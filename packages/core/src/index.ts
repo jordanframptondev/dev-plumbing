@@ -1,5 +1,6 @@
 export * from './schemas';
 export * from './rules';
+export * from './frontMatter';
 export * from './paths';
 export * from './atomic';
 export * from './config';

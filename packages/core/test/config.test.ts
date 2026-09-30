@@ -67,6 +67,15 @@ describe('config folder', () => {
     ]);
   });
 
+  it('falls back to the default projects folder when a hand-edited one is relative', async () => {
+    await write('settings.json', JSON.stringify({ ...defaultSettings, projectsFolder: 'dev-plumbing-projects' }));
+    const c = await loadConfig(dir);
+    expect(c.settings.projectsFolder).toBe('~/dev-plumbing-projects');
+    expect(c.problems).toEqual([
+      { file: 'settings.json', key: 'projectsFolder', message: 'Use a full path, like ~/dev-plumbing-projects. Using the default ("~/dev-plumbing-projects").' },
+    ]);
+  });
+
   it('skips a broken rules file but keeps the others', async () => {
     await installDefaults({ configDir: dir, defaultsDir });
     await write('plumbing/database.md', '---\nid: database\n---\nno screen');
@@ -74,6 +83,16 @@ describe('config folder', () => {
     expect(c.types.map((t) => t.id)).not.toContain('database');
     expect(c.types).toHaveLength(9);
     expect(c.problems).toEqual([expect.objectContaining({ file: 'plumbing/database.md' })]);
+  });
+
+  it('lists a rules file with JavaScript front matter as a problem, without running it', async () => {
+    await installDefaults({ configDir: dir, defaultsDir });
+    const marker = path.join(dir, 'ran');
+    await write('plumbing/database.md', `---js\n{ id: (require('fs').writeFileSync(${JSON.stringify(marker)}, 'ran'), 'database'), title: 'x', order: 1, screen: 'list' }\n---\nbody`);
+    const c = await loadConfig(dir);
+    expect(c.types.map((t) => t.id)).not.toContain('database');
+    expect(c.problems).toEqual([{ file: 'plumbing/database.md', message: expect.stringMatching(/JavaScript front matter is not allowed/) }]);
+    await expect(fs.access(marker)).rejects.toThrow();
   });
 
   it('reads repo profiles and reports broken or duplicate ones', async () => {
@@ -133,6 +152,15 @@ describe('config folder', () => {
     await write('settings.json', broken);
     await expect(updateSettingsFile(dir, { homePageSize: 25 })).rejects.toThrow(/isn't valid JSON/);
     expect(await read('settings.json')).toBe(broken);
+  });
+
+  it('updateSettingsFile keeps unknown keys such as _comment and is not blocked by them', async () => {
+    await write('settings.json', JSON.stringify({ _comment: 'mine', ...defaultSettings, homePageSize: 25, extra: { note: 'x' } }));
+    const s = await updateSettingsFile(dir, { projectsFolder: '~/x' });
+    expect(s.projectsFolder).toBe('~/x');
+    const saved = JSON.parse(await read('settings.json'));
+    expect(saved).toEqual({ _comment: 'mine', ...defaultSettings, homePageSize: 25, projectsFolder: '~/x', extra: { note: 'x' } });
+    expect(Object.keys(saved)[0]).toBe('_comment');
   });
 
   it('updateSettingsFile throws on invalid values and leaves file unchanged', async () => {

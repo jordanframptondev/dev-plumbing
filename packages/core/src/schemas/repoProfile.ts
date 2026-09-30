@@ -1,9 +1,10 @@
 import { z } from 'zod';
+import { fullPathSchema } from './fields';
 
 export const repoProfileSchema = z.object({
   name: z.string().regex(/^[a-z0-9][a-z0-9._-]*$/i, 'Use letters, numbers, dots, dashes or underscores'),
   match: z.array(z.string().min(1)).min(1, 'Add at least one git remote'),
-  projectsFolder: z.string().min(1).optional(),
+  projectsFolder: fullPathSchema.optional(),
   linkIntoClones: z
     .object({ enabled: z.boolean(), linkName: z.string().min(1) })
     .default({ enabled: false, linkName: 'dev-plumbing' }),

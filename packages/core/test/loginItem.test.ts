@@ -16,11 +16,18 @@ describe('login item', () => {
 
   it('writes and removes the plist in the given home', async () => {
     const home = await fs.mkdtemp(path.join(os.tmpdir(), 'dp-login-'));
-    const file = await enableLoginItem({ nodePath: '/n', cliPath: '/c', configDir: '/d', home });
+    const file = await enableLoginItem({ nodePath: '/n', cliPath: '/c', configDir: path.join(home, 'config'), home });
     expect(file).toBe(loginItemPath(home));
     expect(await isLoginItemEnabled(home)).toBe(true);
     expect(await disableLoginItem(home)).toBe(true);
     expect(await isLoginItemEnabled(home)).toBe(false);
     expect(await disableLoginItem(home)).toBe(false);
+  });
+
+  it('creates the run folder the plist logs to, so launchd can start the job', async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), 'dp-login-'));
+    const configDir = path.join(home, 'fresh-config');
+    await enableLoginItem({ nodePath: '/n', cliPath: '/c', configDir, home });
+    expect((await fs.stat(path.join(configDir, 'run'))).isDirectory()).toBe(true);
   });
 });

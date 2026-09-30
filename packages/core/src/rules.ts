@@ -1,4 +1,5 @@
-import matter from 'gray-matter';
+import type matter from 'gray-matter';
+import { parseFrontMatter, UnsafeFrontMatterError } from './frontMatter';
 import { plumbingTypeHeaderSchema, type PlumbingType } from './schemas';
 
 export type RulesFileResult = { ok: true; type: PlumbingType } | { ok: false; file: string; error: string };
@@ -25,8 +26,9 @@ export function splitSections(body: string): Record<string, string> {
 export function parseRulesFile(fileName: string, text: string): RulesFileResult {
   let parsed: matter.GrayMatterFile<string>;
   try {
-    parsed = matter(text);
+    parsed = parseFrontMatter(text);
   } catch (e) {
+    if (e instanceof UnsafeFrontMatterError) return { ok: false, file: fileName, error: e.message };
     return { ok: false, file: fileName, error: `The header isn't valid YAML: ${(e as Error).message.split('\n')[0]}` };
   }
   const header = plumbingTypeHeaderSchema.safeParse(parsed.data);

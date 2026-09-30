@@ -33,6 +33,18 @@ describe('settings', () => {
     expect(parseSettings({ port: 80 }).errors[0].message).toMatch(/greater than or equal to 1024/);
   });
 
+  it('accepts only ~, ~/… or absolute paths for the projects folder', () => {
+    const relative = parseSettings({ projectsFolder: 'dev-plumbing-projects' });
+    expect(relative.value.projectsFolder).toBe('~/dev-plumbing-projects');
+    expect(relative.errors).toEqual([{ key: 'projectsFolder', message: 'Use a full path, like ~/dev-plumbing-projects.' }]);
+    expect(parseSettings({ projectsFolder: './x' }).errors.map((e) => e.key)).toEqual(['projectsFolder']);
+    for (const ok of ['~', '~/x', '/abs/x']) {
+      const r = parseSettings({ projectsFolder: ok });
+      expect(r.errors).toEqual([]);
+      expect(r.value.projectsFolder).toBe(ok);
+    }
+  });
+
   it('reports unknown keys', () => {
     expect(parseSettings({ colour: 'red' }).errors).toEqual([{ key: 'colour', message: 'Unknown setting', unknown: true }]);
   });

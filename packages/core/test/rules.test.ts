@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseRulesFile, resolveTypes, splitSections } from '../src/rules';
 import { newRulesFileTemplate } from '../src/schemas';
@@ -41,6 +44,18 @@ describe('rules files', () => {
     const r = parseRulesFile('database.md', '---\nid: [unclosed\n---\nbody');
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toMatch(/^The header isn't valid YAML/);
+  });
+
+  it('refuses JavaScript front matter without running it', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dp-js-'));
+    const marker = path.join(dir, 'ran');
+    for (const lang of ['js', 'javascript', 'JS']) {
+      const text = `---${lang}\n{ id: (require('fs').writeFileSync(${JSON.stringify(marker)}, 'ran'), 'database'), title: 'x', order: 1, screen: 'list' }\n---\nbody`;
+      const r = parseRulesFile('database.md', text);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error).toMatch(/JavaScript front matter is not allowed/);
+      expect(fs.existsSync(marker)).toBe(false);
+    }
   });
 
   it('rejects a file with no header', () => {

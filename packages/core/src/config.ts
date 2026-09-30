@@ -66,7 +66,7 @@ async function readJson(file: string, label: string, problems: ConfigProblem[]):
 function fieldProblem(file: string, fields: readonly FieldSpec[], e: FieldError): ConfigProblem {
   if (e.unknown) return { file, key: e.key, message: 'Unknown setting. It is ignored.' };
   const field = fields.find((f) => f.key === e.key);
-  return { file, key: e.key, message: `${e.message}. Using the default (${JSON.stringify(field?.default)}).` };
+  return { file, key: e.key, message: `${e.message.replace(/\.$/, '')}. Using the default (${JSON.stringify(field?.default)}).` };
 }
 
 export const formatZodError = (error: ZodError) =>
@@ -152,34 +152,41 @@ export async function resetToDefault(opts: { configDir: string; defaultsDir: str
   await writeFileAtomic(target, data);
 }
 
+const isPlainObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
+const describeErrors = (errors: FieldError[]) => errors.map((e) => `${e.key}: ${e.message}`).join('; ');
+
+/**
+ * Merges `patch` into settings.json. Refuses on invalid JSON or an invalid value of a known key.
+ * Unknown keys (such as "_comment") don't block, and are kept exactly as they are.
+ */
 export async function updateSettingsFile(dir: string, patch: Partial<Settings>): Promise<Settings> {
   const file = path.join(dir, 'settings.json');
   let current: Record<string, unknown> = {};
 
-  // Read settings.json if it exists
   const text = await readText(file, 'settings.json', []);
   if (text !== null) {
+    let raw: unknown;
     try {
-      current = JSON.parse(text) as Record<string, unknown>;
+      raw = JSON.parse(text);
     } catch (e) {
       throw new Error(`settings.json has problems (isn't valid JSON: ${(e as Error).message}). Fix it or reset it to the default, then try again.`);
     }
+    if (isPlainObject(raw)) current = raw;
 
-    // Check if current settings parse without errors
-    const currentCheck = parseSettings(current);
-    if (currentCheck.errors.length) {
-      const details = currentCheck.errors.map((e) => `${e.key}: ${e.message}`).join('; ');
-      throw new Error(`settings.json has problems (${details}). Fix it or reset it to the default, then try again.`);
+    const invalid = parseSettings(current).errors.filter((e) => !e.unknown);
+    if (invalid.length) {
+      throw new Error(`settings.json has problems (${describeErrors(invalid)}). Fix it or reset it to the default, then try again.`);
     }
   }
 
-  // Merge and validate
-  const checked = parseSettings({ ...current, ...patch });
-  if (checked.errors.length) {
-    throw new Error(`The updated settings have problems (${checked.errors.map((e) => `${e.key}: ${e.message}`).join('; ')}). Please check your changes.`);
+  const merged = { ...current, ...patch };
+  const checked = parseSettings(merged);
+  const invalid = checked.errors.filter((e) => !e.unknown);
+  if (invalid.length) {
+    throw new Error(`The updated settings have problems (${describeErrors(invalid)}). Please check your changes.`);
   }
 
-  // Write atomically
-  await writeJsonAtomic(file, checked.value);
+  // Unknown keys keep their place and value; known keys take their checked (or default) value.
+  await writeJsonAtomic(file, { ...merged, ...checked.value });
   return checked.value;
 }

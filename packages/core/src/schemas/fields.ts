@@ -10,10 +10,18 @@ export type FieldSpec =
 
 export type FieldError = { key: string; message: string; unknown?: boolean };
 
+export const FULL_PATH_MESSAGE = 'Use a full path, like ~/dev-plumbing-projects.';
+
+/** `~`, `~/…` or an absolute path. A relative path would resolve against whatever folder the service started in. */
+export const isFullPath = (p: string) => p === '~' || p.startsWith('~/') || p.startsWith('/');
+
+/** A folder path setting: `~`, `~/…` or absolute. */
+export const fullPathSchema = z.string().trim().min(1).refine(isFullPath, FULL_PATH_MESSAGE);
+
 function schemaFor(field: FieldSpec): z.ZodTypeAny {
   switch (field.kind) {
     case 'string':
-      return z.string().trim().min(1);
+      return field.format === 'path' ? fullPathSchema : z.string().trim().min(1);
     case 'number':
       return z.number().int().min(field.min).max(field.max);
     case 'boolean':

@@ -44,6 +44,8 @@ export function buildPlist(o: Omit<LoginItemOptions, 'home'>): string {
 
 export async function enableLoginItem(o: LoginItemOptions): Promise<string> {
   const file = loginItemPath(o.home);
+  // The plist logs to <configDir>/run/login.log. launchd won't start the job if that folder is missing.
+  await fs.mkdir(path.join(o.configDir, 'run'), { recursive: true });
   await writeFileAtomic(file, buildPlist(o));
   return file;
 }
