@@ -15,7 +15,11 @@ export function guard(opts: { port: number; token: string; extraOrigins?: string
     const url = new URL(c.req.url);
     const host = c.req.header('host') ?? url.host;
     if (!hosts.has(host)) return c.json({ error: 'Unknown host.' }, 403);
-    if (!url.pathname.startsWith('/api/') || url.pathname === '/api/health') return next();
+    const rawPath = url.pathname;
+    const decodedPath = c.req.path;
+    const isApiRequest = (p: string) => p === '/api' || p.startsWith('/api/');
+    const isProtected = isApiRequest(rawPath) || isApiRequest(decodedPath);
+    if (!isProtected || decodedPath === '/api/health') return next();
     if (c.req.header('x-dev-plumbing-token') === opts.token) return next();
     const origin = c.req.header('origin');
     const sameOrigin = c.req.header('sec-fetch-site') === 'same-origin';

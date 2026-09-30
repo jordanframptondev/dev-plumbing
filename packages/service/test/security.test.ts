@@ -40,4 +40,13 @@ describe('guard', () => {
     expect((await makeApp().request(url('/api/x'), init)).status).toBe(401);
     expect((await makeApp(['localhost:5173']).request(url('/api/x'), init)).status).toBe(200);
   });
+  it('rejects percent-encoded /api paths without token', async () => {
+    expect((await makeApp().request(url('/%61pi/x'))).status).toBe(401);
+  });
+  it('accepts percent-encoded /api paths with token', async () => {
+    expect((await makeApp().request(url('/%61pi/x'), { headers: { 'x-dev-plumbing-token': 'secret' } })).status).toBe(200);
+  });
+  it('treats percent-encoded health like health endpoint', async () => {
+    expect((await makeApp().request(url('/%61pi/health'))).status).toBe(200);
+  });
 });
