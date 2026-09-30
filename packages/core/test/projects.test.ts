@@ -133,4 +133,44 @@ describe('project store', () => {
     await fs.writeFile(path.join(r.dir, 'project.json'), JSON.stringify(pj));
     await expect(readProjectDocument(r, 'draft')).rejects.toThrow(/outside the project/);
   });
+
+  it('counts corrupt item files without rejecting the project', async () => {
+    const dir = path.join(root, 'beta', 'item-corrupt');
+    await fs.mkdir(path.join(dir, 'items'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'items', 'bad.json'), '{broken');
+    await fs.writeFile(path.join(dir, 'project.json'), JSON.stringify({
+      id: 'item-corrupt', repo: 'beta', title: 'Item Corrupt', status: 'active',
+      source: { path: 'test', clone: 'test', branch: 'test', hashAtImport: 'test' },
+      docs: { original: 'test', draft: 'test' }, createdAt: NOW.toISOString(), updatedAt: NOW.toISOString(),
+    }));
+    const refs = await findProjects(settings(), []);
+    const all = await listProjectSummaries(refs, { tab: 'all', limit: 10 });
+    const broken = all.items.find((s) => s.id === 'item-corrupt');
+    expect(broken?.error).toMatch(/1 item file couldn't be read/);
+    expect(all.total).toBe(4);
+  });
+
+  it('skips repo folders that are regular files', async () => {
+    await fs.writeFile(path.join(root, 'broken-repo'), 'not a folder');
+    const refs = await findProjects(settings(), []);
+    expect(refs.map((r) => `${r.repo}/${r.id}`).sort()).toEqual([
+      'acme/onboarding-emails',
+      'acme/restock-reminders',
+      'beta/checkout-redesign',
+    ]);
+  });
+
+  it('handles threads path that is a regular file', async () => {
+    const dir = path.join(root, 'beta', 'file-threads');
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, 'threads'), 'not a folder');
+    await fs.writeFile(path.join(dir, 'project.json'), JSON.stringify({
+      id: 'file-threads', repo: 'beta', title: 'File Threads', status: 'active',
+      source: { path: 'test', clone: 'test', branch: 'test', hashAtImport: 'test' },
+      docs: { original: 'test', draft: 'test' }, createdAt: NOW.toISOString(), updatedAt: NOW.toISOString(),
+    }));
+    const s = await summarizeProject(ref('beta', 'file-threads'));
+    expect(s.error).toMatch(/thread file couldn't be read/);
+    expect(s.status).toBe('active');
+  });
 });

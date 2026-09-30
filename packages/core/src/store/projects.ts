@@ -31,9 +31,8 @@ async function subdirs(dir: string): Promise<string[]> {
       .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
       .map((d) => d.name)
       .sort();
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return [];
-    throw e;
+  } catch {
+    return [];
   }
 }
 
@@ -76,8 +75,9 @@ async function readFolder<T>(dir: string, schema: { safeParse: (v: unknown) => {
   let files: string[] = [];
   try {
     files = (await fs.readdir(dir)).filter((f) => f.endsWith('.json')).sort();
-  } catch {
-    return { values: [], bad: 0 };
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { values: [], bad: 0 };
+    return { values: [], bad: 1 };
   }
   const values: T[] = [];
   let bad = 0;
@@ -104,12 +104,23 @@ async function readProject(ref: ProjectRef): Promise<{ project: PlumbingProject 
 
 export async function summarizeProject(ref: ProjectRef): Promise<ProjectSummary> {
   const { project, error } = await readProject(ref);
-  const { values: threads, bad } = await readThreads(ref.dir);
+  const { values: threads, bad: badThreads } = await readThreads(ref.dir);
+  const { values: items, bad: badItems } = await readItems(ref.dir);
   const counts = countThreads(threads.map(displayStatus));
-  const problems = [error, bad ? `${bad} thread file${bad === 1 ? '' : 's'} couldn't be read.` : undefined].filter(Boolean).join(' ');
+  const problems = [
+    error,
+    badThreads ? `${badThreads} thread file${badThreads === 1 ? '' : 's'} couldn't be read.` : undefined,
+    badItems ? `${badItems} item file${badItems === 1 ? '' : 's'} couldn't be read.` : undefined,
+  ].filter(Boolean).join(' ');
   if (!project) {
-    const stat = await fs.stat(ref.dir);
-    return { repo: ref.repo, id: ref.id, title: ref.id, sourcePath: null, clone: null, branch: null, status: 'broken', updatedAt: stat.mtime.toISOString(), counts, error: problems };
+    let updatedAt = new Date(0).toISOString();
+    try {
+      const stat = await fs.stat(ref.dir);
+      updatedAt = stat.mtime.toISOString();
+    } catch {
+      // use default epoch time
+    }
+    return { repo: ref.repo, id: ref.id, title: ref.id, sourcePath: null, clone: null, branch: null, status: 'broken', updatedAt, counts, error: problems };
   }
   return {
     repo: ref.repo,
