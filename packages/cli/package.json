@@ -1,0 +1,17 @@
+{
+  "name": "@dev-plumbing/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "dev-plumbing": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@dev-plumbing/core": "workspace:*",
+    "commander": "^14.0.3"
+  }
+}
