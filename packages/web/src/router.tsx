@@ -1,13 +1,14 @@
 import { createRootRoute, createRoute, createRouter } from '@tanstack/react-router';
 import { PageMessage } from './components/PageMessage';
-import { OutputEditorPage, RuleEditorPage, RulesPage } from './pages/placeholders';
-import { SettingsPage } from './pages/SettingsPage';
+import { AppHome } from './pages/AppHome';
 import { DocumentView } from './pages/DocumentView';
 import { InboxView } from './pages/InboxView';
 import { ProjectLayout } from './pages/ProjectLayout';
-import { TypeView } from './pages/TypeView';
-import { AppHome } from './pages/AppHome';
 import { Root } from './pages/Root';
+import { OutputEditorPage, RuleEditorPage } from './pages/RuleEditor';
+import { RulesPage } from './pages/RulesPage';
+import { SettingsPage } from './pages/SettingsPage';
+import { TypeView } from './pages/TypeView';
 
 const rootRoute = createRootRoute({ component: Root, notFoundComponent: () => <PageMessage title="Page not found" /> });
 const indexRoute = createRoute({ getParentRoute: () => rootRoute, path: '/', component: AppHome });
