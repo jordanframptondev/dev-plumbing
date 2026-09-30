@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import { expandHome, installDefaults, loadConfig, updateSettingsFile, writeReadme, type Settings } from '@dev-plumbing/core';
+import { expandHome, FULL_PATH_MESSAGE, installDefaults, isFullPath, loadConfig, updateSettingsFile, writeReadme, type Settings } from '@dev-plumbing/core';
 
 export type SetupOptions = {
   configDir: string;
@@ -15,11 +15,26 @@ export type SetupOptions = {
   log: (line: string) => void;
 };
 
+const MAX_ASKS = 3;
+
+/** Asks for the projects folder until the answer is ~, ~/… or absolute. */
+async function askProjectsFolder(o: SetupOptions, fallback: string): Promise<string> {
+  for (let i = 0; i < MAX_ASKS; i++) {
+    const answer = (await o.ask('Where should plumbing projects be stored?', fallback)).trim();
+    if (isFullPath(answer)) return answer;
+    o.log(FULL_PATH_MESSAGE);
+  }
+  throw new Error(`${FULL_PATH_MESSAGE} Run dev-plumbing setup again.`);
+}
+
 export async function runSetup(o: SetupOptions): Promise<{ settings: Settings; created: string[] }> {
+  if (o.projectsFolder !== undefined && !isFullPath(o.projectsFolder.trim())) {
+    throw new Error(`--projects-folder "${o.projectsFolder}": ${FULL_PATH_MESSAGE}`);
+  }
   const { created } = await installDefaults({ configDir: o.configDir, defaultsDir: o.defaultsDir });
   const { settings: current } = await loadConfig(o.configDir);
 
-  const projectsFolder = o.projectsFolder ?? (o.yes ? current.projectsFolder : await o.ask('Where should plumbing projects be stored?', current.projectsFolder));
+  const projectsFolder = o.projectsFolder?.trim() ?? (o.yes ? current.projectsFolder : await askProjectsFolder(o, current.projectsFolder));
 
   let startAtLogin = current.startAtLogin;
   if (!o.loginItem) startAtLogin = false;

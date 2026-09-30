@@ -65,6 +65,29 @@ describe('setup', () => {
     expect(calls.filter((c) => c.startsWith('ask:'))).toHaveLength(2);
   });
 
+  it('asks again when the projects folder answer is not a full path', async () => {
+    const answers = ['dev-plumbing-projects', '~/plans'];
+    const lines: string[] = [];
+    const r = await runSetup(
+      options({
+        yes: false,
+        ask: async (q, fallback) => {
+          calls.push(`ask:${q}`);
+          return q.startsWith('Where') ? (answers.shift() ?? fallback) : fallback;
+        },
+        log: (line) => lines.push(line),
+      }),
+    );
+    expect(calls.filter((c) => c.startsWith('ask:Where'))).toHaveLength(2);
+    expect(lines).toContain('Use a full path, like ~/dev-plumbing-projects.');
+    expect(r.settings.projectsFolder).toBe('~/plans');
+  });
+
+  it('refuses a --projects-folder that is not a full path, before writing anything', async () => {
+    await expect(runSetup(options({ projectsFolder: 'dev-plumbing-projects' }))).rejects.toThrow('Use a full path, like ~/dev-plumbing-projects.');
+    await expect(fs.access(dir)).rejects.toThrow();
+  });
+
   it('running setup twice keeps your edits', async () => {
     await runSetup(options());
     await fs.writeFile(path.join(dir, 'plumbing', 'ideas.md'), (await fs.readFile(path.join(dir, 'plumbing', 'ideas.md'), 'utf8')).replace('title: Ideas', 'title: My ideas'));
