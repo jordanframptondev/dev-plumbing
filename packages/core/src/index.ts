@@ -4,3 +4,5 @@ export * from './paths';
 export * from './atomic';
 export * from './config';
 export * from './readme';
+export * from './store/projects';
+export * from './demo';
