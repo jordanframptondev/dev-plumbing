@@ -25,6 +25,18 @@ test('active is the default tab and finalized projects have their own', async ({
   await page.getByRole('tab', { name: 'Finalized' }).click();
   await expect(page.getByTestId('project-row')).toHaveCount(1);
   await expect(page.getByTestId('project-row')).toContainText('Onboarding emails');
+  await expect(page.getByTestId('project-row')).toContainText('Finalized');
+});
+
+test('the empty state depends on the tab', async ({ page }) => {
+  await page.route((url) => url.pathname === '/api/projects', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [], total: 0 }) }));
+  await page.goto('/');
+  const empty = page.getByTestId('empty-state');
+  await expect(empty).toHaveText('No active plumbing projects.');
+  await page.getByRole('tab', { name: 'Finalized' }).click();
+  await expect(empty).toHaveText('No finalized plumbing projects yet.');
+  await page.getByRole('tab', { name: 'All' }).click();
+  await expect(empty).toContainText('No plumbing projects yet. In Claude Code, run');
 });
 
 test('search filters, and says when nothing matches', async ({ page }) => {

@@ -43,7 +43,7 @@ export const api = {
   typeItems: (repo: string, id: string, type: string) => request<{ type: TypeEntry; items: TypeItemRow[] }>(`/api/projects/${enc(repo)}/${enc(id)}/types/${enc(type)}`),
   document: (repo: string, id: string, which: string) => request<{ text: string | null }>(`/api/projects/${enc(repo)}/${enc(id)}/docs/${enc(which)}`),
   open: (body: { target: 'config' } | { target: 'source'; repo: string; id: string }) => request<{ ok: true }>('/api/open', send('POST', body)),
-  saveSettings: (value: unknown) => request<{ value: Settings; restartRequired: boolean }>('/api/settings', send('PUT', value)),
+  saveSettings: (value: unknown) => request<{ value: Settings; restartRequired: boolean; loginItemError?: string }>('/api/settings', send('PUT', value)),
   saveAgents: (value: unknown) => request<{ value: AgentsConfig }>('/api/agents', send('PUT', value)),
   saveRepo: (name: string, value: unknown) => request<{ value: RepoProfile }>(`/api/repos/${enc(name)}`, send('PUT', value)),
   rules: () => request<RulesResponse>('/api/rules'),
@@ -52,5 +52,5 @@ export const api = {
   createRule: (id: string, title: string) => request<{ file: string }>('/api/rules', send('POST', { id, title })),
   output: (name: string) => request<FileResponse>(`/api/outputs/${enc(name)}`),
   saveOutput: (name: string, text: string) => request<{ ok: true }>(`/api/outputs/${enc(name)}`, send('PUT', { text })),
-  reset: (file: string) => request<{ ok: true }>('/api/reset', send('POST', { file })),
+  reset: (file: string) => request<{ ok: true; loginItemError?: string }>('/api/reset', send('POST', { file })),
 };

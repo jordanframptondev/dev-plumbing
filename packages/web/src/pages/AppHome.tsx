@@ -70,6 +70,10 @@ export function AppHome() {
         <p className="mt-10 text-center text-[13px] text-ink-3" data-testid="empty-state">
           {q ? (
             `No plumbing projects match "${q}".`
+          ) : tab === 'active' ? (
+            'No active plumbing projects.'
+          ) : tab === 'finalized' ? (
+            'No finalized plumbing projects yet.'
           ) : (
             <>
               No plumbing projects yet. In Claude Code, run <code className="font-mono text-ink-2">/dev-plumbing path/to/plan.md</code>.
@@ -107,7 +111,7 @@ function ProjectRow({ p }: { p: ProjectSummary }) {
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-2">
             <span className="text-[14px] font-semibold">{p.title}</span>
-            {p.status === 'finalized' && <span className="text-[10.5px] font-semibold text-ink-3">FINALIZED</span>}
+            {p.status === 'finalized' && <span className="text-[10.5px] font-semibold text-ink-3">Finalized</span>}
           </div>
           {p.sourcePath && <div className="truncate font-mono text-[11px] text-ink-3">{p.sourcePath}</div>}
           {p.error && <div className="text-[12px] text-seal">Couldn't read this project: {p.error}</div>}

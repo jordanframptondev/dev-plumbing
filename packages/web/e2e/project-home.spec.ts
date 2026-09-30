@@ -46,6 +46,14 @@ test('the inbox groups threads by whose turn it is', async ({ page }) => {
   await expect(inbox.getByTestId('inbox-row')).toHaveCount(6);
 });
 
+test('inbox type titles are in sentence case, with no CSS uppercase', async ({ page }) => {
+  await page.goto(PROJECT);
+  const inbox = page.getByTestId('inbox');
+  await expect(inbox.getByTestId('inbox-row').first()).toBeVisible();
+  const uppercased = await inbox.evaluate((el) => [...el.querySelectorAll('*')].filter((e) => getComputedStyle(e).textTransform === 'uppercase').length);
+  expect(uppercased).toBe(0);
+});
+
 test('shows the original and the draft, and says when there is no final yet', async ({ page }) => {
   await page.goto(PROJECT);
   const nav = page.getByRole('complementary', { name: 'Project navigation' });

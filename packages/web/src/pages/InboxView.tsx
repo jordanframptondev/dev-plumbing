@@ -18,7 +18,7 @@ function InboxGroup({ title, entries, repo, project }: { title?: string; entries
           <div className="min-w-0 flex-1">
             <div className="text-[13px] font-medium">
               {e.blocking && <span className="mr-1.5 text-[10.5px] font-semibold text-seal">BLOCKING</span>}
-              <span className="mr-1.5 text-[10.5px] font-semibold uppercase text-ink-3">{e.typeTitle}</span>
+              <span className="mr-1.5 text-[10.5px] font-semibold text-ink-3">{e.typeTitle}</span>
               {e.itemTitle}
             </div>
             {e.lastMessage && (

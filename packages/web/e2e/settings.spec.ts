@@ -1,6 +1,7 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import { expect, test } from '@playwright/test';
-import { configPath, noSideScroll, readJson, writeJson } from './env';
+import { configPath, noSideScroll, readJson, repoRoot, writeJson } from './env';
 
 test('shows every setting with its help text', async ({ page }) => {
   await page.goto('/settings');
@@ -57,6 +58,55 @@ test('a broken settings file is listed as a problem and the page still works', a
   } finally {
     fs.writeFileSync(configPath('settings.json'), raw);
   }
+});
+
+test('reset to default puts the defaults back in the form, even when the file already has them', async ({ page }) => {
+  const raw = fs.readFileSync(configPath('settings.json'), 'utf8');
+  try {
+    fs.copyFileSync(path.join(repoRoot, 'defaults', 'settings.json'), configPath('settings.json'));
+    await page.goto('/settings');
+    const general = page.getByRole('region', { name: 'General' });
+    const field = general.getByLabel('Recent projects per page');
+    await expect(field).toHaveValue('10');
+    await field.fill('7');
+    page.once('dialog', (dialog) => void dialog.accept());
+    await general.getByRole('button', { name: 'Reset to default' }).click();
+    await expect(general.getByRole('status')).toHaveText('Reset to default.');
+    await expect(field).toHaveValue('10');
+  } finally {
+    fs.writeFileSync(configPath('settings.json'), raw);
+  }
+});
+
+test('editing again clears the last message and field errors', async ({ page }) => {
+  await page.goto('/settings');
+  const general = page.getByRole('region', { name: 'General' });
+  const port = general.getByLabel('Port', { exact: true });
+  await port.fill('80');
+  await general.getByRole('button', { name: 'Save' }).click();
+  await expect(general.getByText(/greater than or equal to 1024/)).toBeVisible();
+  await port.fill('45459');
+  await expect(general.getByText(/greater than or equal to 1024/)).toHaveCount(0);
+});
+
+test('a failed save without field errors shows the reason', async ({ page }) => {
+  await page.route('**/api/settings', (route) => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'The disk is full.' }) }));
+  await page.goto('/settings');
+  const general = page.getByRole('region', { name: 'General' });
+  await general.getByRole('button', { name: 'Save' }).click();
+  await expect(general.getByRole('alert')).toHaveText('The disk is full.');
+});
+
+test('a login item problem is shown after the settings are saved', async ({ page }) => {
+  const message = "Your settings were saved, but start at login couldn't be turned on: not allowed";
+  await page.route('**/api/settings', async (route) => {
+    const value = readJson('settings.json');
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ value, restartRequired: false, loginItemError: message }) });
+  });
+  await page.goto('/settings');
+  const general = page.getByRole('region', { name: 'General' });
+  await general.getByRole('button', { name: 'Save' }).click();
+  await expect(general.getByRole('alert')).toHaveText(message);
 });
 
 test.describe('on a phone', () => {

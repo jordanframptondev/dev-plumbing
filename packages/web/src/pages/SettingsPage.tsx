@@ -3,7 +3,7 @@ import { agentsFields, flatten, settingsFields, unflatten } from '@dev-plumbing/
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
-import { api, ApiError } from '../api/client';
+import { api, ApiError, type ConfigResponse } from '../api/client';
 import { Button } from '../components/Button';
 import { inputClass } from '../components/inputClass';
 import { Segmented } from '../components/Segmented';
@@ -11,6 +11,12 @@ import { Switch } from '../components/Switch';
 import { useConfig } from '../lib/useConfig';
 
 const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+const RESTART = 'Restart the service to use the new port: dev-plumbing stop, then dev-plumbing start.';
+
+type Notice = { kind: 'ok' | 'error'; text: string };
+
+/** A failure the server didn't explain field by field: a 500, a bad request, or no answer at all. */
+const failureMessage = (e: unknown) => (e instanceof ApiError ? e.message : `Couldn't reach dev-plumbing (${(e as Error).message}).`);
 
 export function SettingsPage() {
   const { data: config } = useConfig();
@@ -31,8 +37,8 @@ export function SettingsPage() {
         </Button>
       </div>
       {config.problems.length > 0 && <Problems problems={config.problems} />}
-      <FieldsForm title="General" file="settings.json" fields={settingsFields} values={flatten(config.settings)} save={(v) => api.saveSettings(v)} />
-      <FieldsForm title="Agents" file="agents.json" fields={agentsFields} values={flatten(config.agents)} save={(v) => api.saveAgents(v)} />
+      <FieldsForm title="General" file="settings.json" fields={settingsFields} values={flatten(config.settings)} pick={(c) => flatten(c.settings)} save={(v) => api.saveSettings(v)} />
+      <FieldsForm title="Agents" file="agents.json" fields={agentsFields} values={flatten(config.agents)} pick={(c) => flatten(c.agents)} save={(v) => api.saveAgents(v)} />
       <section className="mt-8" aria-labelledby="repos-title">
         <h2 id="repos-title" className="text-[20px] font-semibold">
           Repos
@@ -68,18 +74,22 @@ function FieldsForm({
   file,
   fields,
   values,
+  pick,
   save,
 }: {
   title: string;
   file: 'settings.json' | 'agents.json';
   fields: readonly FieldSpec[];
   values: Record<string, unknown>;
-  save: (value: unknown) => Promise<{ value: unknown; restartRequired?: boolean }>;
+  /** This form's values, from a fresh config. */
+  pick: (config: ConfigResponse) => Record<string, unknown>;
+  save: (value: unknown) => Promise<{ value: unknown; restartRequired?: boolean; loginItemError?: string }>;
 }) {
   const qc = useQueryClient();
+  const config = useConfig();
   const [draft, setDraft] = useState(values);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
   const valuesKey = JSON.stringify(values);
   useEffect(() => setDraft(values), [valuesKey]);
 
@@ -87,22 +97,33 @@ function FieldsForm({
     mutationFn: () => save(unflatten(draft)),
     onSuccess: (r) => {
       setErrors({});
-      setNotice(r.restartRequired ? 'Saved. Restart the service to use the new port: dev-plumbing stop, then dev-plumbing start.' : 'Saved.');
+      if (r.loginItemError) setNotice({ kind: 'error', text: r.restartRequired ? `${r.loginItemError} ${RESTART}` : r.loginItemError });
+      else setNotice({ kind: 'ok', text: r.restartRequired ? `Saved. ${RESTART}` : 'Saved.' });
       void qc.invalidateQueries({ queryKey: ['config'] });
     },
     onError: (e) => {
       const list = ((e as ApiError).body as { errors?: { key: string; message: string }[] } | null)?.errors ?? [];
       setErrors(Object.fromEntries(list.map((x) => [x.key, x.message])));
-      setNotice(null);
+      setNotice(list.length ? null : { kind: 'error', text: failureMessage(e) });
     },
   });
   const reset = useMutation({
     mutationFn: () => api.reset(file),
-    onSuccess: () => {
-      setNotice('Reset to default.');
-      void qc.invalidateQueries({ queryKey: ['config'] });
+    onSuccess: async (r) => {
+      setErrors({});
+      setNotice(r.loginItemError ? { kind: 'error', text: r.loginItemError } : { kind: 'ok', text: 'Reset to default.' });
+      // The file may already have had the defaults, so the values don't change and the effect above doesn't run. Set the form directly.
+      const fresh = await config.refetch();
+      if (fresh.data) setDraft(pick(fresh.data));
     },
+    onError: (e) => setNotice({ kind: 'error', text: failureMessage(e) }),
   });
+
+  const edit = (key: string, value: unknown) => {
+    setDraft((d) => ({ ...d, [key]: value }));
+    setNotice(null);
+    setErrors({});
+  };
 
   const id = `${file.replace('.', '-')}-title`;
   return (
@@ -115,7 +136,7 @@ function FieldsForm({
       </div>
       <div className="mt-3 overflow-hidden rounded-[10px] border-[0.5px] border-separator bg-cell">
         {fields.map((f) => (
-          <FieldRow key={f.key} field={f} value={draft[f.key]} error={errors[f.key]} onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))} />
+          <FieldRow key={f.key} field={f} value={draft[f.key]} error={errors[f.key]} onChange={(v) => edit(f.key, v)} />
         ))}
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -129,9 +150,14 @@ function FieldsForm({
         >
           Reset to default
         </Button>
-        {notice && (
+        {notice?.kind === 'ok' && (
           <span role="status" className="text-[12.5px] text-moss">
-            {notice}
+            {notice.text}
+          </span>
+        )}
+        {notice?.kind === 'error' && (
+          <span role="alert" className="text-[12.5px] text-seal">
+            {notice.text}
           </span>
         )}
       </div>
