@@ -12,7 +12,8 @@ Status: design draft for review · 2026-09-30 · no code yet
   - **shown as lists:** Questions, Concerns, Ideas, Phases, Testing & rollout, Security.
 - **Every item has its own conversation thread.** You always see what's waiting on you, what's with Claude, and what's resolved. Claude's choices come as radio buttons, each with an optional note, plus a Custom answer.
 - **Send one thread or Submit all.** Your main Claude window gets the list and starts **one subagent per thread**. The window only ever sees one-line summaries, so its context never fills up.
-- Accepted answers are **written into the original `.md`** as you go. **Finalize spec** then writes a separate **`<name>.final.md`** next to it, in a standard structure an AI can build from exactly as designed, with Mermaid diagrams and the mockups alongside.
+- **Your repo's `.md` is never edited.** On import, dev-plumbing keeps an **original** copy and makes a **draft**. Every accepted answer goes into the draft, so you can see exactly what changed and why.
+- **Finalize spec** writes the **final** version in a standard structure an AI can build from exactly as designed, with Mermaid diagrams. All three documents live in the plumbing project, and the final is also copied into your repo as `<name>.final.md`, next to the plan.
 - **Whiteboard Defense** turns the plumbing project into something you can explain on a whiteboard before you ship, in three modes: **Present** (an animated whiteboard), **Study** (a 13-part guide) and **Practice** (flashcards and a checklist).
 - **The Ink wash look**, Apple-style: a white canvas (ink night in dark mode), ink text and a slate accent. Seal red, moss, amber and ochre appear only as small signals. One column on mobile.
 - **Everything is tunable in plain files** in `~/.dev-plumbing/`: settings, agent config, repo profiles, and one **rules file per plumbing type**. Adding a plumbing type means adding one Markdown file. A README and the in-app help explain every setting.
@@ -25,7 +26,7 @@ Status: design draft for review · 2026-09-30 · no code yet
 | Input | Any Markdown plan, usually a Superpowers spec. |
 | Who answers threads | Your **main Claude window**. It receives each submission and starts **subagents**: one per thread, or one per group of closely linked threads. |
 | Sending | **Send this thread**, or **Submit all** (every thread with new input from you). |
-| The `.md` | Stays in git where it was written. Accepted changes are written into it as you go. **Finalize spec** never touches it: it writes `<name>.final.md` (the standard AI-ready structure, with Mermaid diagrams) and `<name>.assets/` (mockups) next to it. |
+| The `.md` | **Never edited in your repo.** Import copies it into the plumbing project as `original.md` (kept as it was) and `draft.md` (where accepted changes go). Finalize writes `final.md` there too, and copies it into the repo as `<name>.final.md` with `<name>.assets/` (mockups), next to the plan. |
 | Look | **Ink wash**, Apple-style. White canvas in light mode, ink night in dark mode; follows the system, with a toggle. Colour only as dots, text and thin lines. One column on mobile. See §16. |
 | Defaults | Projects folder `~/dev-plumbing-projects`. Sonnet for imports and threads, Opus for Finalize and Whiteboard Defense. |
 | Auto-apply | Small things (wording, typos, diagram layout) apply straight away with Undo. Anything that changes meaning waits for you. |
@@ -34,7 +35,7 @@ Status: design draft for review · 2026-09-30 · no code yet
 | Config | `~/.dev-plumbing/`: `settings.json`, `agents.json`, `repos/*.json` (repo profiles), `plumbing/*.md` (rules per plumbing type), `outputs/*.md` (Finalize and Whiteboard Defense rules), and a README. All of it can be edited in the app. |
 | Storage | A projects folder, set in the app (default `~/dev-plumbing-projects`). Any repo can override it, e.g. with a folder shared by several clones and linked into each one. |
 | Repo-specific knowledge | Kept in **repo profiles** on your Mac, detected on first use and editable. The code and the public repo contain nothing specific to one repo. |
-| Diagrams | dev-plumbing's own renderer: Claude describes each diagram as data, and the app checks it against the code, lays it out and draws it. Mermaid is only used for export into the `.md`. |
+| Diagrams | dev-plumbing's own renderer: Claude describes each diagram as data, and the app checks it against the code, lays it out and draws it. Mermaid is only used for export into the final document. |
 | Screens | App home (search, 10 most recent, Load more). Project home (inbox, with the plumbing types on the left). Thread view (item on top, conversation below). Database (relationship strip, diff cards, migration panel). UI (large mockup with pins). Flows (storyboard or sequence diagram, chosen per flow). Lists (rows with inline answers). |
 | Whiteboard Defense | Built from the plan now, and later from the real code diff. Present, Study and Practice modes. Your `whiteboard-defense.md` is the default rules file. |
 | Stack | TypeScript, Node 22, pnpm workspaces, Hono, Zod, React 19 + Vite, Tailwind v4 + shadcn/ui, ELK.js, Motion, Rough.js, the MCP SDK, Vitest, Playwright. |
@@ -59,7 +60,7 @@ Planning a large feature produces one big Markdown file full of design choices, 
 2. Give every piece of information its own thread and status: your turn, draft, with Claude, resolved or parked.
 3. Make answering fast: radio buttons, a note and Custom, inline where possible.
 4. Keep the main Claude window's context small by doing per-thread work in subagents.
-5. Write accepted outcomes into the `.md`. Finalize it into a structure an AI can implement faithfully.
+5. Leave the original plan untouched, track every accepted change in a draft, and finalize it into a structure an AI can implement faithfully.
 6. Help the engineer understand and defend the change (Whiteboard Defense).
 7. Make everything tunable in clear, documented files: rules, agents and settings.
 8. Never lose work: autosave, submissions saved before Claude sees them, resume from any clone.
@@ -131,7 +132,7 @@ flowchart LR
 | `/dev-plumbing` skill | Imports a plan, resumes a plumbing project, and keeps the main window listening. Run with no argument, it lists this repo's plumbing projects. |
 | Subagents | Each one follows its rules file (§6). **repo-setup** detects a repo's profile the first time. **importer** runs once per plumbing type. **thread** handles one thread or linked group. **finalizer** writes the final `.md`. **whiteboard** writes the Whiteboard Defense. |
 | MCP server | A thin bridge that turns tool calls into requests to the service. It holds no state. |
-| Local service | HTTP API, live updates (SSE), the web app, validation, checking code references, patching the `.md`, the login item. **The only writer of the projects folder.** |
+| Local service | HTTP API, live updates (SSE), the web app, validation, checking code references, the original, draft and final documents, exporting the final to the repo, the login item. **The only writer of the projects folder.** |
 | Web app | React. App home, project home, plumbing-type screens, thread view, Finalize, Whiteboard Defense, Settings, Plumbing rules. |
 
 ---
@@ -286,7 +287,11 @@ Every setting is defined once in code, as a Zod schema with a description. `dev-
 ```
 <projects folder for the repo>/            # settings.projectsFolder/<repo>, or the repo profile's projectsFolder
   restock-reminders/                       # one folder per plumbing project
-    project.json                           # title, source .md (path, clone, branch, hash), status
+    project.json                           # title, source .md (path, clone, branch, hash at import), status
+    docs/original.md                       # the plan exactly as imported (never changed)
+    docs/draft.md                          # working copy: every accepted change lands here
+    docs/final.md                          # written by Finalize
+    docs/final.assets/                     # mockups that go with the final
     items/<id>.json                        # one file per item, including diagram / table / mockup / flow data
     threads/<id>.json                      # messages, options, drafts, status
     mockups/<id>.after.html                # body markup only; the app adds the design kit
@@ -299,8 +304,12 @@ Every setting is defined once in code, as a Zod schema with a description. `dev-
 ```
 
 - **Atomic writes.** Every file is written by the service to a temp file, then renamed.
-- **The `.md` stays in git in its clone.** `project.json` records its path within the repo, its clone and branch, and a hash of its content.
-- **Where edits go.** They're applied to the clone of the main window that last opened the plumbing project; the project header shows which one. If you open the project from a clone where the file differs or doesn't exist, the app says so before applying anything.
+- **Your repo's plan is only ever read.** `project.json` records its path within the repo, the clone and branch it came from, and a hash of its content at import.
+- **Three documents, all kept here:**
+  - `original.md` is the plan exactly as imported
+  - `draft.md` is where every accepted change lands
+  - `final.md` is written by Finalize.
+- **The only write into your repo** is Finalize's copy of the final: `<name>.final.md` and `<name>.assets/`, next to the plan. It goes to the source clone by default, and you can pick another.
 
 ---
 
@@ -310,8 +319,8 @@ Every setting is defined once in code, as a Zod schema with a description. `dev-
 
 1. You run `/dev-plumbing docs/specs/restock-reminders.md` in any clone.
 2. The main window works out the repo from its git remote. If the repo has no profile yet, the **repo-setup** subagent detects one and asks you to confirm it.
-3. The main window creates the plumbing project, or reopens it if it exists.
-4. It starts **one importer subagent per enabled plumbing type**, in parallel. Each follows its rules file, reads the `.md` and the relevant code (read-only), and writes items through the MCP tools. It writes either:
+3. The main window creates the plumbing project, or reopens it if it exists. On create, the service copies the plan into the project as `docs/original.md` and `docs/draft.md`.
+4. It starts **one importer subagent per enabled plumbing type**, in parallel. Each follows its rules file, reads the draft and the relevant code (read-only), and writes items through the MCP tools. It writes either:
    - **items**: diagrams as data, schema diffs against the real schema file, mockups built with the app's kit, and every question, concern and idea it finds, each with an opening message from Claude
    - **or an explicit "no changes" marker, with a reason.**
 5. The service checks every code reference (✓ when found) and opens the project home in your browser.
@@ -338,7 +347,7 @@ Every setting is defined once in code, as a Zod schema with a description. `dev-
 
 ### 8.4 Finalize and defend
 
-13. **Finalize spec** (§11) writes `<name>.final.md` next to the plan. You preview it and accept it first.
+13. **Finalize spec** (§11) writes `docs/final.md` in the plumbing project and copies it into the repo as `<name>.final.md`. You preview it and accept it first.
 14. **Whiteboard Defense** (§12) can be generated any time. It's most useful after Finalize, and again after the code is written.
 
 ```mermaid
@@ -380,7 +389,7 @@ sequenceDiagram
     MW->>SA: finalizer
     SA->>MCP: proposed final .md
     You->>BR: review the preview and accept
-    SV->>SV: write name.final.md and name.assets next to the plan
+    SV->>SV: save final.md, copy it into the repo as name.final.md
 ```
 
 ---
@@ -394,7 +403,7 @@ sequenceDiagram
 | Your turn | seal dot | Claude replied or asked something |
 | Draft | slate ring | You've typed or picked something but haven't sent it |
 | With Claude | dashed slate ring | A subagent is working on it |
-| Resolved | moss check | Settled. Recorded as a decision and written into the `.md`. |
+| Resolved | moss check | Settled. Recorded as a decision and written into the draft. |
 | Parked | mist dot | Set aside |
 | Idle | none | Nothing needed right now |
 
@@ -404,7 +413,7 @@ sequenceDiagram
 
 | You picked | What happens | Claude called? |
 |---|---|---|
-| An option that carries a change, **no note** | The service applies it (`.md` patch and view updates), records the decision and resolves the thread | No |
+| An option that carries a change, **no note** | The service applies it (draft patch and view updates), records the decision and resolves the thread | No |
 | An option that carries a change, **with a note** | Applies the change, keeps the thread open, and sends the note to Claude | Yes |
 | An answer with no attached change | Sent to Claude, which replies with the change it implies, or resolves | Yes |
 | Custom answer or free text | Sent to Claude | Yes |
@@ -438,21 +447,24 @@ Mockups from the design sessions exist locally. They're not in the repo.
 
 - **Header:**
   - the title
-  - **Source:** the `.md` path, its clone and branch, and an **Open file** link
+  - **Source:** the plan's path in the repo, its clone and branch, and an **Open file** link
   - the progress bar and **Claude listening**
   - buttons: **Submit all · N drafts**, **Whiteboard Defense** and **Finalize spec**. Finalize is disabled, with the reason, while blocking items are open.
 - **Left sidebar:** **Inbox**, then every enabled plumbing type in `order`, each with its badge.
   - A type with no items is greyed and marked **No changes**.
   - Opening it shows its `emptyMessage` ("This plan doesn't change the database.") and the importer's reason.
+- **Documents** (in the sidebar, under the plumbing types): **Original**, **Draft** and, once it exists, **Final**.
+  - **Draft** can highlight every change against the original. Each change links to the thread that caused it ("changed by: One row per send?"), so you can always see what changed and why.
+  - **Final** shows where it was copied in the repo.
 - **Main area (the inbox):** threads grouped as *Your turn* / *Drafts, not sent* / *With Claude* / resolved and parked (collapsed).
 
 ### 10.3 Thread view
 
-- **The item card on top, collapsible:** the item as its screen draws it, its place in the `.md`, code references (✓), linked items and the decisions that apply.
+- **The item card on top, collapsible:** the item as its screen draws it, its place in the draft, code references (✓), linked items and the decisions that apply.
 - **The conversation below:**
   - messages, oldest first, with status lines such as "sent on its own · answered in 48 s"
   - "Read N files"
-  - **What changes if you accept:** the `.md` diff, view changes, small edits already applied (with Undo), new threads and impact flags
+  - **What changes if you accept:** the draft diff, view changes, small edits already applied (with Undo), new threads and impact flags
   - **Your answer:** radios, note and Custom, with **Park** and **Send this thread**.
 
 ### 10.4 Plumbing-type screens
@@ -485,8 +497,8 @@ Mockups from the design sessions exist locally. They're not in the repo.
 
 1. **Before starting,** a checklist shows: blocking items open (these block Finalize), pending proposals, unanswered non-blocking questions (their defaults will be used), and unreviewed items (a warning only).
 2. **Start** runs the finalizer.
-3. **Review:** a preview of `<name>.final.md`, with a diff against the last finalized version if there is one.
-4. **Accept** writes `<name>.final.md` and `<name>.assets/` next to the plan. The original `.md` is left as it is.
+3. **Review:** a preview of the final document, with a diff against the last finalized version if there is one.
+4. **Accept** saves `docs/final.md` in the plumbing project and copies it into the repo as `<name>.final.md`, with `<name>.assets/`, next to the plan. It goes to the source clone by default; you can pick another. The repo's original plan is left as it is.
 5. **After:** the project moves to Finalized, and the app suggests the next command (e.g. `writing-plans docs/specs/restock-reminders.final.md`).
 
 ### 10.6 Whiteboard Defense
@@ -510,9 +522,9 @@ This is a tab in the plumbing project, switching between **Present**, **Study** 
 
 ## 11. Finalize spec: an `.md` built for AI implementers
 
-Finalize writes a **new file next to the plan**, `<name>.final.md`, in a fixed structure defined by `outputs/finalize.md`. That gives an implementing AI everything it needs, in the order it needs it.
-- **The original `.md` is never touched by Finalize.**
-- **Running Finalize again** overwrites `.final.md`, after a preview.
+Finalize turns the draft into the **final** document, in a fixed structure defined by `outputs/finalize.md`. That gives an implementing AI everything it needs, in the order it needs it.
+- **Where it goes:** `docs/final.md` in the plumbing project, plus a copy in the repo as `<name>.final.md` next to the plan, with `<name>.assets/`.
+- **Running Finalize again** replaces both, after a preview.
 
 The default structure:
 
@@ -531,7 +543,7 @@ The default structure:
 13. **Notes for the implementer:** files likely to change, the repo profile's conventions, things not to do, and assumptions made.
 14. **Open items:** non-blocking only, each with the default used.
 
-**The gate.** Finalize won't run while blocking questions or concerns are open or a proposal is waiting. Earlier `.final.md` versions stay in git and in dev-plumbing's history.
+**The gate.** Finalize won't run while blocking questions or concerns are open or a proposal is waiting. Earlier finals stay in dev-plumbing's history, and in git once you commit them.
 
 ---
 
@@ -541,7 +553,7 @@ The default structure:
 
 **How it's generated.**
 - **The subagent:** the **whiteboard** subagent follows `outputs/whiteboard-defense.md`.
-- **What it reads:** the plumbing project (items, decisions, diagram data, schema diffs, flows), the `.md`, and the repo profile, whose `sensitiveData` tags raise the review level.
+- **What it reads:** the plumbing project (items, decisions, diagram data, schema diffs, flows), the draft (or the final, once it exists), and the repo profile, whose `sensitiveData` tags raise the review level.
 - **Now:** based on the plan.
 - **Later (Phase 2):** **Defend the code** re-runs it against the branch's real diff, to defend what was actually built.
 
@@ -591,7 +603,9 @@ type PlumbingProject = {
   id: string;                          // "restock-reminders"
   repo: string;                        // repo profile name, e.g. "acme"
   title: string;
-  source: { path: string; clone: string; branch: string; hash: string };
+  source: { path: string; clone: string; branch: string; hashAtImport: string };
+  docs: { original: string; draft: string; final?: string;       // paths inside the project folder
+          exportedTo?: { clone: string; path: string; at: string } };  // where <name>.final.md was copied
   status: "importing" | "active" | "finalized";
   emptyTypes: { type: string; reason: string }[];   // plumbing types with "No changes"
   createdAt: string; updatedAt: string;
@@ -604,7 +618,7 @@ type Item = {
   summary: string;                     // one line
   body?: string;                       // markdown
   fields?: Record<string, string>;     // values for the type's extra fields (severity, effort…)
-  mdAnchor?: { heading: string; lines?: [number, number] };
+  mdAnchor?: { heading: string; lines?: [number, number] };   // location in draft.md
   codeRefs?: { path: string; symbol?: string; verified?: boolean }[];
   links?: string[];                    // related item ids
   data?: DiagramData | TableDiff | Mockup | Flow | PhaseData;
@@ -665,7 +679,7 @@ type Message =
 type Option = { id: string; label: string; detail?: string; change?: Change };
 
 type Change = {
-  md?: { find: string; replace: string }[];   // exact-text patches on the .md
+  md?: { find: string; replace: string }[];   // exact-text patches on draft.md
   items?: { itemId: string; patch: unknown }[];
 };
 
@@ -698,7 +712,7 @@ type WhiteboardDefense = {
 - the thread, in full
 - a one-line summary of each linked item
 - every decision, one line each
-- the `.md` section the item comes from, and its code references
+- the draft section the item comes from, and its code references
 - the repo profile's conventions
 - the **Rules** section of the item's plumbing type.
 
@@ -731,7 +745,7 @@ The subagent may read more files but can't change the repo. Its only write path 
   - **Sequences:** a lane-and-row layout.
   - **Storyboards:** reuse the mockup HTML at thumbnail size.
   - **Whiteboard:** reuses the same diagram data, drawn with Rough.js.
-- **Mermaid is only an export,** generated from the same data when Finalize writes the `.md`.
+- **Mermaid is only an export,** generated from the same data when Finalize writes the final document.
 
 ## 15. The hard parts
 
@@ -747,9 +761,10 @@ The subagent may read more files but can't change the repo. Its only write path 
    - **The wait:** `dp_wait` sends a heartbeat every `waitHeartbeatSeconds`, and the plugin sets a 12-hour per-server `timeout`.
    - **Submissions are saved first.** If no window is listening, the app says: *Saved. No Claude window is listening. Run `/dev-plumbing` in any clone.*
    - **While listening, the window is busy.** Press Esc to chat with it, then run `/dev-plumbing` to resume.
-4. **The `.md` changing underneath.** Every patch checks the file's hash first.
-   - **If it changed,** the patch is held back and Claude re-proposes against the new text.
-   - **When a changed file is noticed at open,** the affected plumbing types are re-imported. Existing items keep their ids by matching heading and key, so their threads survive, and changed items are marked "may need another look".
+4. **The plan changing in the repo after import.** dev-plumbing is the only writer of the draft, so patches never collide. If the plan in the repo changes later (you edited it, or pulled), the project home shows **The plan changed in the repo**, with **Bring changes in**:
+   - **A three-way merge** (`git merge-file`): `original.md` is the common base, your draft is one side and the new repo version is the other.
+   - **Clean changes** go into the draft. **Conflicts** become a thread for you and Claude.
+   - **Afterwards,** `original.md` is updated to the new repo version, and the affected plumbing types are re-imported. Items keep their ids by matching heading and key, so their threads survive, and changed items are marked "may need another look".
 5. **Mockups that look like your app.**
    - **The kit:** each app's design kit is built from the `kitFiles` in the repo profile (for example a Tailwind v4 `@theme` plus the app's variables).
    - **Rendering:** a bundled copy of Tailwind's browser build compiles it inside the mockup iframe.
@@ -844,7 +859,7 @@ dev-plumbing/
     outputs/whiteboard-defense.md
   packages/
     core/                        # Zod schemas and types, settings and rules loaders, file store, README generator
-    service/                     # Hono server, SSE, submissions, .md patching, code-ref checks, login item
+    service/                     # Hono server, SSE, submissions, original/draft/final documents, final export, code-ref checks, login item
     web/                         # React app: screens, diagram renderer, whiteboard, mockup sandbox
                                  #   src/theme/tokens.css holds the Ink wash tokens (§16)
     mcp/                         # MCP server (stdio), a thin client to the service
@@ -875,20 +890,20 @@ Everything below is v1. It's built in this order so each milestone is usable bef
    - import with list screens, and threads (radios, note, Custom)
    - submissions and listening
    - thread subagents
-   - accepts written into the `.md` with the hash check, auto-apply with Undo
+   - original and draft copies at import, accepts written into the draft, auto-apply with Undo, the Documents view
    - + Question / Concern / Idea.
 4. **Visual screens:** the diagram renderer (ELK), Database, UI mockups (kits, pins, Before/After), Flows, and the Phases timeline.
-5. **Finalize spec:** the checklist, finalizer, preview, and `<name>.final.md` with Mermaid diagrams, plus `<name>.assets/`.
+5. **Finalize spec:** the checklist, finalizer, preview, `final.md` with Mermaid diagrams, and the copy into the repo as `<name>.final.md` plus `<name>.assets/`. Also **Bring changes in** for plans edited in the repo.
 6. **Whiteboard Defense:** generation, Study, Present (Rough.js and Motion), Practice with checklist, sending items to Questions/Concerns, Out of date, Export `.md`.
 
 **v1 is done when**, on a real repo:
 1. Setup installs everything and the app starts at login.
 2. Importing a real spec fills every plumbing type, or marks it "No changes".
 3. You answer five questions inline, send one thread on its own, and subagents reply.
-4. An accepted proposal changes the `.md`.
+4. An accepted proposal changes the draft, and the plan in the repo is untouched.
 5. Reopening the project from another clone loses nothing.
 6. A submission made with no window listening is picked up by the next `/dev-plumbing`.
-7. **Finalize** writes `<name>.final.md` in the standard structure and leaves the original alone.
+7. **Finalize** saves the final in the plumbing project and copies it into the repo as `<name>.final.md`.
 8. The Whiteboard Defense plays in Present, reads in Study, and tracks progress in Practice.
 9. Changing a plumbing rules file changes the next import.
 10. Every screen matches the Ink wash spec in light and dark mode and works in one column on a phone.
@@ -914,7 +929,7 @@ Everything below is v1. It's built in this order so each milestone is usable bef
 | **Plugin subagents calling MCP tools** | The spike in step 1 of §18, with the JSON fallback |
 | **Separate threads conflicting** | Decisions, grouping, cross-check, impact flags (§15) |
 | **Usage cost of Submit all on many threads** | `maxParallel`, plain accepts don't call Claude, and each submission shows what ran |
-| **The final `.md` drifting from what was decided** | The finalizer gets every decision and item, and you preview `.final.md` before it's written |
+| **The final `.md` drifting from what was decided** | The finalizer gets every decision and item, and you preview the final before it's written |
 | **The theme sliding back to default component colours** | One tokens file, shadcn/ui restyled to it, and a light, dark and phone check in the v1 "done when" list |
 | **Clashing with Superpowers skills** | The skill says plainly that the plan already exists. Test this. |
 | **Rules-file edits breaking imports** | Headers are validated when loaded, with clear errors on the Plumbing rules page. **Reset to default** is always there. |
@@ -930,9 +945,9 @@ Everything below is v1. It's built in this order so each milestone is usable bef
 | Config inside the code repo | The repo is public and generic. Your tuning lives in `~/.dev-plumbing`. |
 | Mermaid for diagrams | Generic look, fragile syntax, no checking against the code. Kept only as the export. |
 | Whiteboard Defense as a document only | Drawing and practising teach more than reading |
-| Finalize rewriting the plan in place, or only adding to it | You'd rather keep your original `.md` untouched by Finalize and get a separate, standard `.final.md` |
+| Editing the plan in the repo, as you go or at Finalize | You want the repo's plan left alone. dev-plumbing keeps the original, draft and final itself, and only copies the final into the repo. |
 | The palette's cream (paper) colour, as background or accent | You found it unattractive, so it's dropped entirely for now |
 
 ## 21. Open questions
 
-1. **Accepts while plumbing.** Accepted answers still update your original `.md` as you go (your earlier choice), while Finalize writes the separate `.final.md`. Keep it that way, or should the original never change at all, with every accepted answer landing only in `.final.md`?
+None right now.
