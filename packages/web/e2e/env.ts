@@ -6,7 +6,7 @@ import type { Page } from '@playwright/test';
 export const E2E_PORT = 45459;
 export const repoRoot = path.resolve(import.meta.dirname, '../../..');
 export const cliPath = path.join(repoRoot, 'packages/cli/dist/index.js');
-const marker = path.join(os.tmpdir(), 'dev-plumbing-e2e-current');
+export const marker = path.join(os.tmpdir(), 'dev-plumbing-e2e-current');
 
 export const e2eTmp = () => fs.readFileSync(marker, 'utf8').trim();
 export const setE2eTmp = (dir: string) => fs.writeFileSync(marker, dir);

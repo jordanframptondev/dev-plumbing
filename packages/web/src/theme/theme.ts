@@ -6,6 +6,11 @@ export function resolveTheme(pref: ThemePreference, prefersDark: boolean): 'ligh
 
 /** Sets <html data-theme>. For "system" it follows OS changes until the returned function is called. */
 export function applyTheme(pref: ThemePreference): () => void {
+  try {
+    localStorage.setItem('dev-plumbing-theme', pref);
+  } catch {
+    /* storage unavailable */
+  }
   const mq = window.matchMedia('(prefers-color-scheme: dark)');
   const set = () => {
     document.documentElement.dataset.theme = resolveTheme(pref, mq.matches);

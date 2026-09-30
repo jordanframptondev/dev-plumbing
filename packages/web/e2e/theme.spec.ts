@@ -34,3 +34,34 @@ test.describe('with the system set to dark', () => {
     }
   });
 });
+
+test.describe('saved choice beats the system setting', () => {
+  test.use({ colorScheme: 'dark' });
+  test('saved "light" stays light on a dark system', async ({ page }) => {
+    const saved = readJson('settings.json');
+    writeJson('settings.json', { ...saved, theme: 'light' });
+    try {
+      await page.goto('/');
+      await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+      expect(await page.evaluate(bodyBackground)).toBe('rgb(255, 255, 255)');
+    } finally {
+      writeJson('settings.json', saved);
+    }
+  });
+});
+
+test.describe('with the system set to light', () => {
+  test.use({ colorScheme: 'light' });
+  test('"system" follows a live change of the system setting', async ({ page }) => {
+    const saved = readJson('settings.json');
+    writeJson('settings.json', { ...saved, theme: 'system' });
+    try {
+      await page.goto('/');
+      await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+      await page.emulateMedia({ colorScheme: 'dark' });
+      await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    } finally {
+      writeJson('settings.json', saved);
+    }
+  });
+});

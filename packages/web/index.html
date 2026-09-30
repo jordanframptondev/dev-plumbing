@@ -5,7 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>dev-plumbing</title>
     <script>
-      document.documentElement.dataset.theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      (function () {
+        var pref = null;
+        try {
+          pref = localStorage.getItem('dev-plumbing-theme');
+        } catch (e) {}
+        var dark = matchMedia('(prefers-color-scheme: dark)').matches;
+        document.documentElement.dataset.theme = pref === 'light' || pref === 'dark' ? pref : dark ? 'dark' : 'light';
+      })();
     </script>
   </head>
   <body>
