@@ -4,7 +4,6 @@ const Soon = ({ title }: { title: string }) => (
   </div>
 );
 
-export const SettingsPage = () => <Soon title="Settings" />;
 export const RulesPage = () => <Soon title="Plumbing rules" />;
 export const RuleEditorPage = () => <Soon title="Rules file" />;
 export const OutputEditorPage = () => <Soon title="Output rules" />;

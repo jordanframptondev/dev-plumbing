@@ -1,6 +1,7 @@
 import { createRootRoute, createRoute, createRouter } from '@tanstack/react-router';
 import { PageMessage } from './components/PageMessage';
-import { OutputEditorPage, RuleEditorPage, RulesPage, SettingsPage } from './pages/placeholders';
+import { OutputEditorPage, RuleEditorPage, RulesPage } from './pages/placeholders';
+import { SettingsPage } from './pages/SettingsPage';
 import { DocumentView } from './pages/DocumentView';
 import { InboxView } from './pages/InboxView';
 import { ProjectLayout } from './pages/ProjectLayout';
