@@ -6,7 +6,6 @@ const Soon = ({ title }: { title: string }) => (
   </div>
 );
 
-export const AppHome = () => <Soon title="Plumbing projects" />;
 export const ProjectLayout = () => <Outlet />;
 export const InboxView = () => <Soon title="Inbox" />;
 export const TypeView = () => <Soon title="Plumbing type" />;

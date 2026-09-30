@@ -1,7 +1,6 @@
 import { createRootRoute, createRoute, createRouter } from '@tanstack/react-router';
 import { PageMessage } from './components/PageMessage';
 import {
-  AppHome,
   DocumentView,
   InboxView,
   OutputEditorPage,
@@ -11,6 +10,7 @@ import {
   SettingsPage,
   TypeView,
 } from './pages/placeholders';
+import { AppHome } from './pages/AppHome';
 import { Root } from './pages/Root';
 
 const rootRoute = createRootRoute({ component: Root, notFoundComponent: () => <PageMessage title="Page not found" /> });
