@@ -1,7 +1,8 @@
+import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ZodError } from 'zod';
-import { writeJsonAtomic } from './atomic';
+import { writeFileAtomic, writeJsonAtomic } from './atomic';
 import { parseRulesFile, resolveTypes, type RulesFileResult } from './rules';
 import {
   agentsFields,
@@ -29,27 +30,30 @@ export type LoadedConfig = {
 };
 
 const isMissing = (e: unknown) => (e as NodeJS.ErrnoException).code === 'ENOENT';
+const getErrorCode = (e: unknown) => (e as NodeJS.ErrnoException).code || 'UNKNOWN';
 
-async function readText(file: string): Promise<string | null> {
+async function readText(file: string, label: string, problems: ConfigProblem[]): Promise<string | null> {
   try {
     return await fs.readFile(file, 'utf8');
   } catch (e) {
     if (isMissing(e)) return null;
-    throw e;
+    problems.push({ file: label, message: `This couldn't be read (${getErrorCode(e)}). Using the defaults until it's fixed.` });
+    return null;
   }
 }
 
-async function listFiles(dir: string, ext: string): Promise<string[]> {
+async function listFiles(dir: string, ext: string, label: string, problems: ConfigProblem[]): Promise<string[]> {
   try {
     return (await fs.readdir(dir)).filter((f) => f.endsWith(ext) && !f.startsWith('.')).sort();
   } catch (e) {
     if (isMissing(e)) return [];
-    throw e;
+    problems.push({ file: label, message: `This folder couldn't be read (${getErrorCode(e)}).` });
+    return [];
   }
 }
 
 async function readJson(file: string, label: string, problems: ConfigProblem[]): Promise<unknown> {
-  const text = await readText(file);
+  const text = await readText(file, label, problems);
   if (text === null) return {};
   try {
     return JSON.parse(text);
@@ -78,7 +82,7 @@ export async function loadConfig(dir: string): Promise<LoadedConfig> {
   agents.errors.forEach((e) => problems.push(fieldProblem('agents.json', agentsFields, e)));
 
   const repos: RepoProfile[] = [];
-  for (const f of await listFiles(path.join(dir, 'repos'), '.json')) {
+  for (const f of await listFiles(path.join(dir, 'repos'), '.json', 'repos', problems)) {
     const label = `repos/${f}`;
     const parsed = repoProfileSchema.safeParse(await readJson(path.join(dir, 'repos', f), label, problems));
     if (!parsed.success) {
@@ -93,13 +97,14 @@ export async function loadConfig(dir: string): Promise<LoadedConfig> {
   }
 
   const results: RulesFileResult[] = [];
-  for (const f of await listFiles(path.join(dir, 'plumbing'), '.md')) {
-    results.push(parseRulesFile(f, (await readText(path.join(dir, 'plumbing', f))) ?? ''));
+  for (const f of await listFiles(path.join(dir, 'plumbing'), '.md', 'plumbing', problems)) {
+    const fileContent = await readText(path.join(dir, 'plumbing', f), `plumbing/${f}`, problems);
+    results.push(parseRulesFile(f, fileContent ?? ''));
   }
   const { types, errors } = resolveTypes(results);
   errors.forEach((e) => problems.push({ file: `plumbing/${e.file}`, message: e.error }));
 
-  const outputs = await listFiles(path.join(dir, 'outputs'), '.md');
+  const outputs = await listFiles(path.join(dir, 'outputs'), '.md', 'outputs', problems);
   return { dir, settings: settings.value, agents: agents.value, repos, types, outputs, problems };
 }
 
@@ -114,14 +119,18 @@ export async function installDefaults(opts: { configDir: string; defaultsDir: st
         await walk(r);
         continue;
       }
+      const source = path.join(opts.defaultsDir, r);
       const target = path.join(opts.configDir, r);
+      await fs.mkdir(path.dirname(target), { recursive: true });
       try {
-        await fs.access(target);
-        kept.push(r);
-      } catch {
-        await fs.mkdir(path.dirname(target), { recursive: true });
-        await fs.copyFile(path.join(opts.defaultsDir, r), target);
+        await fs.copyFile(source, target, fsConstants.COPYFILE_EXCL);
         created.push(r);
+      } catch (e) {
+        if (isMissing(e) || (e as NodeJS.ErrnoException).code === 'EEXIST') {
+          kept.push(r);
+        } else {
+          throw e;
+        }
       }
     }
   }
@@ -133,19 +142,44 @@ export async function resetToDefault(opts: { configDir: string; defaultsDir: str
   const rel = path.normalize(opts.file);
   if (rel.startsWith('..') || path.isAbsolute(rel)) throw new Error('That file is outside the config folder.');
   const source = path.join(opts.defaultsDir, rel);
+  let data: string;
   try {
-    await fs.access(source);
+    data = await fs.readFile(source, 'utf8');
   } catch {
     throw new Error(`There is no default for ${opts.file}.`);
   }
-  await fs.mkdir(path.dirname(path.join(opts.configDir, rel)), { recursive: true });
-  await fs.copyFile(source, path.join(opts.configDir, rel));
+  const target = path.join(opts.configDir, rel);
+  await writeFileAtomic(target, data);
 }
 
 export async function updateSettingsFile(dir: string, patch: Partial<Settings>): Promise<Settings> {
-  const { settings } = await loadConfig(dir);
-  const checked = parseSettings({ ...settings, ...patch });
-  if (checked.errors.length) throw new Error(checked.errors.map((e) => `${e.key}: ${e.message}`).join('; '));
-  await writeJsonAtomic(path.join(dir, 'settings.json'), checked.value);
+  const file = path.join(dir, 'settings.json');
+  let current: Record<string, unknown> = {};
+
+  // Read settings.json if it exists
+  const text = await readText(file, 'settings.json', []);
+  if (text !== null) {
+    try {
+      current = JSON.parse(text) as Record<string, unknown>;
+    } catch (e) {
+      throw new Error(`settings.json has problems (isn't valid JSON: ${(e as Error).message}). Fix it or reset it to the default, then try again.`);
+    }
+
+    // Check if current settings parse without errors
+    const currentCheck = parseSettings(current);
+    if (currentCheck.errors.length) {
+      const details = currentCheck.errors.map((e) => `${e.key}: ${e.message}`).join('; ');
+      throw new Error(`settings.json has problems (${details}). Fix it or reset it to the default, then try again.`);
+    }
+  }
+
+  // Merge and validate
+  const checked = parseSettings({ ...current, ...patch });
+  if (checked.errors.length) {
+    throw new Error(`The updated settings have problems (${checked.errors.map((e) => `${e.key}: ${e.message}`).join('; ')}). Please check your changes.`);
+  }
+
+  // Write atomically
+  await writeJsonAtomic(file, checked.value);
   return checked.value;
 }

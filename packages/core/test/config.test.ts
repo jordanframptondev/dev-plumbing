@@ -100,4 +100,45 @@ describe('config folder', () => {
     expect(s.homePageSize).toBe(25);
     expect(JSON.parse(await read('settings.json')).projectsFolder).toBe('~/x');
   });
+
+  it('resetToDefault restores content and never clobbers on installDefaults', async () => {
+    await installDefaults({ configDir: dir, defaultsDir });
+    const original = await read('plumbing/ideas.md');
+    await write('plumbing/ideas.md', 'CHANGED');
+    expect(await read('plumbing/ideas.md')).toBe('CHANGED');
+    await resetToDefault({ configDir: dir, defaultsDir, file: 'plumbing/ideas.md' });
+    expect(await read('plumbing/ideas.md')).toBe(original);
+    // Run installDefaults again—it must not overwrite the just-reset file
+    const r = await installDefaults({ configDir: dir, defaultsDir });
+    expect(r.kept).toContain('plumbing/ideas.md');
+    expect(await read('plumbing/ideas.md')).toBe(original);
+  });
+
+  it('loadConfig does not reject when settings.json is a directory', async () => {
+    await fs.mkdir(path.join(dir, 'settings.json'));
+    const c = await loadConfig(dir);
+    expect(c.settings).toEqual(defaultSettings);
+    expect(c.problems).toEqual([expect.objectContaining({ file: 'settings.json', message: expect.stringMatching(/couldn't be read/) })]);
+  });
+
+  it('loadConfig does not reject when plumbing is a regular file', async () => {
+    await write('plumbing', 'not a folder');
+    const c = await loadConfig(dir);
+    expect(c.types).toEqual([]);
+    expect(c.problems).toEqual([expect.objectContaining({ file: 'plumbing', message: expect.stringMatching(/couldn't be read/) })]);
+  });
+
+  it('updateSettingsFile throws on broken JSON and leaves file unchanged', async () => {
+    const broken = '{ "port": ';
+    await write('settings.json', broken);
+    await expect(updateSettingsFile(dir, { homePageSize: 25 })).rejects.toThrow(/isn't valid JSON/);
+    expect(await read('settings.json')).toBe(broken);
+  });
+
+  it('updateSettingsFile throws on invalid values and leaves file unchanged', async () => {
+    const invalid = JSON.stringify({ port: 80 });
+    await write('settings.json', invalid);
+    await expect(updateSettingsFile(dir, { homePageSize: 25 })).rejects.toThrow(/problems.*port.*greater than or equal to 1024/);
+    expect(await read('settings.json')).toBe(invalid);
+  });
 });
