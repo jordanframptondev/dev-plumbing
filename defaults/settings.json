@@ -1,0 +1,9 @@
+{
+  "port": 4545,
+  "projectsFolder": "~/dev-plumbing-projects",
+  "startAtLogin": true,
+  "openBrowserOnImport": true,
+  "autoApplySmallEdits": true,
+  "homePageSize": 10,
+  "theme": "system"
+}

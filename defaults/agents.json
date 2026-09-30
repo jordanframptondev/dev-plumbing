@@ -1,0 +1,12 @@
+{
+  "maxParallel": 4,
+  "groupLinkedThreads": true,
+  "models": {
+    "repoSetup": "sonnet",
+    "importer": "sonnet",
+    "thread": "sonnet",
+    "finalizer": "opus",
+    "whiteboard": "opus"
+  },
+  "waitHeartbeatSeconds": 60
+}
