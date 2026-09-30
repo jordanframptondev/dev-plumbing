@@ -1,2 +1,6 @@
 export * from './schemas';
 export * from './rules';
+export * from './paths';
+export * from './atomic';
+export * from './config';
+export * from './readme';

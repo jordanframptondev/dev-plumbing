@@ -4,3 +4,4 @@ export * from './settings';
 export * from './agents';
 export * from './repoProfile';
 export * from './plumbingType';
+export * from './views';
