@@ -6,3 +6,5 @@ export * from './config';
 export * from './readme';
 export * from './store/projects';
 export * from './demo';
+export * from './loginItem';
+export * from './runFile';
