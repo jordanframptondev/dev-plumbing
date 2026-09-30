@@ -49,12 +49,12 @@ test('the inbox groups threads by whose turn it is', async ({ page }) => {
 test('shows the original and the draft, and says when there is no final yet', async ({ page }) => {
   await page.goto(PROJECT);
   const nav = page.getByRole('complementary', { name: 'Project navigation' });
-  await nav.getByRole('link', { name: 'Original' }).click();
+  await nav.getByRole('link', { name: 'Original', exact: true }).click();
   await expect(page.getByTestId('document')).toContainText('A daily job finds subscriptions');
-  await nav.getByRole('link', { name: 'Draft' }).click();
+  await nav.getByRole('link', { name: 'Draft', exact: true }).click();
   await expect(page.getByTestId('document')).toContainText('Reminders go out by SMS and email.');
   await expect(nav.getByText('Final')).toBeVisible();
-  await expect(nav.getByRole('link', { name: 'Final' })).toHaveCount(0);
+  await expect(nav.getByRole('link', { name: 'Final', exact: true })).toHaveCount(0);
 });
 
 test('Open file explains when the plan is not on disk', async ({ page }) => {
