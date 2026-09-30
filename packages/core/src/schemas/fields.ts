@@ -43,14 +43,23 @@ export function flatten(obj: unknown, prefix = ''): Record<string, unknown> {
   return out;
 }
 
+/** Sets an own property, so a key such as "__proto__" from a file stays plain data. */
+const setOwn = (node: Record<string, unknown>, key: string, value: unknown) =>
+  Object.defineProperty(node, key, { value, writable: true, enumerable: true, configurable: true });
+
 export function unflatten(flat: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(flat)) {
     const parts = key.split('.');
     let node = out;
     parts.forEach((part, i) => {
-      if (i === parts.length - 1) node[part] = value;
-      else node = (node[part] ??= {}) as Record<string, unknown>;
+      if (i === parts.length - 1) {
+        setOwn(node, part, value);
+        return;
+      }
+      const child = Object.hasOwn(node, part) ? node[part] : undefined;
+      if (child === null || typeof child !== 'object' || Array.isArray(child)) setOwn(node, part, {});
+      node = node[part] as Record<string, unknown>;
     });
   }
   return out;
