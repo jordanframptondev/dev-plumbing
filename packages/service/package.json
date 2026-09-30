@@ -1,0 +1,16 @@
+{
+  "name": "@dev-plumbing/service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsup",
+    "dev": "DEV_PLUMBING_DEV=1 tsx watch src/index.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@dev-plumbing/core": "workspace:*",
+    "@hono/node-server": "^1.19.17",
+    "hono": "^4.13.12"
+  }
+}
