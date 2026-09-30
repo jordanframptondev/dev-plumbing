@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { configDir, disableLoginItem, enableLoginItem, loadConfig, removeRunFile, VERSION, writeRunFile } from '@dev-plumbing/core';
+import { configDir, disableLoginItem, enableLoginItem, isLoginItemEnabled, loadConfig, removeRunFile, VERSION, writeRunFile } from '@dev-plumbing/core';
 import { createApp } from './app';
 import { listen, PortInUseError } from './listen';
 
@@ -28,6 +28,7 @@ async function main() {
       disable: async () => {
         await disableLoginItem();
       },
+      isEnabled: () => isLoginItemEnabled(),
     },
   });
 

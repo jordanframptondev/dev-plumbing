@@ -70,3 +70,83 @@ describe('projects API', () => {
     expect((errBody.error as string)).toMatch(/isn't at .*restock-reminders.md/);
   });
 });
+
+describe('opening the plan file', () => {
+  const openSource = (app: ReturnType<typeof createApp>) =>
+    call(app, '/api/open', { method: 'POST', body: JSON.stringify({ target: 'source', repo: 'acme', id: 'restock-reminders' }) });
+
+  /** Points the restock-reminders project at `path` inside `clone`, and makes a clone folder under the temp home. */
+  async function setup(source: { clone?: string; path: string }) {
+    const made = await makeContext();
+    const clone = path.join(made.tmp, 'Source', 'acme');
+    await fs.mkdir(path.join(clone, 'docs', 'specs'), { recursive: true });
+    const projectFile = path.join(made.root, 'acme', 'restock-reminders', 'project.json');
+    const project = JSON.parse(await fs.readFile(projectFile, 'utf8'));
+    await fs.writeFile(projectFile, JSON.stringify({ ...project, source: { ...project.source, clone: source.clone ?? clone, path: source.path } }));
+    return { ...made, clone, app: createApp(made.ctx) };
+  }
+
+  it('opens a real .md file inside the clone', async () => {
+    const { app, clone, opened } = await setup({ path: 'docs/specs/Plan.MD' });
+    await fs.writeFile(path.join(clone, 'docs', 'specs', 'Plan.MD'), '# Plan');
+    const res = await openSource(app);
+    expect(res.status).toBe(200);
+    expect(opened).toEqual([await fs.realpath(path.join(clone, 'docs', 'specs', 'Plan.MD'))]);
+  });
+
+  it('refuses a path that escapes the clone with ..', async () => {
+    const { app, tmp, opened } = await setup({ path: '../outside.md' });
+    await fs.writeFile(path.join(tmp, 'Source', 'outside.md'), '# Not in the clone');
+    const res = await openSource(app);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/inside/);
+    expect(opened).toEqual([]);
+  });
+
+  it('refuses a symlink that points outside the clone', async () => {
+    const { app, tmp, clone, opened } = await setup({ path: 'docs/link.md' });
+    await fs.writeFile(path.join(tmp, 'secret.md'), '# Secret');
+    await fs.symlink(path.join(tmp, 'secret.md'), path.join(clone, 'docs', 'link.md'));
+    expect((await openSource(app)).status).toBe(400);
+    expect(opened).toEqual([]);
+  });
+
+  it('refuses a file that is not markdown', async () => {
+    const { app, clone, opened } = await setup({ path: 'run.command' });
+    await fs.writeFile(path.join(clone, 'run.command'), 'echo hi', { mode: 0o755 });
+    const res = await openSource(app);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/Markdown/);
+    expect(opened).toEqual([]);
+  });
+
+  it('refuses a directory, even one named like a .md file', async () => {
+    const { app, clone, opened } = await setup({ path: 'docs/folder.md' });
+    await fs.mkdir(path.join(clone, 'docs', 'folder.md'));
+    expect((await openSource(app)).status).toBe(400);
+    expect(opened).toEqual([]);
+  });
+
+  it('refuses a clone of / pointing at an app', async () => {
+    const made = await setup({ clone: '/', path: 'placeholder' });
+    const bundle = path.join(made.tmp, 'Fake.app');
+    await fs.mkdir(path.join(bundle, 'Contents'), { recursive: true });
+    const projectFile = path.join(made.root, 'acme', 'restock-reminders', 'project.json');
+    const project = JSON.parse(await fs.readFile(projectFile, 'utf8'));
+    await fs.writeFile(projectFile, JSON.stringify({ ...project, source: { ...project.source, path: path.relative('/', bundle) } }));
+    const { app, opened } = made;
+    expect((await openSource(app)).status).toBe(400);
+    expect(opened).toEqual([]);
+  });
+
+  it('says so when the file cannot be opened', async () => {
+    const { app, clone, ctx } = await setup({ path: 'docs/specs/plan.md' });
+    await fs.writeFile(path.join(clone, 'docs', 'specs', 'plan.md'), '# Plan');
+    ctx.open = async () => {
+      throw new Error('no app for this file');
+    };
+    const res = await openSource(app);
+    expect(res.status).toBe(500);
+    expect(((await res.json()) as { error: string }).error).toMatch(/couldn't be opened.*no app for this file/);
+  });
+});

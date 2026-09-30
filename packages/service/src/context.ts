@@ -8,5 +8,5 @@ export type AppContext = {
   home?: string;
   extraOrigins?: string[];
   open: (target: string) => Promise<void>;
-  loginItem: { enable: () => Promise<void>; disable: () => Promise<void> };
+  loginItem: { enable: () => Promise<void>; disable: () => Promise<void>; isEnabled: () => Promise<boolean> };
 };

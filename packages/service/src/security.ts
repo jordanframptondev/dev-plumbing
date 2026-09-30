@@ -28,3 +28,15 @@ export function guard(opts: { port: number; token: string; extraOrigins?: string
     return c.json({ error: 'Not allowed.' }, 401);
   };
 }
+
+/**
+ * Anti-framing on every response, so another site can't frame the app and clickjack it.
+ * 'self' rather than 'none', because mockup iframes are served from the same origin.
+ */
+export function frameHeaders(): MiddlewareHandler {
+  return async (c, next) => {
+    await next();
+    c.header('X-Frame-Options', 'SAMEORIGIN');
+    c.header('Content-Security-Policy', "frame-ancestors 'self'");
+  };
+}

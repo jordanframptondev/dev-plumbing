@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import {
   expandHome,
   findProjects,
@@ -12,12 +12,20 @@ import {
   readProjectDocument,
 } from '@dev-plumbing/core';
 import type { AppContext } from '../context';
+import { EXPECTED_OBJECT, readJsonObject } from '../json';
 
 const clampInt = (value: string | undefined, min: number, max: number, fallback: number) => {
   const n = Number(value);
   return Number.isInteger(n) ? Math.min(max, Math.max(min, n)) : fallback;
 };
 const TABS = ['active', 'finalized', 'all'] as const;
+const MARKDOWN = /\.(md|markdown)$/i;
+
+/** `inner` is strictly inside `outer`: not equal to it, and not a sibling that only shares a prefix. */
+const isInside = (outer: string, inner: string) => {
+  const rel = path.relative(outer, inner);
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+};
 const DOCS = ['original', 'draft', 'final'] as const;
 
 export function projectRoutes(ctx: AppContext): Hono {
@@ -79,21 +87,36 @@ export function projectRoutes(ctx: AppContext): Hono {
     }
   });
 
-  r.post('/open', async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { target?: string; repo?: string; id?: string };
-    if (body.target === 'config') {
-      await ctx.open(ctx.configDir);
+  /** Runs macOS `open`, and turns a failure into a readable error. */
+  async function openWith(c: Context, target: string, what: string) {
+    try {
+      await ctx.open(target);
       return c.json({ ok: true });
+    } catch (e) {
+      return c.json({ error: `The ${what} couldn't be opened: ${(e as Error).message}` }, 500);
     }
-    if (body.target === 'source' && body.repo && body.id) {
+  }
+
+  r.post('/open', async (c) => {
+    const body = await readJsonObject(c);
+    if (!body) return c.json(EXPECTED_OBJECT, 400);
+    if (body.target === 'config') return openWith(c, ctx.configDir, 'config folder');
+    if (body.target === 'source' && typeof body.repo === 'string' && typeof body.id === 'string' && body.repo && body.id) {
       const { ref } = await locate(body.repo, body.id);
       if (!ref) return c.json(notFound, 404);
       const home = await loadProjectHome(ref, []).catch(() => null);
       if (!home) return c.json({ error: 'This plumbing project could not be read.' }, 422);
-      const file = path.join(expandHome(home.project.source.clone, ctx.home), home.project.source.path);
+      // project.json is a plain file anyone can edit, so only ever open a Markdown file inside the clone.
+      const clone = expandHome(home.project.source.clone, ctx.home);
+      const file = path.resolve(clone, home.project.source.path);
+      const notInside = { error: 'The plan file must be inside the clone.' };
+      if (!isInside(clone, file)) return c.json(notInside, 400);
       if (!(await fs.access(file).then(() => true, () => false))) return c.json({ error: `The plan isn't at ${file} any more.` }, 404);
-      await ctx.open(file);
-      return c.json({ ok: true });
+      const [realClone, realFile] = await Promise.all([fs.realpath(clone), fs.realpath(file)]);
+      if (!isInside(realClone, realFile)) return c.json(notInside, 400);
+      const stat = await fs.stat(realFile);
+      if (!stat.isFile() || !MARKDOWN.test(realFile)) return c.json({ error: 'The plan must be a Markdown file (.md or .markdown).' }, 400);
+      return openWith(c, realFile, 'plan');
     }
     return c.json({ error: 'Unknown target.' }, 400);
   });

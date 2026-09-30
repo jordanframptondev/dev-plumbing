@@ -17,6 +17,8 @@ export async function makeContext(overrides: Partial<AppContext> = {}) {
   await writeDemoProjects(root, new Date('2026-09-30T12:00:00Z'));
   const opened: string[] = [];
   const login: string[] = [];
+  // A fake login item. It starts on, like after `dev-plumbing setup` with the default settings.
+  const loginState = { enabled: true };
   const ctx: AppContext = {
     configDir,
     defaultsDir: DEFAULTS_DIR,
@@ -31,14 +33,17 @@ export async function makeContext(overrides: Partial<AppContext> = {}) {
     loginItem: {
       enable: async () => {
         login.push('enable');
+        loginState.enabled = true;
       },
       disable: async () => {
         login.push('disable');
+        loginState.enabled = false;
       },
+      isEnabled: async () => loginState.enabled,
     },
     ...overrides,
   };
-  return { ctx, tmp, root, opened, login };
+  return { ctx, tmp, root, opened, login, loginState };
 }
 
 export function call(app: Hono, pathname: string, init: RequestInit = {}) {

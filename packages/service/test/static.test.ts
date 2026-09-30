@@ -3,7 +3,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { Hono } from 'hono';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { createApp } from '../src/app';
 import { staticHandler } from '../src/static';
+import { call, makeContext } from './helpers';
 
 let root: string;
 beforeAll(async () => {
@@ -31,5 +33,29 @@ describe('static files', () => {
     const res = await new Hono().get('*', staticHandler(path.join(root, 'missing'))).request('http://localhost/');
     expect(res.status).toBe(503);
     expect(await res.text()).toMatch(/pnpm build/);
+  });
+});
+
+describe('anti-framing headers', () => {
+  const expectFrameHeaders = (res: Response) => {
+    expect(res.headers.get('x-frame-options')).toBe('SAMEORIGIN');
+    expect(res.headers.get('content-security-policy')).toBe("frame-ancestors 'self'");
+  };
+
+  it('are set on the app shell, on API responses and on refusals', async () => {
+    const { ctx } = await makeContext({ webDist: root });
+    const app = createApp(ctx);
+    const page = await app.request('http://localhost:4545/');
+    expect(await page.text()).toBe('<html>app</html>');
+    expectFrameHeaders(page);
+    const asset = await app.request('http://localhost:4545/assets/app.js');
+    expectFrameHeaders(asset);
+    const api = await call(app, '/api/config');
+    expect(api.status).toBe(200);
+    expectFrameHeaders(api);
+    const health = await app.request('http://localhost:4545/api/health');
+    expectFrameHeaders(health);
+    expectFrameHeaders(await app.request('http://localhost:4545/api/config'));
+    expectFrameHeaders(await app.request('http://evil.example:4545/'));
   });
 });
