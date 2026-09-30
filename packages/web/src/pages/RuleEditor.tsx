@@ -9,12 +9,12 @@ import { Segmented } from '../components/Segmented';
 
 export function RuleEditorPage() {
   const { file } = useParams({ from: '/rules/$file' });
-  return <Editor kind="rule" name={file} />;
+  return <Editor key={`rule:${file}`} kind="rule" name={file} />;
 }
 
 export function OutputEditorPage() {
   const { name } = useParams({ from: '/rules/outputs/$name' });
-  return <Editor kind="output" name={name} />;
+  return <Editor key={`output:${name}`} kind="output" name={name} />;
 }
 
 function Editor({ kind, name }: { kind: 'rule' | 'output'; name: string }) {
@@ -42,10 +42,16 @@ function Editor({ kind, name }: { kind: 'rule' | 'output'; name: string }) {
   });
   const reset = useMutation({
     mutationFn: () => api.reset(kind === 'rule' ? `plumbing/${name}` : `outputs/${name}`),
-    onSuccess: () => {
+    onSuccess: async () => {
       setError(null);
       setNotice('Reset to default.');
       void qc.invalidateQueries();
+      const r = await file.refetch();
+      setText(r.data?.text ?? null);
+    },
+    onError: (e) => {
+      setNotice(null);
+      setError((e as Error).message);
     },
   });
 

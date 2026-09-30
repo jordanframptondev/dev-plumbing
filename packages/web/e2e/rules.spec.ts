@@ -96,6 +96,22 @@ test('output rules can be edited and reset', async ({ page }) => {
   }
 });
 
+test('Reset to default drops unsaved edits even when the file is already the default', async ({ page }) => {
+  page.on('dialog', (d) => d.accept());
+  const undo = restore('outputs/whiteboard-defense.md');
+  try {
+    await page.goto('/rules/outputs/whiteboard-defense.md');
+    const editor = page.getByRole('textbox', { name: 'whiteboard-defense.md' });
+    const original = await editor.inputValue();
+    await editor.fill('# unsaved edits');
+    await page.getByRole('button', { name: 'Reset to default' }).click();
+    await expect(page.getByRole('status')).toHaveText('Reset to default.');
+    await expect(editor).toHaveValue(original);
+  } finally {
+    undo();
+  }
+});
+
 test.describe('on a phone', () => {
   test.use({ viewport: { width: 375, height: 812 } });
   test('no sideways scrolling on the list or the editor', async ({ page }) => {
