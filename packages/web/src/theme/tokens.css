@@ -1,0 +1,69 @@
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root {
+  --canvas: #ffffff;
+  --cell: #ffffff;
+  --sidebar: rgb(246 246 244 / 0.86);
+  --selection: rgb(74 74 74 / 0.07);
+  --text: #262625;
+  --text-2: #4a4a4a;
+  --text-3: #8a8a86;
+  --separator: rgb(74 74 74 / 0.14);
+  --mist: #cbcbcb;
+  --slate: #6d8196;
+  --seal: #a5503b;
+  --moss: #5f8a5b;
+  --amber: #c07a2c;
+  --ochre: #a88a25;
+  --button: #4a4a4a;
+  --button-text: #ffffff;
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --canvas: #1e1e1d;
+  --cell: #2a2a28;
+  --sidebar: rgb(38 38 36 / 0.86);
+  --selection: rgb(203 203 203 / 0.11);
+  --text: #f2f2f0;
+  --text-2: #cbcbcb;
+  --text-3: #8c8c86;
+  --separator: rgb(203 203 203 / 0.14);
+  --mist: #55554f;
+  --slate: #93a6ba;
+  --seal: #d07c63;
+  --moss: #8db587;
+  --amber: #e0a15a;
+  --ochre: #d9bc5c;
+  --button: #f2f2f0;
+  --button-text: #262625;
+  color-scheme: dark;
+}
+
+/* Switch off Tailwind's default palette so only Ink wash colours exist (§16). */
+@theme {
+  --color-*: initial;
+}
+
+@theme inline {
+  --color-white: #ffffff;
+  --color-black: #000000;
+  --color-canvas: var(--canvas);
+  --color-cell: var(--cell);
+  --color-sidebar: var(--sidebar);
+  --color-selection: var(--selection);
+  --color-ink: var(--text);
+  --color-ink-2: var(--text-2);
+  --color-ink-3: var(--text-3);
+  --color-separator: var(--separator);
+  --color-mist: var(--mist);
+  --color-slate: var(--slate);
+  --color-seal: var(--seal);
+  --color-moss: var(--moss);
+  --color-amber: var(--amber);
+  --color-ochre: var(--ochre);
+  --color-button: var(--button);
+  --color-button-text: var(--button-text);
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+}

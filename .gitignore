@@ -4,3 +4,5 @@ archive/
 node_modules/
 dist/
 .idea/
+test-results/
+playwright-report/
