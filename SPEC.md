@@ -773,7 +773,7 @@ The subagent may read more files but can't change the repo. Its only write path 
 - **Backgrounds:** a white canvas in light mode, ink night in dark mode. The app follows the system setting, with a toggle (`settings.theme`).
 - **Colour is a signal, never decoration.** It appears only as dots, text, thin lines and small markers.
   - **Never:** tinted info boxes, gradients, glows, purple or indigo, sparkle icons, "AI" badges, heavy shadows.
-- **Paper is an accent only:** the selected row, note fields (like a notepad) and the whiteboard canvas.
+- **No cream anywhere.** The palette's paper colour (`#FFFFE3`) isn't used for now. Selection is a neutral grey, note fields are plain inputs, and dark-mode text is a neutral off-white.
 - **Icons:** thin line icons, used sparingly. No emoji in the interface.
 - **One primary button per screen,** in ink.
 - **Scope:** this theme covers dev-plumbing's own screens. UI mockups use your app's design kit.
@@ -785,8 +785,8 @@ The subagent may read more files but can't change the repo. Its only write path 
 | `canvas` | `#FFFFFF` | `#1E1E1D` | page background |
 | `cell` | `#FFFFFF` | `#2A2A28` | grouped list cells, cards (hairline border) |
 | `sidebar` | `#F6F6F4` at 86%, blurred | `#262624` at 86%, blurred | sidebar, toolbars, mobile bottom bar |
-| `paper` | `#FFFFE3` | `#3A3A2E` | selected row, note fields, whiteboard canvas |
-| `text` | `#262625` | `#FFFFE3` | primary text |
+| `selection` | `#4A4A4A` at 7% | `#CBCBCB` at 11% | selected row, hovered row |
+| `text` | `#262625` | `#F2F2F0` | primary text |
 | `text-2` | `#4A4A4A` | `#CBCBCB` | secondary text |
 | `text-3` | `#8A8A86` | `#8C8C86` | captions, metadata |
 | `separator` | `#4A4A4A` at 14% | `#CBCBCB` at 14% | hairlines |
@@ -796,7 +796,7 @@ The subagent may read more files but can't change the repo. Its only write path 
 | `moss` | `#5F8A5B` | `#8DB587` | resolved, added lines, Claude listening |
 | `amber` | `#C07A2C` | `#E0A15A` | medium risk, changed |
 | `ochre` | `#A88A25` | `#D9BC5C` | low risk (used rarely) |
-| `button` | `#4A4A4A` with white text | `#FFFFE3` with ink text | the primary action |
+| `button` | `#4A4A4A` with white text | `#F2F2F0` with ink text | the primary action |
 
 **What each colour marks**
 
@@ -811,7 +811,7 @@ The subagent may read more files but can't change the repo. Its only write path 
 | Diagram box: new / changed / unchanged / external | moss / amber / mist / dashed mist outline |
 | Diff line: added / removed | moss / seal text, with + and − |
 | Risk: critical or high / medium / low / info | the label in seal / amber / ochre / `text-3` |
-| Whiteboard | paper canvas, ink marker for structure, slate for data, seal for warnings, moss for "this is safe" |
+| Whiteboard | white canvas (night canvas in dark mode) with a faint dot grid, ink marker for structure, slate for data, seal for warnings, moss for "this is safe" |
 
 **Type scale.** Large title 26/32 bold · Title 20 semibold · Headline 15 semibold · Body 13–14 · Caption 11–12 · Mono 11.5.
 
@@ -931,7 +931,7 @@ Everything below is v1. It's built in this order so each milestone is usable bef
 | Mermaid for diagrams | Generic look, fragile syntax, no checking against the code. Kept only as the export. |
 | Whiteboard Defense as a document only | Drawing and practising teach more than reading |
 | Finalize rewriting the plan in place, or only adding to it | You'd rather keep your original `.md` untouched by Finalize and get a separate, standard `.final.md` |
-| A cream (paper) background in light mode | It looked heavy. The canvas is white, and paper is kept as an accent. |
+| The palette's cream (paper) colour, as background or accent | You found it unattractive, so it's dropped entirely for now |
 
 ## 21. Open questions
 
