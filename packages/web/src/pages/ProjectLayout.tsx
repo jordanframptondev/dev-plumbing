@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { Link, Outlet, useParams } from '@tanstack/react-router';
+import { Link, Outlet, useMatch, useNavigate, useParams } from '@tanstack/react-router';
 import { useState } from 'react';
 import { api } from '../api/client';
 import { Button } from '../components/Button';
@@ -8,12 +8,22 @@ import { Segmented } from '../components/Segmented';
 import { NOT_YET, ProjectHeader } from './ProjectHeader';
 import { ProjectNav } from './ProjectNav';
 
-type Section = 'content' | 'plumbing' | 'defense';
+type Mode = 'view' | 'list' | 'defense';
+type Tab = 'inbox' | 'plumbing' | 'defense';
 
 export function ProjectLayout() {
   const { repo, project } = useParams({ from: '/p/$repo/$project' });
   const home = useQuery({ queryKey: ['projectHome', repo, project], queryFn: () => api.projectHome(repo, project) });
-  const [section, setSection] = useState<Section>('content');
+  const navigate = useNavigate();
+  const onInbox = Boolean(useMatch({ from: '/p/$repo/$project/', shouldThrow: false }));
+  const [mode, setMode] = useState<Mode>('view');
+  const tab: Tab = mode === 'defense' ? 'defense' : mode === 'list' ? 'plumbing' : onInbox ? 'inbox' : 'plumbing';
+  const changeTab = (next: Tab) => {
+    if (next === 'inbox') {
+      void navigate({ to: '/p/$repo/$project', params: { repo, project } });
+      setMode('view');
+    } else setMode(next === 'plumbing' ? 'list' : 'defense');
+  };
 
   if (home.error) return <PageMessage title="Couldn't open this plumbing project" body={(home.error as Error).message} />;
   if (!home.data) return <PageMessage title="Loading…" />;
@@ -34,24 +44,24 @@ export function ProjectLayout() {
         </Link>
         <ProjectHeader home={d} repo={repo} project={project} />
         <div className="mt-4 md:hidden">
-          <Segmented<Section>
+          <Segmented<Tab>
             label="Project sections"
-            value={section}
-            onChange={setSection}
+            value={tab}
+            onChange={changeTab}
             options={[
-              { value: 'content', label: 'Inbox' },
+              { value: 'inbox', label: 'Inbox' },
               { value: 'plumbing', label: 'Plumbing' },
               { value: 'defense', label: 'Defense' },
             ]}
           />
         </div>
-        {section === 'plumbing' && (
+        {mode === 'list' && (
           <div className="mt-3 md:hidden">
-            <ProjectNav home={d} repo={repo} project={project} onNavigate={() => setSection('content')} />
+            <ProjectNav home={d} repo={repo} project={project} onNavigate={() => setMode('view')} />
           </div>
         )}
-        {section === 'defense' && <p className="mt-6 text-[13px] text-ink-3 md:hidden">Whiteboard Defense arrives in a later update.</p>}
-        <div className={section === 'content' ? 'mt-4' : 'mt-4 hidden md:block'}>
+        {mode === 'defense' && <p className="mt-6 text-[13px] text-ink-3 md:hidden">Whiteboard Defense arrives in a later update.</p>}
+        <div className={mode === 'view' ? 'mt-4' : 'mt-4 hidden md:block'}>
           <Outlet />
         </div>
       </main>

@@ -78,4 +78,16 @@ test.describe('on a phone', () => {
     await expect(page.getByTestId('no-changes')).toBeVisible();
     expect(await noSideScroll(page)).toEqual([]);
   });
+
+  test('the Inbox tab always goes back to the inbox', async ({ page }) => {
+    await page.goto(PROJECT);
+    await page.getByRole('tab', { name: 'Plumbing' }).click();
+    await page.getByRole('main').getByTestId('nav-type-security').click();
+    await expect(page.getByTestId('no-changes')).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Plumbing' })).toHaveAttribute('aria-selected', 'true');
+    await page.getByRole('tab', { name: 'Inbox' }).click();
+    await expect(page).toHaveURL(/\/p\/acme\/restock-reminders$/);
+    await expect(page.getByTestId('inbox')).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Inbox' })).toHaveAttribute('aria-selected', 'true');
+  });
 });
