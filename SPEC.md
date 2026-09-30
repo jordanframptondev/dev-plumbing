@@ -12,8 +12,9 @@ Status: design draft for review · 2026-09-30 · no code yet
   - **shown as lists:** Questions, Concerns, Ideas, Phases, Testing & rollout, Security.
 - **Every item has its own conversation thread.** You always see what's waiting on you, what's with Claude, and what's resolved. Claude's choices come as radio buttons, each with an optional note, plus a Custom answer.
 - **Send one thread or Submit all.** Your main Claude window gets the list and starts **one subagent per thread**. The window only ever sees one-line summaries, so its context never fills up.
-- Accepted answers are **written into the original `.md`**. **Finalize spec** then rewrites the `.md` into a clean structure an AI can build from exactly as designed, with Mermaid diagrams included.
+- Accepted answers are **written into the original `.md`** as you go. **Finalize spec** then writes a separate **`<name>.final.md`** next to it, in a standard structure an AI can build from exactly as designed, with Mermaid diagrams and the mockups alongside.
 - **Whiteboard Defense** turns the plumbing project into something you can explain on a whiteboard before you ship, in three modes: **Present** (an animated whiteboard), **Study** (a 13-part guide) and **Practice** (flashcards and a checklist).
+- **The Ink wash look**, Apple-style: a white canvas (ink night in dark mode), ink text and a slate accent. Seal red, moss, amber and ochre appear only as small signals. One column on mobile.
 - **Everything is tunable in plain files** in `~/.dev-plumbing/`: settings, agent config, repo profiles, and one **rules file per plumbing type**. Adding a plumbing type means adding one Markdown file. A README and the in-app help explain every setting.
 
 ## Decisions so far
@@ -24,7 +25,9 @@ Status: design draft for review · 2026-09-30 · no code yet
 | Input | Any Markdown plan, usually a Superpowers spec. |
 | Who answers threads | Your **main Claude window**. It receives each submission and starts **subagents**: one per thread, or one per group of closely linked threads. |
 | Sending | **Send this thread**, or **Submit all** (every thread with new input from you). |
-| The `.md` | Stays in git where it was written. Accepted changes are written into it. **Finalize spec** rewrites it into the final AI-ready structure, with Mermaid diagrams. |
+| The `.md` | Stays in git where it was written. Accepted changes are written into it as you go. **Finalize spec** never touches it: it writes `<name>.final.md` (the standard AI-ready structure, with Mermaid diagrams) and `<name>.assets/` (mockups) next to it. |
+| Look | **Ink wash**, Apple-style. White canvas in light mode, ink night in dark mode; follows the system, with a toggle. Colour only as dots, text and thin lines. One column on mobile. See §16. |
+| Defaults | Projects folder `~/dev-plumbing-projects`. Sonnet for imports and threads, Opus for Finalize and Whiteboard Defense. |
 | Auto-apply | Small things (wording, typos, diagram layout) apply straight away with Undo. Anything that changes meaning waits for you. |
 | Answering | Radio buttons, each with an optional note, plus a Custom answer. Open items can be answered inline in lists. |
 | Service | Runs on its own, whether or not Claude is running, on the **fixed port 4545**. **Starts at login** by default. You can work in the app any time; replies from Claude need a Claude window. |
@@ -72,7 +75,7 @@ Planning a large feature produces one big Markdown file full of design choices, 
 
 ```
 brainstorming ──► plan .md ──► /dev-plumbing plan.md ──► Finalize spec ──► writing-plans ──► build
-                  in git       threads, views, answers   same .md, AI-ready     (or GSD / Deep Trilogy)
+                  in git       threads, views, answers   plan.final.md          (or GSD / Deep Trilogy)
                                          └──► Whiteboard Defense (before shipping; later on the code diff)
 ```
 
@@ -335,7 +338,7 @@ Every setting is defined once in code, as a Zod schema with a description. `dev-
 
 ### 8.4 Finalize and defend
 
-13. **Finalize spec** (§11) rewrites the `.md` into its final structure. You see a diff and accept it first.
+13. **Finalize spec** (§11) writes `<name>.final.md` next to the plan. You preview it and accept it first.
 14. **Whiteboard Defense** (§12) can be generated any time. It's most useful after Finalize, and again after the code is written.
 
 ```mermaid
@@ -376,8 +379,8 @@ sequenceDiagram
     You->>BR: Finalize spec
     MW->>SA: finalizer
     SA->>MCP: proposed final .md
-    You->>BR: review the diff and accept
-    SV->>SV: write the .md, copy mockups next to it
+    You->>BR: review the preview and accept
+    SV->>SV: write name.final.md and name.assets next to the plan
 ```
 
 ---
@@ -386,13 +389,13 @@ sequenceDiagram
 
 **Statuses**
 
-| Status | Colour | Meaning |
+| Status | Mark | Meaning |
 |---|---|---|
-| Your turn | orange | Claude replied or asked something |
-| Draft | blue | You've typed or picked something but haven't sent it |
-| With Claude | purple | A subagent is working on it |
-| Resolved | green | Settled. Recorded as a decision and written into the `.md`. |
-| Parked | grey | Set aside |
+| Your turn | seal dot | Claude replied or asked something |
+| Draft | slate ring | You've typed or picked something but haven't sent it |
+| With Claude | dashed slate ring | A subagent is working on it |
+| Resolved | moss check | Settled. Recorded as a decision and written into the `.md`. |
+| Parked | mist dot | Set aside |
 | Idle | none | Nothing needed right now |
 
 **Answering.** When Claude offers options you see radio buttons. The chosen one opens a note box, and **Custom answer** is always last. With no options, you get a plain text box. Answered choices stay in the thread, greyed out, with your note.
@@ -482,9 +485,9 @@ Mockups from the design sessions exist locally. They're not in the repo.
 
 1. **Before starting,** a checklist shows: blocking items open (these block Finalize), pending proposals, unanswered non-blocking questions (their defaults will be used), and unreviewed items (a warning only).
 2. **Start** runs the finalizer.
-3. **Review:** a side-by-side diff of the old and new `.md`.
-4. **Accept** writes the `.md` and copies the mockups next to it.
-5. **After:** the project moves to Finalized, and the app suggests the next command (e.g. `writing-plans`).
+3. **Review:** a preview of `<name>.final.md`, with a diff against the last finalized version if there is one.
+4. **Accept** writes `<name>.final.md` and `<name>.assets/` next to the plan. The original `.md` is left as it is.
+5. **After:** the project moves to Finalized, and the app suggests the next command (e.g. `writing-plans docs/specs/restock-reminders.final.md`).
 
 ### 10.6 Whiteboard Defense
 
@@ -507,14 +510,18 @@ This is a tab in the plumbing project, switching between **Present**, **Study** 
 
 ## 11. Finalize spec: an `.md` built for AI implementers
 
-Finalize **rewrites the whole `.md`** into a fixed structure, defined by `outputs/finalize.md`, so an implementing AI has everything it needs in the order it needs it. The default structure:
+Finalize writes a **new file next to the plan**, `<name>.final.md`, in a fixed structure defined by `outputs/finalize.md`. That gives an implementing AI everything it needs, in the order it needs it.
+- **The original `.md` is never touched by Finalize.**
+- **Running Finalize again** overwrites `.final.md`, after a preview.
+
+The default structure:
 
 1. **Title and summary:** one paragraph.
 2. **Goals and non-goals.**
 3. **Decisions:** each with the decision, why, and the alternatives rejected. Defaults that were used are flagged.
 4. **Architecture:** a Mermaid flowchart generated from the diagram data, and what each component does.
 5. **Data model:** exact schema diff blocks, the migration, backfill and rollback.
-6. **UI changes:** per screen, where it lives (app, route, files), what changes, and a link to its mockup HTML (copied to `<spec-name>.assets/`).
+6. **UI changes:** per screen, where it lives (app, route, files), what changes, and a link to its mockup HTML (copied to `<name>.assets/`).
 7. **Flows:** a Mermaid sequence diagram per system flow, numbered steps per user flow.
 8. **Interfaces:** APIs, jobs, events and integrations.
 9. **Security and permissions.**
@@ -524,7 +531,7 @@ Finalize **rewrites the whole `.md`** into a fixed structure, defined by `output
 13. **Notes for the implementer:** files likely to change, the repo profile's conventions, things not to do, and assumptions made.
 14. **Open items:** non-blocking only, each with the default used.
 
-**The gate.** Finalize won't run while blocking questions or concerns are open or a proposal is waiting. The old version stays in git history and in dev-plumbing's history.
+**The gate.** Finalize won't run while blocking questions or concerns are open or a proposal is waiting. Earlier `.final.md` versions stay in git and in dev-plumbing's history.
 
 ---
 
@@ -677,7 +684,7 @@ type WhiteboardDefense = {
   sections: { id: string; title: string; claims: Claim[]; tables?: unknown[]; diagramId?: string }[];
   presenter: { chapters: { id: string; title: string;
                steps: { caption: string; reveal: string[];                // node/edge ids
-                        notes?: { near: string; text: string; color: "red" | "blue" | "green" }[] }[] }[] };
+                        notes?: { near: string; text: string; ink: "ink" | "slate" | "seal" | "moss" }[] }[] }[] };
   questions: { id: string; q: string; a: string; basis: Claim["basis"] }[];
   concerns: { severity: "critical" | "high" | "medium" | "low" | "info"; text: string }[];
   checklist: { id: string; text: string }[];
@@ -755,7 +762,75 @@ The subagent may read more files but can't change the repo. Its only write path 
 
 ---
 
-## 16. Code layout
+## 16. Look and feel: Ink wash
+
+**Principles**
+
+- **Apple-style restraint:**
+  - the system font (SF Pro on macOS) and SF Mono for paths, code and diffs
+  - hairline dividers, grouped lists, and a frosted sidebar and toolbars
+  - segmented controls, generous spacing, and 6, 10 and 12 px corner radii.
+- **Backgrounds:** a white canvas in light mode, ink night in dark mode. The app follows the system setting, with a toggle (`settings.theme`).
+- **Colour is a signal, never decoration.** It appears only as dots, text, thin lines and small markers.
+  - **Never:** tinted info boxes, gradients, glows, purple or indigo, sparkle icons, "AI" badges, heavy shadows.
+- **Paper is an accent only:** the selected row, note fields (like a notepad) and the whiteboard canvas.
+- **Icons:** thin line icons, used sparingly. No emoji in the interface.
+- **One primary button per screen,** in ink.
+- **Scope:** this theme covers dev-plumbing's own screens. UI mockups use your app's design kit.
+
+**Tokens**
+
+| Token | Light | Dark | Used for |
+|---|---|---|---|
+| `canvas` | `#FFFFFF` | `#1E1E1D` | page background |
+| `cell` | `#FFFFFF` | `#2A2A28` | grouped list cells, cards (hairline border) |
+| `sidebar` | `#F6F6F4` at 86%, blurred | `#262624` at 86%, blurred | sidebar, toolbars, mobile bottom bar |
+| `paper` | `#FFFFE3` | `#3A3A2E` | selected row, note fields, whiteboard canvas |
+| `text` | `#262625` | `#FFFFE3` | primary text |
+| `text-2` | `#4A4A4A` | `#CBCBCB` | secondary text |
+| `text-3` | `#8A8A86` | `#8C8C86` | captions, metadata |
+| `separator` | `#4A4A4A` at 14% | `#CBCBCB` at 14% | hairlines |
+| `mist` | `#CBCBCB` | `#55554F` | parked, unchanged, quiet fills |
+| `slate` | `#6D8196` | `#93A6BA` | the accent: selection, links, focus, draft, with Claude |
+| `seal` | `#A5503B` | `#D07C63` | needs you, blocking, high and critical risk, removed lines |
+| `moss` | `#5F8A5B` | `#8DB587` | resolved, added lines, Claude listening |
+| `amber` | `#C07A2C` | `#E0A15A` | medium risk, changed |
+| `ochre` | `#A88A25` | `#D9BC5C` | low risk (used rarely) |
+| `button` | `#4A4A4A` with white text | `#FFFFE3` with ink text | the primary action |
+
+**What each colour marks**
+
+| Meaning | Mark |
+|---|---|
+| Your turn | seal dot |
+| Draft | slate ring |
+| With Claude | dashed slate ring |
+| Resolved | moss check |
+| Parked | mist dot |
+| Blocking | the word BLOCKING in seal |
+| Diagram box: new / changed / unchanged / external | moss / amber / mist / dashed mist outline |
+| Diff line: added / removed | moss / seal text, with + and − |
+| Risk: critical or high / medium / low / info | the label in seal / amber / ochre / `text-3` |
+| Whiteboard | paper canvas, ink marker for structure, slate for data, seal for warnings, moss for "this is safe" |
+
+**Type scale.** Large title 26/32 bold · Title 20 semibold · Headline 15 semibold · Body 13–14 · Caption 11–12 · Mono 11.5.
+
+**Responsive**
+
+- **1100 px and wider:** the full layout, with sidebar, content and a detail pane where used.
+- **768–1099 px:** the sidebar becomes a drawer, and content uses at most two columns.
+- **Under 768 px: always one column.**
+  - The sidebar becomes a segmented control (Inbox · Plumbing · Defense) plus a list of plumbing types.
+  - The thread view stacks, and tables become stacked cards.
+  - Diagrams fit the width and pinch to zoom.
+  - The main action (Submit all, Send this thread) stays pinned at the bottom.
+  - Present mode suggests turning the phone to landscape.
+
+**How it's built.** The tokens are CSS variables in one file, `packages/web/src/theme/tokens.css`, mapped into Tailwind v4's `@theme`. shadcn/ui components are restyled to use the tokens; none of shadcn's default colours remain.
+
+---
+
+## 17. Code layout
 
 ```
 dev-plumbing/
@@ -771,6 +846,7 @@ dev-plumbing/
     core/                        # Zod schemas and types, settings and rules loaders, file store, README generator
     service/                     # Hono server, SSE, submissions, .md patching, code-ref checks, login item
     web/                         # React app: screens, diagram renderer, whiteboard, mockup sandbox
+                                 #   src/theme/tokens.css holds the Ink wash tokens (§16)
     mcp/                         # MCP server (stdio), a thin client to the service
     cli/                         # dev-plumbing: setup, start, stop, status, open, docs
   plugin/                        # Claude Code plugin
@@ -781,7 +857,7 @@ dev-plumbing/
   .claude-plugin/marketplace.json   # lets you install the plugin straight from this repo
 ```
 
-## 17. Build order
+## 18. Build order
 
 Everything below is v1. It's built in this order so each milestone is usable before the next starts.
 
@@ -792,7 +868,8 @@ Everything below is v1. It's built in this order so each milestone is usable bef
    - repo scaffolding and core schemas
    - `~/.dev-plumbing` defaults, README generation, and the CLI (`setup`, `start`, `stop`, `status`, `open`, `docs`)
    - the login item
-   - service and web shell: app home, project home, Settings, Plumbing rules.
+   - service and web shell: app home, project home, Settings, Plumbing rules
+   - the Ink wash theme (§16) in light and dark, and the one-column mobile layout, from the first screen.
 3. **The Claude loop:**
    - the plugin (skill, agents, MCP) and repo-setup
    - import with list screens, and threads (radios, note, Custom)
@@ -801,7 +878,7 @@ Everything below is v1. It's built in this order so each milestone is usable bef
    - accepts written into the `.md` with the hash check, auto-apply with Undo
    - + Question / Concern / Idea.
 4. **Visual screens:** the diagram renderer (ELK), Database, UI mockups (kits, pins, Before/After), Flows, and the Phases timeline.
-5. **Finalize spec:** the checklist, finalizer, diff preview, and the `.md` with Mermaid diagrams and mockup assets.
+5. **Finalize spec:** the checklist, finalizer, preview, and `<name>.final.md` with Mermaid diagrams, plus `<name>.assets/`.
 6. **Whiteboard Defense:** generation, Study, Present (Rough.js and Motion), Practice with checklist, sending items to Questions/Concerns, Out of date, Export `.md`.
 
 **v1 is done when**, on a real repo:
@@ -811,9 +888,10 @@ Everything below is v1. It's built in this order so each milestone is usable bef
 4. An accepted proposal changes the `.md`.
 5. Reopening the project from another clone loses nothing.
 6. A submission made with no window listening is picked up by the next `/dev-plumbing`.
-7. **Finalize** produces the AI-ready `.md`.
+7. **Finalize** writes `<name>.final.md` in the standard structure and leaves the original alone.
 8. The Whiteboard Defense plays in Present, reads in Study, and tracks progress in Practice.
 9. Changing a plumbing rules file changes the next import.
+10. Every screen matches the Ink wash spec in light and dark mode and works in one column on a phone.
 
 **Phase 2**
 - Defend the code (Whiteboard Defense on the branch diff)
@@ -827,21 +905,22 @@ Everything below is v1. It's built in this order so each milestone is usable bef
 - a desktop app
 - sync across machines
 
-## 18. Risks and unknowns
+## 19. Risks and unknowns
 
 | Risk | Mitigation |
 |---|---|
 | **Imports from arbitrary Markdown are only as good as Claude's reading** | Every item links to its `.md` lines, and "raised when imported" makes the source visible. You can add items. Rules files let you tune what the importers look for. |
 | **Diagram renderer and whiteboard animation are the biggest build costs** | They're built in milestones 4 and 6, after the loop works. Every drawing reuses the same `DiagramData`. |
-| **Plugin subagents calling MCP tools** | The spike in step 1 of §17, with the JSON fallback |
+| **Plugin subagents calling MCP tools** | The spike in step 1 of §18, with the JSON fallback |
 | **Separate threads conflicting** | Decisions, grouping, cross-check, impact flags (§15) |
 | **Usage cost of Submit all on many threads** | `maxParallel`, plain accepts don't call Claude, and each submission shows what ran |
-| **Finalize rewriting the whole `.md`** | A full diff preview, you accept it, and git history |
+| **The final `.md` drifting from what was decided** | The finalizer gets every decision and item, and you preview `.final.md` before it's written |
+| **The theme sliding back to default component colours** | One tokens file, shadcn/ui restyled to it, and a light, dark and phone check in the v1 "done when" list |
 | **Clashing with Superpowers skills** | The skill says plainly that the plan already exists. Test this. |
 | **Rules-file edits breaking imports** | Headers are validated when loaded, with clear errors on the Plumbing rules page. **Reset to default** is always there. |
 | **The projects folder isn't versioned** | Time Machine for now. Git history in Phase 2. |
 
-## 19. Alternatives considered
+## 20. Alternatives considered
 
 | Option | Why not |
 |---|---|
@@ -851,9 +930,9 @@ Everything below is v1. It's built in this order so each milestone is usable bef
 | Config inside the code repo | The repo is public and generic. Your tuning lives in `~/.dev-plumbing`. |
 | Mermaid for diagrams | Generic look, fragile syntax, no checking against the code. Kept only as the export. |
 | Whiteboard Defense as a document only | Drawing and practising teach more than reading |
+| Finalize rewriting the plan in place, or only adding to it | You'd rather keep your original `.md` untouched by Finalize and get a separate, standard `.final.md` |
+| A cream (paper) background in light mode | It looked heavy. The canvas is white, and paper is kept as an accent. |
 
-## 20. Open questions
+## 21. Open questions
 
-1. **The default projects folder.** Is `~/dev-plumbing-projects` OK? (You pick it during setup anyway.)
-2. **Default models.** Sonnet for import and threads, Opus for Finalize and Whiteboard Defense: OK as defaults?
-3. **Finalize rewrites the whole `.md`** into the §11 structure, after you review the diff. Or would you rather it keep your original headings and only add sections?
+1. **Accepts while plumbing.** Accepted answers still update your original `.md` as you go (your earlier choice), while Finalize writes the separate `.final.md`. Keep it that way, or should the original never change at all, with every accepted answer landing only in `.final.md`?
