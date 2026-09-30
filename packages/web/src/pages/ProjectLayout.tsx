@@ -1,0 +1,65 @@
+import { useQuery } from '@tanstack/react-query';
+import { Link, Outlet, useParams } from '@tanstack/react-router';
+import { useState } from 'react';
+import { api } from '../api/client';
+import { Button } from '../components/Button';
+import { PageMessage } from '../components/PageMessage';
+import { Segmented } from '../components/Segmented';
+import { NOT_YET, ProjectHeader } from './ProjectHeader';
+import { ProjectNav } from './ProjectNav';
+
+type Section = 'content' | 'plumbing' | 'defense';
+
+export function ProjectLayout() {
+  const { repo, project } = useParams({ from: '/p/$repo/$project' });
+  const home = useQuery({ queryKey: ['projectHome', repo, project], queryFn: () => api.projectHome(repo, project) });
+  const [section, setSection] = useState<Section>('content');
+
+  if (home.error) return <PageMessage title="Couldn't open this plumbing project" body={(home.error as Error).message} />;
+  if (!home.data) return <PageMessage title="Loading…" />;
+  const d = home.data;
+  const drafts = d.summary.counts.drafts;
+
+  return (
+    <div className="flex min-h-screen">
+      <aside aria-label="Project navigation" className="sticky top-0 hidden h-screen w-[212px] shrink-0 overflow-y-auto border-r-[0.5px] border-separator bg-sidebar px-2 py-3 backdrop-blur-xl md:block">
+        <Link to="/" className="mb-2 block px-2 text-[12px] text-slate">
+          ‹ All projects
+        </Link>
+        <ProjectNav home={d} repo={repo} project={project} />
+      </aside>
+      <main className="min-w-0 flex-1 px-4 pb-28 pt-3 md:px-7 md:pb-8 md:pt-5">
+        <Link to="/" className="mb-1 inline-block text-[13px] text-slate md:hidden">
+          ‹ Projects
+        </Link>
+        <ProjectHeader home={d} repo={repo} project={project} />
+        <div className="mt-4 md:hidden">
+          <Segmented<Section>
+            label="Project sections"
+            value={section}
+            onChange={setSection}
+            options={[
+              { value: 'content', label: 'Inbox' },
+              { value: 'plumbing', label: 'Plumbing' },
+              { value: 'defense', label: 'Defense' },
+            ]}
+          />
+        </div>
+        {section === 'plumbing' && (
+          <div className="mt-3 md:hidden">
+            <ProjectNav home={d} repo={repo} project={project} onNavigate={() => setSection('content')} />
+          </div>
+        )}
+        {section === 'defense' && <p className="mt-6 text-[13px] text-ink-3 md:hidden">Whiteboard Defense arrives in a later update.</p>}
+        <div className={section === 'content' ? 'mt-4' : 'mt-4 hidden md:block'}>
+          <Outlet />
+        </div>
+      </main>
+      <div className="fixed inset-x-0 bottom-0 border-t-[0.5px] border-separator bg-sidebar px-4 pb-6 pt-3 backdrop-blur-xl md:hidden">
+        <Button variant="primary" size="lg" className="w-full" disabled title={NOT_YET}>
+          Submit all · {drafts} draft{drafts === 1 ? '' : 's'}
+        </Button>
+      </div>
+    </div>
+  );
+}

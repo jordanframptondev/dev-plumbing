@@ -1,15 +1,10 @@
 import { createRootRoute, createRoute, createRouter } from '@tanstack/react-router';
 import { PageMessage } from './components/PageMessage';
-import {
-  DocumentView,
-  InboxView,
-  OutputEditorPage,
-  ProjectLayout,
-  RuleEditorPage,
-  RulesPage,
-  SettingsPage,
-  TypeView,
-} from './pages/placeholders';
+import { OutputEditorPage, RuleEditorPage, RulesPage, SettingsPage } from './pages/placeholders';
+import { DocumentView } from './pages/DocumentView';
+import { InboxView } from './pages/InboxView';
+import { ProjectLayout } from './pages/ProjectLayout';
+import { TypeView } from './pages/TypeView';
 import { AppHome } from './pages/AppHome';
 import { Root } from './pages/Root';
 
