@@ -879,6 +879,7 @@ Everything below is v1. It's built in this order so each milestone is usable bef
 1. **Spike: can plugin subagents call the plugin's MCP tools?**
    - A half-day test before anything else.
    - Fallback: the subagent returns its reply as JSON and the main window posts it.
+   - **Result (Plan 1):** Subagents can call plugin MCP tools directly.
 2. **Foundations:**
    - repo scaffolding and core schemas
    - `~/.dev-plumbing` defaults, README generation, and the CLI (`setup`, `start`, `stop`, `status`, `open`, `docs`)
