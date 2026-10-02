@@ -76,13 +76,16 @@ export function AnswerForm(p: Props) {
     setSaved('saving');
     timer.current = setTimeout(() => {
       if (closed.current) return;
+      dirty.current = false;
       api.saveDraft(p.repo, p.project, p.threadId, current()).then(
         () => {
-          dirty.current = false;
           setSaved('saved');
           refresh();
         },
-        () => setSaved('error'),
+        () => {
+          dirty.current = true;
+          setSaved('error');
+        },
       );
     }, 500);
     return () => clearTimeout(timer.current);
