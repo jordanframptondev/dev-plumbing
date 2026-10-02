@@ -4,15 +4,20 @@ import { InputError, newId, readItems, readThread, writeItem, writeThread } from
 import { slugify } from './open';
 import { fieldProblems } from './validate';
 
-/** The options you can answer now: from Claude's last message (system lines aside), unless that message resolved the thread. */
-export function latestOpen(thread: Pick<Thread, 'messages'>): { message: ClaudeMessage; options: Option[]; recommended?: string } | null {
-  const last = [...thread.messages].reverse().find((m) => m.author !== 'system');
-  if (!last || last.author !== 'claude' || last.resolved || !last.options?.length) return null;
+/**
+ * The options you can answer now: those on Claude's last message, unless that message resolved the thread.
+ * They stay open after you answer, so an answer Claude never got to can be sent again, until a later Claude
+ * message replaces them or the thread is with Claude or resolved.
+ */
+export function latestOpen(thread: Pick<Thread, 'messages' | 'status'>): { message: ClaudeMessage; options: Option[]; recommended?: string } | null {
+  if (thread.status === 'with_claude' || thread.status === 'resolved') return null;
+  const last = [...thread.messages].reverse().find((m): m is ClaudeMessage => m.author === 'claude');
+  if (!last || last.resolved || !last.options?.length) return null;
   return { message: last, options: last.options, ...(last.recommended ? { recommended: last.recommended } : {}) };
 }
 
 /** latestOpen, in the shape the API returns. */
-export function openOptions(thread: Pick<Thread, 'messages'>): OpenOptions | null {
+export function openOptions(thread: Pick<Thread, 'messages' | 'status'>): OpenOptions | null {
   const open = latestOpen(thread);
   return open ? { messageId: open.message.id, options: open.options, ...(open.recommended ? { recommended: open.recommended } : {}) } : null;
 }

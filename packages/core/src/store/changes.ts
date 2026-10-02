@@ -1,8 +1,9 @@
-import { applyMdPatches, invertMdPatches, itemSchema, type Change, type HistoryEntry, type Item, type ItemPatch } from '../schemas';
+import { applyMdPatches, changeState, invertMdPatches, itemSchema, type Change, type HistoryEntry, type Item, type ItemPatch } from '../schemas';
 import {
   ConflictError,
   newId,
   readDocText,
+  readHistory,
   readHistoryEntry,
   readItem,
   readItems,
@@ -63,6 +64,15 @@ async function write(dir: string, change: Change): Promise<Snapshot & { restore:
     throw error;
   }
   return { itemsBefore, itemsAfter, restore };
+}
+
+/**
+ * Whether accepting an option already applied exactly this change on this thread. An answer Claude never got to
+ * comes back as a draft after its change went in, so sending it again must not apply the change a second time.
+ */
+export async function acceptApplied(dir: string, threadId: string, change: Change): Promise<boolean> {
+  const wanted = stable(change);
+  return (await readHistory(dir)).some((h) => h.threadId === threadId && h.kind === 'accept' && changeState(h) === 'applied' && stable(h.change) === wanted);
 }
 
 export async function recordChange(

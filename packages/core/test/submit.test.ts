@@ -1,7 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { readDecisions, readItem, readSubmissions, readThread, writeItem } from '../src/store/io';
+import { readDecisions, readHistory, readItem, readSubmissions, readThread, writeItem } from '../src/store/io';
+import { finishSubmission, pickUp } from '../src/store/queue';
 import { submit } from '../src/store/submit';
 import { addOwnItem, latestOpen, saveDraft, setParked } from '../src/store/threads';
 import { removeTempDirs } from '../../../testkit/tmp';
@@ -45,6 +46,16 @@ describe('drafts and parking', () => {
     thread.messages.push({ id: 's', at: AT, author: 'system', text: 'Might conflict with another answer.' });
     expect(latestOpen(thread)?.options.map((o) => o.id)).toEqual(['per-send', 'per-sub']);
     thread.messages.push({ id: 'y', at: AT, author: 'you', optionId: 'per-sub' });
+    thread.status = 'with_claude';
+    expect(latestOpen(thread)).toBeNull();
+  });
+
+  it("keeps Claude's options open until a later Claude message replaces them, or the thread is resolved", async () => {
+    const { thread } = pair('q1', { options });
+    thread.messages.push({ id: 'y', at: AT, author: 'you', optionId: 'per-sub' }, { id: 's', at: AT, author: 'system', text: "Claude didn't get to this one." });
+    expect(latestOpen(thread)?.options.map((o) => o.id)).toEqual(['per-send', 'per-sub']);
+    expect(latestOpen({ ...thread, status: 'resolved' })).toBeNull();
+    thread.messages.push({ id: 'c', at: AT, author: 'claude', text: 'Noted. Anything else?' });
     expect(latestOpen(thread)).toBeNull();
   });
 
@@ -138,6 +149,53 @@ describe('submit', () => {
     await writeItem(dir, { ...(await readItem(dir, 'q1')), flags: [{ reason: 'Retention changed.', fromThreadId: 't-db1', at: AT }] });
     await submit(dir, { scope: 'thread', threadId: 't-q1', types: TYPES });
     expect((await readItem(dir, 'q1')).flags).toBeUndefined();
+  });
+
+  describe("an option answer Claude didn't get to", () => {
+    /** Sends the answer, then the window finishes the submission without replying, so it comes back as a draft. */
+    async function returned(draft: { optionId: string; note?: string }) {
+      const dir = await seedProject({ pairs: [pair('q1', { title: 'Rows per send?', options, draft: { ...draft, updatedAt: AT } })] });
+      const first = await submit(dir, { scope: 'thread', threadId: 't-q1', types: TYPES });
+      expect(first.sent).toEqual(['t-q1']);
+      await pickUp(dir, first.submission.id, 'w-a');
+      expect(await finishSubmission(dir, first.submission.id, [])).toEqual({ returned: ['t-q1'] });
+      expect((await readThread(dir, 't-q1')).draft).toMatchObject(draft);
+      return dir;
+    }
+    const accepts = async (dir: string) => (await readHistory(dir)).filter((h) => h.kind === 'accept' && h.appliedAt);
+
+    for (const note of [undefined, 'Keep it simple.']) {
+      it(`sends again: an option with no change, ${note ? 'with' : 'without'} a note`, async () => {
+        const dir = await returned({ optionId: 'per-sub', ...(note ? { note } : {}) });
+        const again = await submit(dir, { scope: 'thread', threadId: 't-q1', types: TYPES });
+        expect(again).toMatchObject({ sent: ['t-q1'], resolved: [], skipped: [] });
+        expect(await lastOf(dir, 't-q1')).toMatchObject({ author: 'you', optionId: 'per-sub', optionLabel: 'One row per subscription', ...(note ? { note } : {}) });
+        expect((await readThread(dir, 't-q1')).status).toBe('with_claude');
+      });
+    }
+
+    it('sends again: an option with a change and a note, applying the change only once', async () => {
+      const dir = await returned({ optionId: 'per-send', note: 'Delete rows after 180 days.' });
+      expect(await accepts(dir)).toHaveLength(1);
+      const again = await submit(dir, { scope: 'thread', threadId: 't-q1', types: TYPES });
+      expect(again).toMatchObject({ sent: ['t-q1'], resolved: [], skipped: [] });
+      const thread = await readThread(dir, 't-q1');
+      expect(thread.status).toBe('with_claude');
+      expect(thread.messages.at(-1)).toMatchObject({ author: 'you', optionId: 'per-send', note: 'Delete rows after 180 days.' });
+      expect(thread.messages.some((m) => /no longer fits/.test(m.text ?? ''))).toBe(false);
+      expect(await accepts(dir)).toHaveLength(1);
+      expect((await draftOf(dir)).match(/Log one row per send\./g)).toHaveLength(1);
+    });
+
+    it('the same option sent again without its note resolves the thread, still applied only once', async () => {
+      const dir = await returned({ optionId: 'per-send', note: 'Delete rows after 180 days.' });
+      await saveDraft(dir, 't-q1', { optionId: 'per-send' });
+      const again = await submit(dir, { scope: 'thread', threadId: 't-q1', types: TYPES });
+      expect(again).toMatchObject({ resolved: ['t-q1'], sent: [], skipped: [] });
+      expect(await lastOf(dir, 't-q1')).toMatchObject({ author: 'system', text: 'Applied and resolved.' });
+      expect(await accepts(dir)).toHaveLength(1);
+      expect((await readDecisions(dir)).map((d) => d.text)).toEqual(['Rows per send?: One row per send']);
+    });
   });
 
   it('records the submission first and carries on when a thread fails to save', async () => {

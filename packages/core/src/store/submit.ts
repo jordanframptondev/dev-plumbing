@@ -1,5 +1,5 @@
 import type { Message, Option, PlumbingType, Submission, Thread, YouMessage } from '../schemas';
-import { recordChange } from './changes';
+import { acceptApplied, recordChange } from './changes';
 import { addDecision } from './decisions';
 import { ConflictError, newId, readItem, readThreads, StoreError, touchProject, writeItem, writeSubmission, writeThread } from './io';
 import { latestOpen, presetLabel } from './threads';
@@ -42,12 +42,15 @@ async function submitThread(dir: string, thread: Thread, scope: 'thread' | 'all'
   const systemLine = (text: string): Message => ({ id: newId('m', now), at, author: 'system', text });
 
   if (option?.change) {
-    try {
-      await recordChange(dir, { threadId: thread.id, kind: 'accept', summary: `${item.title}: ${option.label}`, change: option.change, apply: true, now });
-    } catch (e) {
-      if (!(e instanceof ConflictError)) throw e;
-      await save('with_claude', [systemLine(`This change no longer fits the draft, so it wasn't applied. Sent to Claude to redo it. (${e.message})`)]);
-      return { kind: 'sent' };
+    // Sent before with a note and came back unanswered: its change is already in, so don't apply it twice.
+    if (!(await acceptApplied(dir, thread.id, option.change))) {
+      try {
+        await recordChange(dir, { threadId: thread.id, kind: 'accept', summary: `${item.title}: ${option.label}`, change: option.change, apply: true, now });
+      } catch (e) {
+        if (!(e instanceof ConflictError)) throw e;
+        await save('with_claude', [systemLine(`This change no longer fits the draft, so it wasn't applied. Sent to Claude to redo it. (${e.message})`)]);
+        return { kind: 'sent' };
+      }
     }
     if (!note) {
       await addDecision(dir, { text: `${item.title}: ${option.label}`, threadId: thread.id, itemIds: [item.id], now });

@@ -84,6 +84,24 @@ test('a failed Send keeps autosave working', async ({ page }) => {
     .toBe('Still saved.');
 });
 
+test("an option answer Claude didn't get to comes back picked, and sends again", async ({ page }) => {
+  const p = await importProject('loop-returned', 'Loop returned', { questions: [rows] });
+  const thread = `/api/projects/${p.repo}/${p.project}/threads/t-questions-rows`;
+  await api(`${thread}/draft`, 'PUT', { optionId: 'per-sub', note: 'Keep it simple.' });
+  await api(`/api/projects/${p.repo}/${p.project}/submit`, 'POST', { scope: 'thread', threadId: 't-questions-rows' });
+  const base = { repo: p.repo, project: p.project, windowId: 'w-e2e-returned', timeoutSeconds: 0 };
+  const picked = await asClaude('/wait', base);
+  await asClaude('/wait', { ...base, finished: { submission: picked.submission } });
+
+  await page.goto(`${p.url}/th/t-questions-rows`);
+  await expect(page.getByText(/didn't get to this one/)).toBeVisible();
+  await expect(page.getByRole('radio', { name: /One row per subscription/ })).toBeChecked();
+  await expect(page.getByRole('textbox', { name: 'Note for One row per subscription' })).toHaveValue('Keep it simple.');
+  await page.getByRole('button', { name: 'Send this thread' }).click();
+  await expect(page.getByTestId('thread-status')).toHaveText('With Claude');
+  expect((await api(thread)).thread.messages.at(-1)).toMatchObject({ author: 'you', optionId: 'per-sub', note: 'Keep it simple.' });
+});
+
 test('only one primary button on the desktop thread view', async ({ page }) => {
   const p = await importProject('loop-primary', 'Loop primary', { questions: [rows] });
   await page.goto(`${p.url}/th/t-questions-rows`);
