@@ -45,7 +45,7 @@ export function ProjectLayout() {
         <Link to="/" className="mb-1 inline-block text-[13px] text-slate md:hidden">
           ‹ Projects
         </Link>
-        <ProjectHeader home={d} repo={repo} project={project} submitAll={submitAll} />
+        <ProjectHeader home={d} repo={repo} project={project} submitAll={submitAll} submitPrimary={!onThread} />
         <div className="mt-4 md:hidden">
           <Segmented<Tab>
             label="Project sections"

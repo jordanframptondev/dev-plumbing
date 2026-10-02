@@ -50,6 +50,32 @@ test('a plain accept applies straight away and resolves the thread', async ({ pa
   await expect(page.getByRole('button', { name: 'Park' })).toBeHidden();
 });
 
+test("a note on another option isn't sent", async ({ page }) => {
+  const p = await importProject('loop-hidden', 'Loop hidden note', { questions: [rows] });
+  await page.goto(`${p.url}/th/t-questions-rows`);
+  await page.getByRole('radio', { name: /One row per send/ }).check();
+  await page.getByRole('textbox', { name: 'Note for One row per send' }).fill('Delete rows after 180 days.');
+  await page.getByRole('radio', { name: /One row per subscription/ }).check();
+  await page.getByRole('radio', { name: /One row per send/ }).check();
+  await expect(page.getByRole('textbox', { name: 'Note for One row per send' })).toHaveValue('Delete rows after 180 days.');
+  // A note typed for another option stays out of the draft: this plain accept still resolves.
+  await page.getByRole('radio', { name: /One row per subscription/ }).check();
+  await page.getByRole('textbox', { name: 'Note for One row per subscription' }).fill('Not this one.');
+  await page.getByRole('radio', { name: /One row per send/ }).check();
+  await page.getByRole('textbox', { name: 'Note for One row per send' }).fill('');
+  await page.getByRole('button', { name: 'Send this thread' }).click();
+  await expect(page.getByTestId('send-notice')).toHaveText('Applied. 1 thread resolved.');
+  await expect(page.getByTestId('thread-status')).toHaveText('Resolved');
+});
+
+test('only one primary button on the desktop thread view', async ({ page }) => {
+  const p = await importProject('loop-primary', 'Loop primary', { questions: [rows] });
+  await page.goto(`${p.url}/th/t-questions-rows`);
+  await expect(page.getByRole('button', { name: 'Send this thread' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Submit all/ }).first()).not.toHaveClass(/bg-button/);
+  await expect(page.getByRole('button', { name: 'Send this thread' })).toHaveClass(/bg-button/);
+});
+
 test('Custom answer, Park, and a thread with no options', async ({ page }) => {
   const p = await importProject('loop-custom', 'Loop custom', { questions: [rows, channels] });
   await page.goto(`${p.url}/th/t-questions-rows`);

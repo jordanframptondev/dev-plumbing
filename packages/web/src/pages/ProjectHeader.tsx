@@ -6,7 +6,7 @@ import { ListeningMark } from '../components/ListeningMark';
 import { ProgressBar } from '../components/ProgressBar';
 import { draftsLabel, type useSubmit } from '../lib/useSubmit';
 
-export function ProjectHeader({ home, repo, project, submitAll }: { home: ProjectHome; repo: string; project: string; submitAll: ReturnType<typeof useSubmit> }) {
+export function ProjectHeader({ home, repo, project, submitAll, submitPrimary = true }: { home: ProjectHome; repo: string; project: string; submitAll: ReturnType<typeof useSubmit>; submitPrimary?: boolean }) {
   const s = home.summary;
   const src = home.project.source;
   const open = useMutation({ mutationFn: () => api.open({ target: 'source', repo, id: project }) });
@@ -17,7 +17,7 @@ export function ProjectHeader({ home, repo, project, submitAll }: { home: Projec
         <div className="hidden gap-2 md:flex">
           <Button disabled title="Whiteboard Defense arrives in a later update.">Whiteboard Defense</Button>
           <Button disabled title="Finalize spec arrives in a later update.">Finalize spec</Button>
-          <Button variant="primary" disabled={!s.counts.drafts || submitAll.isPending} onClick={() => submitAll.mutate({ scope: 'all' })}>
+          <Button variant={submitPrimary ? 'primary' : 'secondary'} disabled={!s.counts.drafts || submitAll.isPending} onClick={() => submitAll.mutate({ scope: 'all' })}>
             Submit all · {draftsLabel(s.counts.drafts)}
           </Button>
         </div>

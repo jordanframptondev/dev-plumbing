@@ -19,6 +19,11 @@ const STATUS_TEXT: Record<DisplayStatus, string> = {
 };
 
 export function ThreadView() {
+  const { thread } = useParams({ from: '/p/$repo/$project/th/$thread' });
+  return <ThreadBody key={thread} />;
+}
+
+function ThreadBody() {
   const { repo, project, thread } = useParams({ from: '/p/$repo/$project/th/$thread' });
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['thread', repo, project, thread], queryFn: () => api.thread(repo, project, thread) });
