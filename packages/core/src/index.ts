@@ -21,4 +21,5 @@ export * from './store/submit';
 export * from './store/reply';
 export * from './store/queue';
 export * from './store/context';
+export * from './store/detail';
 export * from './docDiff';

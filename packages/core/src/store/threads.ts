@@ -1,4 +1,4 @@
-import type { ClaudeMessage, Item, Message, Option, PlumbingType, Thread } from '../schemas';
+import type { ClaudeMessage, Item, Message, OpenOptions, Option, PlumbingType, Thread } from '../schemas';
 import { uniqueId } from './importItems';
 import { InputError, newId, readItems, readThread, writeItem, writeThread } from './io';
 import { slugify } from './open';
@@ -9,6 +9,12 @@ export function latestOpen(thread: Pick<Thread, 'messages'>): { message: ClaudeM
   const last = [...thread.messages].reverse().find((m) => m.author !== 'system');
   if (!last || last.author !== 'claude' || last.resolved || !last.options?.length) return null;
   return { message: last, options: last.options, ...(last.recommended ? { recommended: last.recommended } : {}) };
+}
+
+/** latestOpen, in the shape the API returns. */
+export function openOptions(thread: Pick<Thread, 'messages'>): OpenOptions | null {
+  const open = latestOpen(thread);
+  return open ? { messageId: open.message.id, options: open.options, ...(open.recommended ? { recommended: open.recommended } : {}) } : null;
 }
 
 export function presetLabel(types: PlumbingType[], item: Pick<Item, 'type'>, optionId: string): string | undefined {

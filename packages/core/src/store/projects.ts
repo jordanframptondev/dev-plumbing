@@ -2,7 +2,9 @@ import fs from 'node:fs/promises';
 import type { Dirent } from 'node:fs';
 import path from 'node:path';
 import { expandHome } from '../paths';
-import { docPath, readItems, readJsonFile, readThreads } from './io';
+import { activeDecisions } from './decisions';
+import { docPath, readDecisions, readItems, readJsonFile, readThreads } from './io';
+import { openOptions } from './threads';
 import {
   countThreads,
   displayStatus,
@@ -186,7 +188,7 @@ export async function loadProjectHome(ref: ProjectRef, types: PlumbingType[]): P
         : ofType.length === 0 && project.status !== 'importing'
           ? { reason: 'No items were found for this plumbing type.' }
           : null;
-      return { id: t.id, title: t.title, order: t.order, screen: t.screen, emptyMessage: t.emptyMessage, itemCount: ofType.length, yourTurn: c.yourTurn, drafts: c.drafts, withClaude: c.withClaude, resolved: c.resolved, noChanges };
+      return { id: t.id, title: t.title, order: t.order, screen: t.screen, emptyMessage: t.emptyMessage, itemCount: ofType.length, yourTurn: c.yourTurn, drafts: c.drafts, withClaude: c.withClaude, resolved: c.resolved, noChanges, fields: t.fields, answerPresets: t.answerPresets, ...(t.addLabel ? { addLabel: t.addLabel } : {}) };
     });
 
   const inbox: InboxEntry[] = threads
@@ -222,11 +224,27 @@ export async function loadTypeItems(ref: ProjectRef, types: PlumbingType[], type
   const { values: items } = await readItems(ref.dir);
   const { values: threads } = await readThreads(ref.dir);
   const byId = new Map(threads.map((t) => [t.id, t]));
+  const decisions = activeDecisions(await readDecisions(ref.dir));
   const rows = items
     .filter((i) => i.type === typeId)
     .map((i): TypeItemRow => {
       const th = byId.get(i.threadId);
-      return { id: i.id, title: i.title, summary: i.summary, status: th ? displayStatus(th) : 'idle', blocking: i.fields?.blocking === 'true' };
+      const last = th ? [...th.messages].reverse().find((m) => m.text) : undefined;
+      return {
+        id: i.id,
+        threadId: i.threadId,
+        title: i.title,
+        summary: i.summary,
+        status: th ? displayStatus(th) : 'idle',
+        blocking: i.fields?.blocking === 'true',
+        fields: i.fields ?? {},
+        messageCount: th?.messages.length ?? 0,
+        latest: last?.text ? { author: last.author, text: last.text } : null,
+        open: th ? openOptions(th) : null,
+        draft: th?.draft ?? null,
+        decision: [...decisions].reverse().find((d) => d.threadId === i.threadId)?.text ?? null,
+        flagged: Boolean(i.flags?.length),
+      };
     })
     .sort((a, b) => a.title.localeCompare(b.title));
   return { type, items: rows };

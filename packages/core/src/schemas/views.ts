@@ -1,4 +1,5 @@
-import type { PlumbingProject, Thread } from './project';
+import type { ChangeState, Decision, Option, ThreadDraft } from './loop';
+import type { Item, PlumbingProject, Thread } from './project';
 import type { Screen } from './plumbingType';
 
 export type ConfigProblem = { file: string; key?: string; message: string };
@@ -65,6 +66,9 @@ export type TypeEntry = {
   withClaude: number;
   resolved: number;
   noChanges: { reason: string } | null;
+  fields: string[];
+  answerPresets: string[];
+  addLabel?: string;
 };
 
 export type InboxEntry = {
@@ -87,7 +91,13 @@ export type ProjectHome = {
   listening?: ListeningState;
 };
 
-export type TypeItemRow = { id: string; title: string; summary: string; status: DisplayStatus; blocking: boolean };
+export type OpenOptions = { messageId: string; options: Option[]; recommended?: string };
+
+export type TypeItemRow = {
+  id: string; threadId: string; title: string; summary: string; status: DisplayStatus; blocking: boolean;
+  fields: Record<string, string>; messageCount: number; latest: { author: 'you' | 'claude' | 'system'; text: string } | null;
+  open: OpenOptions | null; draft: ThreadDraft | null; decision: string | null; flagged: boolean;
+};
 
 /** A projects folder that couldn't be read while listing plumbing projects. */
 export type DiscoveryProblem = { folder: string; message: string };
@@ -99,3 +109,19 @@ export type DiffSegment = {
 };
 export type FieldChange = { field: string; before: string; after: string };
 export type ChangePreview = { md: DiffSegment[] | null; items: { itemId: string; title: string; changes: FieldChange[] }[]; problem?: string };
+
+export type ThreadDetail = {
+  thread: Thread & { display: DisplayStatus };
+  item: Item;
+  type: { id: string; title: string; screen: Screen; fields: string[]; answerPresets: string[] };
+  open: OpenOptions | null;
+  previews: Record<string, ChangePreview>;
+  linked: { itemId: string; threadId: string; title: string; typeTitle: string }[];
+  refs: Record<string, { title: string; threadId: string; typeTitle: string }>;
+  edits: Record<string, { state: ChangeState; summary: string }>;
+  decisions: Decision[];
+  listening: ListeningState;
+};
+export type SubmitResponse = { resolved: number; sent: number; skipped: { threadId: string; reason: string }[]; listening: ListeningState; message: string };
+export type ChangeEntry = { id: string; at: string; kind: 'small-edit' | 'accept'; summary: string; state: ChangeState; threadId: string; threadTitle: string };
+export type ChangesResponse = { segments: DiffSegment[]; entries: ChangeEntry[] };
