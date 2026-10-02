@@ -104,16 +104,18 @@ export function createDpServer(o: { client: ServiceClient; cwd: string; windowId
       const token = extra._meta?.progressToken;
       let finished = args.finished;
       let beat = 0;
+      let failures = 0;
       while (true) {
         const t0 = Date.now();
         try {
           const r = await o.client.call<{ kind: string }>('/wait', { repo: args.repo, project: args.project, windowId: o.windowId, ...(finished ? { finished } : {}) }, extra.signal);
           finished = undefined;
+          failures = 0;
           if (r.kind === 'submission') return ok(r);
         } catch (e) {
           if (extra.signal.aborted) return failed(new Error('Stopped listening.'));
-          // A restarting service answers 503 or can't be reached for a moment. Anything else is a real error.
-          if (!(e instanceof ServiceError) || e.status !== 503) return failed(e);
+          // Only a service that is restarting or briefly unreachable is worth waiting out. A broken install or a real error is not.
+          if (!(e instanceof ServiceError) || !e.retryable || ++failures >= 5) return failed(e);
         }
         if (extra.signal.aborted) return failed(new Error('Stopped listening.'));
         const minutes = Math.floor((Date.now() - started) / 60_000);

@@ -13,7 +13,7 @@ const server = createDpServer({
   windowId,
   // Once this window opens a project, ping every 30 s so the app knows it's alive, even while subagents work.
   onActive: () => {
-    setInterval(() => void client.call('/alive', { windowId }).catch(() => undefined), 30_000).unref();
+    setInterval(() => void client.call('/alive', { windowId }, undefined, { start: false }).catch(() => undefined), 30_000).unref();
   },
 });
 

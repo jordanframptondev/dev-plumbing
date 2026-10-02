@@ -49,4 +49,28 @@ describe('the service client', () => {
     expect(err).toBeInstanceOf(ServiceError);
     expect(err).toMatchObject({ status: 400, message: 'Nothing was saved. Fix these.' });
   });
+
+  it('starts the service once when calls arrive together', async () => {
+    const dir = tempDir('dp-mcp-');
+    let starts = 0;
+    const client = serviceClient({
+      configDir: dir,
+      ensureRunning: async () => {
+        starts++;
+        await new Promise((r) => setTimeout(r, 30));
+        await writeRunFile(dir, run);
+      },
+      fetch: async () => json(200, { ok: true }),
+    });
+    await Promise.all([client.call('/alive', {}), client.call('/alive', {})]);
+    expect(starts).toBe(1);
+  });
+
+  it("doesn't start the service for a call that says not to", async () => {
+    const dir = tempDir('dp-mcp-');
+    let starts = 0;
+    const client = serviceClient({ configDir: dir, ensureRunning: async () => { starts++; }, fetch: async () => json(200, {}) });
+    await expect(client.call('/alive', {}, undefined, { start: false })).rejects.toMatchObject({ status: 503, retryable: true });
+    expect(starts).toBe(0);
+  });
 });

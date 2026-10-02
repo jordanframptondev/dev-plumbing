@@ -4,12 +4,20 @@ import { startService } from './start';
 
 export { ServiceError };
 
-export type ServiceClient = { call<T = unknown>(path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> };
+export type ServiceClient = { call<T = unknown>(path: string, body: Record<string, unknown>, signal?: AbortSignal, opts?: { start?: boolean }): Promise<T> };
 
 /** Talks to the local service as Claude: POST /api/claude/<path> with the run-file token. */
 export function serviceClient(o: { configDir: string; fetch?: typeof fetch; ensureRunning?: () => Promise<void> }): ServiceClient {
   const doFetch = o.fetch ?? fetch;
-  const ensureRunning = o.ensureRunning ?? (() => startService(o.configDir));
+  const start = o.ensureRunning ?? (() => startService(o.configDir));
+  // One start at a time: concurrent callers wait on the same attempt.
+  let starting: Promise<void> | null = null;
+  const ensureRunning = (): Promise<void> => {
+    starting ??= start().finally(() => {
+      starting = null;
+    });
+    return starting;
+  };
 
   /** null means "couldn't reach it": no run file, or the connection failed. */
   async function attempt(path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<{ data: unknown } | null> {
@@ -33,13 +41,14 @@ export function serviceClient(o: { configDir: string; fetch?: typeof fetch; ensu
   }
 
   return {
-    async call<T>(path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
+    async call<T>(path: string, body: Record<string, unknown>, signal?: AbortSignal, opts?: { start?: boolean }): Promise<T> {
       const first = await attempt(path, body, signal);
       if (first) return first.data as T;
+      if (opts?.start === false) throw new ServiceError(503, "dev-plumbing isn't running.", true);
       await ensureRunning();
       const second = await attempt(path, body, signal);
       if (second) return second.data as T;
-      throw new ServiceError(503, "dev-plumbing isn't running and couldn't be started. Run dev-plumbing start in a terminal.");
+      throw new ServiceError(503, "dev-plumbing isn't running and couldn't be started. Run dev-plumbing start in a terminal.", true);
     },
   };
 }

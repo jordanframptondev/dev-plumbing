@@ -82,7 +82,7 @@ describe('the dp tools', () => {
     const { client } = fakeService({
       '/wait': () => {
         polls++;
-        if (polls === 1) throw new ServiceError(503, 'restarting');
+        if (polls === 1) throw new ServiceError(503, 'restarting', true);
         return { kind: 'timeout' };
       },
     });
@@ -91,5 +91,26 @@ describe('the dp tools', () => {
     expect(r.isError).toBeFalsy();
     expect(JSON.parse(textOf(r))).toMatchObject({ kind: 'still-waiting' });
     expect(polls).toBeGreaterThan(1);
+  });
+
+  it('a broken install surfaces at once', async () => {
+    let polls = 0;
+    const msg = "dev-plumbing isn't set up on this Mac. Run dev-plumbing setup in a terminal.";
+    const { client } = fakeService({ '/wait': () => { polls++; throw new ServiceError(503, msg); } });
+    const mcp = await connect(createDpServer({ client, cwd: '/repo', windowId: 'w-1', retryMs: 1 }));
+    const r = await mcp.callTool({ name: 'dp_wait', arguments: { repo: 'acme', project: 'p' } });
+    expect(r.isError).toBe(true);
+    expect(textOf(r)).toBe(msg);
+    expect(polls).toBe(1);
+  });
+
+  it('gives up after five failed restarts in a row', async () => {
+    let polls = 0;
+    const { client } = fakeService({ '/wait': () => { polls++; throw new ServiceError(503, 'restarting', true); } });
+    const mcp = await connect(createDpServer({ client, cwd: '/repo', windowId: 'w-1', retryMs: 1 }));
+    const r = await mcp.callTool({ name: 'dp_wait', arguments: { repo: 'acme', project: 'p' } });
+    expect(r.isError).toBe(true);
+    expect(textOf(r)).toBe('restarting');
+    expect(polls).toBe(5);
   });
 });
