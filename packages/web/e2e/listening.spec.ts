@@ -33,3 +33,15 @@ test("Claude's reply appears without reloading", async ({ page }) => {
   await expect(page.getByText('Your turn · 1')).toBeVisible();
   await expect(page.getByText('Claude: Both it is. Want SMS first?')).toBeVisible();
 });
+
+test.describe('on a phone', () => {
+  test.use({ viewport: { width: 375, height: 812 } });
+  test('Submit all says what happened right by the button', async ({ page }) => {
+    const p = await importProject('quiet-phone', 'Quiet phone', { questions: [question] });
+    await api(`/api/projects/${p.repo}/${p.project}/threads/t-questions-channels/draft`, 'PUT', { text: 'Both.' });
+    await page.goto(p.url);
+    await page.getByRole('button', { name: 'Submit all · 1 draft' }).click();
+    await expect(page.getByTestId('submit-notice-phone')).toHaveText('Saved. No Claude window is listening. Run /dev-plumbing in any clone.');
+    await expect(page.getByTestId('submit-notice-phone')).toBeInViewport();
+  });
+});

@@ -47,7 +47,7 @@ export function ProjectHeader({ home, repo, project, submitAll }: { home: Projec
         <ListeningMark state={home.listening} />
       </div>
       {(submitAll.data || submitAll.error) && (
-        <p role="status" data-testid="submit-notice" className={`mt-2 text-[12.5px] ${submitAll.error ? 'text-seal' : 'text-ink-2'}`}>
+        <p role="status" data-testid="submit-notice" className={`mt-2 hidden md:block text-[12.5px] ${submitAll.error ? 'text-seal' : 'text-ink-2'}`}>
           {submitAll.error ? (submitAll.error as Error).message : submitAll.data?.message}
         </p>
       )}

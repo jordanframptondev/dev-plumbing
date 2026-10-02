@@ -68,6 +68,11 @@ export function ProjectLayout() {
         </div>
       </main>
       <div className="fixed inset-x-0 bottom-0 border-t-[0.5px] border-separator bg-sidebar px-4 pb-6 pt-3 backdrop-blur-xl md:hidden">
+        {(submitAll.data || submitAll.error) && (
+          <p role="status" data-testid="submit-notice-phone" className={`mb-2 text-[12.5px] ${submitAll.error ? 'text-seal' : 'text-ink-2'}`}>
+            {submitAll.error ? (submitAll.error as Error).message : submitAll.data?.message}
+          </p>
+        )}
         <Button variant="primary" size="lg" className="w-full" disabled={!drafts || submitAll.isPending} onClick={() => submitAll.mutate({ scope: 'all' })}>
           Submit all · {draftsLabel(drafts)}
         </Button>

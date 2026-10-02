@@ -8,14 +8,19 @@ export function useLiveUpdates(): void {
   useEffect(() => {
     if (typeof EventSource === 'undefined') return;
     const source = new EventSource('/api/events');
+    let connected = false;
     source.onmessage = (message) => {
-      let event: LiveEvent;
+      let event: LiveEvent | { type: 'hello' };
       try {
-        event = JSON.parse(message.data) as LiveEvent;
+        event = JSON.parse(message.data) as LiveEvent | { type: 'hello' };
       } catch {
         return;
       }
-      if (event.type === 'project') {
+      if (event.type === 'hello') {
+        // The service says hello on every connect. After a drop (sleep, restart) events were missed, so refresh everything.
+        if (connected) void qc.invalidateQueries();
+        connected = true;
+      } else if (event.type === 'project') {
         void qc.invalidateQueries({ predicate: (q) => q.queryKey[1] === event.repo && q.queryKey[2] === event.id });
         void qc.invalidateQueries({ queryKey: ['projects'] });
       } else if (event.type === 'projects') {
