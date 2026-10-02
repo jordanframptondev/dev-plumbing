@@ -3,6 +3,7 @@ import path from 'node:path';
 import { Hono } from 'hono';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app';
+import { frameHeaders } from '../src/security';
 import { staticHandler } from '../src/static';
 import { call, makeContext, removeTempDirs } from './helpers';
 import { tempDir } from '../../../testkit/tmp';
@@ -59,5 +60,15 @@ describe('anti-framing headers', () => {
     expectFrameHeaders(health);
     expectFrameHeaders(await app.request('http://localhost:4545/api/config'));
     expectFrameHeaders(await app.request('http://evil.example:4545/'));
+  });
+  it("leave a route's own Content-Security-Policy alone", async () => {
+    const app = new Hono();
+    app.use('*', frameHeaders());
+    app.get('/own', (c) => c.text('x', 200, { 'Content-Security-Policy': "default-src 'none'; frame-ancestors 'self'" }));
+    app.get('/plain', (c) => c.text('y'));
+    const own = await app.request('http://localhost/own');
+    expect(own.headers.get('content-security-policy')).toBe("default-src 'none'; frame-ancestors 'self'");
+    expect(own.headers.get('x-frame-options')).toBe('SAMEORIGIN');
+    expect((await app.request('http://localhost/plain')).headers.get('content-security-policy')).toBe("frame-ancestors 'self'");
   });
 });

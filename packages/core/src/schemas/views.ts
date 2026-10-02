@@ -157,3 +157,6 @@ export type DataChecks =
   | { kind: 'diagram'; checked: false; reason: string; nodes: Record<string, never> }
   | { kind: 'database'; checked: true; file: string; warnings: string[] }
   | { kind: 'database'; checked: false; reason: string; warnings: [] };
+
+/** What a mockup's toolbar says about its design kit: the app it came from, its files, and what was skipped. */
+export type MockupKitInfo = { app: string | null; files: string[]; warnings: string[] };

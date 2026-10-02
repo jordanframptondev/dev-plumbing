@@ -3,6 +3,7 @@ import type { AppContext } from './context';
 import { claudeRoutes } from './routes/claude';
 import { configRoutes } from './routes/config';
 import { eventRoutes } from './routes/events';
+import { kitScript, mockupRoutes } from './routes/mockups';
 import { projectRoutes } from './routes/projects';
 import { threadRoutes } from './routes/threads';
 import { createRuntime, type Runtime } from './runtime';
@@ -17,9 +18,11 @@ export function createApp(ctx: AppContext, rt: Runtime = createRuntime()): Hono 
   app.route('/api', eventRoutes(rt));
   app.route('/api', projectRoutes(ctx, rt));
   app.route('/api', threadRoutes(ctx, rt));
+  app.route('/api', mockupRoutes(ctx));
   app.route('/api', configRoutes(ctx, rt));
   app.route('/api/claude', claudeRoutes(ctx, rt));
   app.all('/api/*', (c) => c.json({ error: 'Not found.' }, 404));
+  app.get('/kit/tailwind.js', kitScript);
   app.get('*', staticHandler(ctx.webDist));
   return app;
 }

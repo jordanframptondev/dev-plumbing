@@ -3,6 +3,7 @@ import type {
   Anchor,
   ChangesResponse,
   ConfigProblem,
+  MockupKitInfo,
   DiscoveryProblem,
   ProjectHome,
   ProjectSummary,
@@ -36,6 +37,8 @@ const enc = encodeURIComponent;
 const send = (method: string, value: unknown): RequestInit => ({ method, body: JSON.stringify(value) });
 
 const proj = (repo: string, id: string) => `/api/projects/${enc(repo)}/${enc(id)}`;
+/** One side of a UI item's mockup document. It's an iframe src, so it's a URL, not a request. */
+export const mockupUrl = (repo: string, id: string, itemId: string, side: 'after' | 'before') => `${proj(repo, id)}/items/${enc(itemId)}/mockup/${side}`;
 export type DraftInput = { optionId?: string; note?: string; text?: string };
 export type SubmitBody = { scope: 'all' } | { scope: 'thread'; threadId: string };
 
@@ -69,6 +72,7 @@ export const api = {
   submit: (repo: string, id: string, body: SubmitBody) => request<SubmitResponse>(`${proj(repo, id)}/submit`, send('POST', body)),
   addItem: (repo: string, id: string, body: { type: string; title: string; text: string; fields?: Record<string, string>; anchor?: Anchor }) =>
     request<SubmitResponse & { threadId: string }>(`${proj(repo, id)}/items`, send('POST', body)),
+  mockupKit: (repo: string, id: string, itemId: string) => request<MockupKitInfo>(`${proj(repo, id)}/items/${enc(itemId)}/mockup-kit`),
   changes: (repo: string, id: string) => request<ChangesResponse>(`${proj(repo, id)}/changes`),
   changeAction: (repo: string, id: string, changeId: string, action: 'undo' | 'apply') =>
     request<{ ok: true }>(`${proj(repo, id)}/changes/${enc(changeId)}/${action}`, send('POST', {})),
