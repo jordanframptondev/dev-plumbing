@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import { afterAll, describe, expect, it } from 'vitest';
-import { newId, readDocText, readItem, readSubmissions, StoreError, writeSubmission } from '../src/store/io';
+import { newId, readDecisions, readDocText, readItem, readSubmissions, StoreError, writeSubmission } from '../src/store/io';
 import { removeTempDirs } from '../../../testkit/tmp';
 import { pair, seedProject } from './fixtures';
 
@@ -33,5 +33,14 @@ describe('project files', () => {
     await writeSubmission(dir, { id: 's-1', at: 'a', scope: 'thread', drafts: {}, sent: [], resolved: [] });
     await fs.writeFile(`${dir}/submissions/s-3.json`, '{broken');
     expect((await readSubmissions(dir)).map((s) => s.id)).toEqual(['s-1', 's-2']);
+  });
+
+  it('reads a missing decisions file as empty, but reports a damaged one', async () => {
+    const dir = await seedProject();
+    expect(await readDecisions(dir)).toEqual([]);
+    await fs.writeFile(`${dir}/decisions.json`, '{broken');
+    await expect(readDecisions(dir)).rejects.toThrow(StoreError);
+    await fs.writeFile(`${dir}/decisions.json`, '{"not":"a list"}');
+    await expect(readDecisions(dir)).rejects.toThrow(/expected shape/);
   });
 });

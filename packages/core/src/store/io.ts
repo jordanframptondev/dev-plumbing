@@ -100,9 +100,13 @@ export const readThreads = (dir: string) => readFolder<Thread>(projectFiles(dir)
 
 export async function readDecisions(dir: string): Promise<Decision[]> {
   const r = await readJsonFile(projectFiles(dir).decisions);
-  if (!r.ok) return [];
+  if (!r.ok) {
+    if (r.error === 'missing') return [];
+    throw new StoreError(`decisions.json can't be read (${r.error}). Fix or remove it, then try again.`);
+  }
   const parsed = z.array(decisionSchema).safeParse(r.value);
-  return parsed.success ? parsed.data : [];
+  if (!parsed.success) throw new StoreError("decisions.json doesn't have the expected shape. Fix or remove it, then try again.");
+  return parsed.data;
 }
 export const writeDecisions = (dir: string, decisions: Decision[]) => writeJsonAtomic(projectFiles(dir).decisions, decisions);
 
