@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { InputError, readDecisions, readHistory, readItem, readThread } from '../src/store/io';
+import { InputError, projectFiles, readDecisions, readHistory, readItem, readItems, readThread, StoreError } from '../src/store/io';
 import { postReply } from '../src/store/reply';
 import { removeTempDirs } from '../../../testkit/tmp';
 import { DRAFT, pair, seedProject, TYPES } from './fixtures';
@@ -99,5 +99,38 @@ describe('posting a reply', () => {
     const dir = await seedProject({ pairs: [pair('q1')] });
     await expect(reply(dir, { threadId: 't-q1', text: 'x' })).rejects.toThrow(/isn't waiting for Claude/);
     await expect(reply(dir, { threadId: 't-ghost', text: 'x' })).rejects.toThrow(/no thread "t-ghost"/);
+  });
+});
+
+describe('a reply is all or nothing', () => {
+  const smallEdit = { summary: 'Wording', change: { md: [{ find: 'Log reminders in a table.', replace: 'Log each reminder in a table.' }] } };
+  const newItem = { type: 'questions', title: 'Is 180 days enough?', summary: 's', message: { text: 'm' } };
+
+  it('a valid small edit next to a bad option writes nothing', async () => {
+    const dir = await seedProject({ pairs: [asked('q1')] });
+    const before = (await readItems(dir)).values.map((i) => i.id).sort();
+    const attempt = reply(dir, {
+      threadId: 't-q1',
+      text: 'x',
+      smallEdits: [smallEdit],
+      newItems: [newItem],
+      options: [{ id: 'a', label: 'A', change: { md: [{ find: 'Nowhere in the draft', replace: 'y' }] } }],
+    });
+    await expect(attempt).rejects.toThrow(InputError);
+    expect(await draftOf(dir)).toBe(DRAFT);
+    expect(await readHistory(dir)).toEqual([]);
+    expect((await readItems(dir)).values.map((i) => i.id).sort()).toEqual(before);
+    expect((await readThread(dir, 't-q1')).messages).toHaveLength(2);
+  });
+
+  it('a damaged decisions.json stops a resolving reply before anything is written', async () => {
+    const dir = await seedProject({ pairs: [asked('q1')] });
+    await fs.writeFile(projectFiles(dir).decisions, '{broken');
+    const before = (await readItems(dir)).values.map((i) => i.id).sort();
+    await expect(reply(dir, { threadId: 't-q1', text: 'Done.', smallEdits: [smallEdit], newItems: [newItem], resolve: { decision: 'Go' } })).rejects.toThrow(StoreError);
+    expect(await draftOf(dir)).toBe(DRAFT);
+    expect(await readHistory(dir)).toEqual([]);
+    expect((await readItems(dir)).values.map((i) => i.id).sort()).toEqual(before);
+    expect((await readThread(dir, 't-q1')).status).toBe('with_claude');
   });
 });

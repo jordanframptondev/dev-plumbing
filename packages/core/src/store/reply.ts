@@ -2,7 +2,7 @@ import { applyMdPatches, type ClaudeMessage, type HistoryEntry, type PlumbingTyp
 import { recordChange } from './changes';
 import { addDecision } from './decisions';
 import { uniqueId, verifyCodeRefs } from './importItems';
-import { InputError, newId, readDocText, readItem, readItems, readProjectFile, readThread, StoreError, touchProject, writeItem, writeThread } from './io';
+import { InputError, newId, readDecisions, readDocText, readItem, readItems, readProjectFile, readThread, StoreError, touchProject, writeItem, writeThread } from './io';
 import { slugify } from './open';
 import { fieldProblems, messageProblems, nothingSaved } from './validate';
 
@@ -62,6 +62,10 @@ export async function postReply(
   for (const id of r.resolve?.itemIds ?? []) if (!itemIds.has(id)) problems.push(`resolve.itemIds: there's no item "${id}".`);
   if (problems.length) throw nothingSaved(problems, 'call dp_reply again');
 
+  // Everything that can fail on a read happens before the first write, so a refused reply leaves nothing behind.
+  if (r.resolve) await readDecisions(dir);
+  const codeRefs = await Promise.all((r.newItems ?? []).map((n) => (n.codeRefs?.length ? verifyCodeRefs(o.clone, n.codeRefs) : Promise.resolve(undefined))));
+
   const edits: HistoryEntry[] = [];
   for (const e of r.smallEdits ?? []) {
     edits.push(await recordChange(dir, { threadId: thread.id, kind: 'small-edit', summary: e.summary, change: e.change, apply: o.autoApply, now }));
@@ -69,7 +73,7 @@ export async function postReply(
 
   const taken = new Set(itemIds);
   const newItemIds: string[] = [];
-  for (const n of r.newItems ?? []) {
+  for (const [i, n] of (r.newItems ?? []).entries()) {
     const id = uniqueId(`${n.type}-${slugify(n.title)}`, taken);
     await writeItem(dir, {
       id,
@@ -79,7 +83,7 @@ export async function postReply(
       ...(n.body ? { body: n.body } : {}),
       ...(n.fields ? { fields: n.fields } : {}),
       ...(n.mdAnchor ? { mdAnchor: n.mdAnchor } : {}),
-      ...(n.codeRefs?.length ? { codeRefs: await verifyCodeRefs(o.clone, n.codeRefs) } : {}),
+      ...(codeRefs[i] ? { codeRefs: codeRefs[i] } : {}),
       ...(n.data !== undefined ? { data: n.data } : {}),
       links: [thread.itemId],
       threadId: `t-${id}`,
