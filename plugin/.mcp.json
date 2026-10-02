@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "dp": {
+      "command": "sh",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/dp-mcp.sh"],
+      "timeout": 43200000
+    }
+  }
+}
