@@ -11,6 +11,7 @@
   "dependencies": {
     "@dev-plumbing/core": "workspace:*",
     "@hono/node-server": "^1.19.17",
-    "hono": "^4.13.12"
+    "hono": "^4.13.12",
+    "zod": "^3.25.76"
   }
 }

@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { AppContext } from './context';
+import { claudeRoutes } from './routes/claude';
 import { configRoutes } from './routes/config';
 import { eventRoutes } from './routes/events';
 import { projectRoutes } from './routes/projects';
@@ -15,6 +16,7 @@ export function createApp(ctx: AppContext, rt: Runtime = createRuntime()): Hono 
   app.route('/api', eventRoutes(rt));
   app.route('/api', projectRoutes(ctx, rt));
   app.route('/api', configRoutes(ctx, rt));
+  app.route('/api/claude', claudeRoutes(ctx, rt));
   app.all('/api/*', (c) => c.json({ error: 'Not found.' }, 404));
   app.get('*', staticHandler(ctx.webDist));
   return app;
