@@ -230,6 +230,10 @@ describe('visual data shapes', () => {
     expect(withAfter('<head><title>x</title></head><header class="p-4">Acme</header>')).toEqual(["after: remove the <head> tag. Write only the page's body markup."]);
     // A refresh tag would navigate the frame away, and no CSP directive stops that. SVG's <metadata> is fine.
     expect(withAfter('<meta http-equiv="refresh" content="0;url=/x"><div>Hi</div>')).toEqual(["after: remove the <meta> tag. Write only the page's body markup."]);
+    // A declarative shadow root hides a link from the frame's click guard.
+    expect(withAfter('<div><template shadowrootmode="closed"><a href="https://x.example/">x</a></template></div>')).toEqual([
+      "after: remove the <template> tags. Mockups can't use <template> elements.",
+    ]);
     expect(withAfter('<svg viewBox="0 0 4 4"><metadata>Logo</metadata><rect width="4" height="4"/></svg>')).toEqual([]);
     expect(withAfter('<link rel="stylesheet" href="x.css"><iframe src="/x"></iframe><object></object><embed>')).toEqual([
       "after: remove the <link> tag. Mockups can't load or embed other files.",
@@ -300,7 +304,7 @@ describe('visual data shapes', () => {
       expect(parseData(kind, example).ok, `${kind} example parses`).toBe(true);
     }
     const ui = dataShapeDoc('mockups');
-    for (const bit of ["Write only the page's body markup", '<meta>', 'kitFiles', 'Tailwind classes and theme tokens', 'No scripts', 'inline SVG or plain boxes', '100,000', 'Send it only when the screen exists today']) {
+    for (const bit of ["Write only the page's body markup", '<meta>', 'kitFiles', 'Tailwind classes and theme tokens', 'No scripts', '<template>', 'inline SVG or plain boxes', '100,000', 'Send it only when the screen exists today']) {
       expect(ui).toContain(bit);
     }
   });

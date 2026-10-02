@@ -193,6 +193,8 @@ function markupProblems(side: 'after' | 'before', markup: string): string[] {
   if (/<script\b/i.test(markup)) problems.push(`${side}: remove the <script> tags. Mockups can't run scripts.`);
   // <meta> too: a refresh tag would navigate the frame away, and no CSP directive stops that.
   for (const tag of tagsIn(markup, /<\/?(!doctype|html|head|body|meta)\b/gi)) problems.push(`${side}: remove the <${tag}> tag. Write only the page's body markup.`);
+  // <template> too: a declarative shadow root (shadowrootmode) can hide a link from the frame's click guard.
+  if (/<template\b/i.test(markup)) problems.push(`${side}: remove the <template> tags. Mockups can't use <template> elements.`);
   for (const tag of tagsIn(markup, /<(link|iframe|object|embed)\b/gi)) problems.push(`${side}: remove the <${tag}> tag. Mockups can't load or embed other files.`);
   if (loadsOutsideFiles(markup)) {
     problems.push(`${side}: a src or srcset points at another site. Use inline SVG or plain boxes for images; outside files don't load in mockups.`);
@@ -394,7 +396,7 @@ Shape:
 Rules:
 - Write only the page's body markup: no <html>, <head>, <body> or <meta> tags. The app adds the kit.
 - Use the app's Tailwind classes and theme tokens, from the kit files listed for the app in the repo profile (profile.apps[].kitFiles). Read those files before writing markup.
-- No scripts, and no <link>, <iframe>, <object> or <embed> tags.
+- No scripts, and no <link>, <iframe>, <object>, <embed> or <template> tags.
 - Images are inline SVG or plain boxes: no src or srcset pointing at http:, https: or //.
 - after and before are each at most 100,000 characters.`,
 

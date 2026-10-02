@@ -227,6 +227,16 @@ describe('mockup documents', () => {
     }
     expect(markupOf({ after: '<p>no meta here</p>' }, 'after')).toBe('<p>no meta here</p>');
   });
+
+  it('escape templates, so no declarative shadow root can hide a link', () => {
+    for (const mode of ['closed', 'open']) {
+      const hostile = `<div><template shadowrootmode="${mode}"><a href="https://x.example/">x</a></template></div><TEMPLATE\nshadowrootmode=open>`;
+      const out = markupOf({ after: hostile }, 'after') ?? '';
+      expect(out, mode).not.toMatch(/<template/i);
+      const html = mockupDocument({ body: out, kitCss: '', nonce: 'n0', title: 't' });
+      expect(count(html.toLowerCase(), '<template'), mode).toBe(0);
+    }
+  });
 });
 
 // jsdom lives in the web package; it's only used here to run the frame's script against hostile markup.
@@ -282,6 +292,16 @@ describe('the pin script against hostile markup', () => {
     win.document.getElementById('f')!.dispatchEvent(submit);
     expect(submit.defaultPrevented).toBe(true);
     expect(posted.some((m) => m.type === 'size')).toBe(true);
+  });
+
+  it('stops a link inside an open shadow root', async () => {
+    const { win, posted } = await loadFrame('<div id="host"></div>');
+    const root = win.document.getElementById('host').attachShadow({ mode: 'open' });
+    root.innerHTML = '<a id="inner" href="https://x.example/">x</a>';
+    const ev = new win.MouseEvent('click', { bubbles: true, cancelable: true, composed: true });
+    root.getElementById('inner').dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+    expect(posted.some((m: { type: string }) => m.type === 'size')).toBe(true);
   });
 
   it('survives markup that swallows the rest of the document', async () => {

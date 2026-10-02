@@ -47,6 +47,8 @@ export const PIN_SCRIPT = String.raw`(() => {
 
   // A mockup is a picture: nothing in it navigates the frame. No CSP directive stops a frame navigating itself, so this
   // is the guard. It's registered now, in the capture phase, so it sees every click and submit first.
+  const composedPath = Event.prototype.composedPath;
+  const eventPath = (e) => (typeof composedPath === 'function' ? composedPath.call(e) : []);
   const linkLike = (el) => {
     for (let node = el; node; node = parentOf.call(node)) {
       const name = nameOf.call(node);
@@ -55,8 +57,9 @@ export const PIN_SCRIPT = String.raw`(() => {
     return false;
   };
   listen('click', (e) => {
+    // The path too: a click inside a shadow root reaches this listener retargeted to the host.
     const el = elementOf(e.target);
-    if (el && linkLike(el)) {
+    if ((el && linkLike(el)) || eventPath(e).some((node) => node instanceof E && linkLike(node))) {
       e.preventDefault();
       e.stopPropagation();
     }
@@ -264,12 +267,12 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 /**
  * One side's markup, or null when there's none. It's read leniently: markup that breaks a write rule (edited by hand,
  * or written by an older version) is still served, because the sandbox and the CSP, not the write check, are what keep
- * it harmless. Meta tags are escaped into text, in one pass that can't build a new tag: a refresh tag would navigate the frame away, and no CSP directive stops that.
+ * it harmless. Meta and template tags are escaped into text, in one pass that can't build a new tag: a refresh tag would navigate the frame away, and no CSP directive stops that, and a declarative shadow root would hide links from the click guard.
  */
 export function markupOf(data: unknown, side: 'after' | 'before'): string | null {
   const value = isObject(data) ? data[side] : undefined;
   if (typeof value !== 'string' || !value.trim()) return null;
-  return value.replace(/<(?=meta(?:[\s/>]|$))/gi, '&lt;');
+  return value.replace(/<(?=(?:meta|template)(?:[\s/>]|$))/gi, '&lt;');
 }
 
 /** The app names a UI item's data points at: its kit first, then its location's app. */
