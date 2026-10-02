@@ -85,3 +85,11 @@ export type TypeItemRow = { id: string; title: string; summary: string; status: 
 
 /** A projects folder that couldn't be read while listing plumbing projects. */
 export type DiscoveryProblem = { folder: string; message: string };
+
+export type DiffSegment = {
+  kind: 'same' | 'added' | 'removed';
+  text: string;
+  changedBy?: { changeId: string; threadId: string; summary: string; threadTitle: string }[];
+};
+export type FieldChange = { field: string; before: string; after: string };
+export type ChangePreview = { md: DiffSegment[] | null; items: { itemId: string; title: string; changes: FieldChange[] }[]; problem?: string };

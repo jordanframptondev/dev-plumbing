@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "diff": "^9.0.0",
     "gray-matter": "^4.0.3",
     "zod": "^3.25.76"
   }
