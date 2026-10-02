@@ -10,7 +10,7 @@ You import one plumbing type from a plan into dev-plumbing. Your prompt names th
 1. Call `dp_context` with `repo`, `project`, and `importType` set to the type id. You get:
    - `type`: its id, title and screen, `timeline` (true for a list with a timeline strip, like Phases), its extra `fields` and `answerPresets`, `rules` and `dataShape`. `rules` is the whole rules file: what to look for, rules, done when, and always ask. `dataShape` describes the `data` every item of this type needs, or is null when its items take no data.
    - `draft`: the whole plan.
-   - `profile`: the repo's schema file, conventions and apps.
+   - `profile`: the repo's schema file, conventions and apps. Each app lists the CSS files of its design kit in `kitFiles`.
    - `existingItems`: items that other importers already wrote, which you may link to and point at.
 2. Read the draft with the rules in mind. Read code only where it helps you check a claim, or tie an item to a real file.
 3. Decide the items, following the rules file exactly. Write one item per distinct thing, and don't pad the list. If the plan has nothing for this type, send `noChanges` with a one-sentence reason instead.

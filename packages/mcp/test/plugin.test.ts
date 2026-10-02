@@ -58,6 +58,7 @@ describe('the plugin', () => {
     const importer = parseFrontMatter(read('plugin/agents/importer.md')).content;
     for (const s of ['type.dataShape', 'kitFiles', 'mockupId', 'itemIds', 'existingItems']) expect(importer).toContain(s);
     expect(importer).not.toContain('Mockup HTML comes in a later version');
+    expect(importer).toMatch(/- `profile`:[^\n]*`kitFiles`/);
     const thread = parseFrontMatter(read('plugin/agents/thread.md')).content;
     for (const s of ['patch: { data }', 'type.dataShape', 'anchor.itemId', 'anchor.label', 'anchor.ref', 'the whole item is in `anchored`']) expect(thread).toContain(s);
     expect(thread).not.toContain('t-<anchor.itemId>');
