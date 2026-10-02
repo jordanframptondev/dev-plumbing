@@ -17,167 +17,228 @@ export function mockupCsp(nonce: string): string {
  */
 export const PIN_SCRIPT = String.raw`(() => {
   'use strict';
+  // This script runs in <head>, before any markup has parsed, so the markup can't have changed anything it uses yet.
+  // Everything it needs is captured here. After the markup has parsed, no document method or element property is read
+  // by name, because markup like <img name="querySelector"> or <form><input name="closest"> can shadow them.
+  const doc = document;
+  const win = window;
+  const qs = doc.querySelector.bind(doc);
+  const create = doc.createElement.bind(doc);
+  const listen = doc.addEventListener.bind(doc);
+  const winListen = win.addEventListener.bind(win);
+  const raf = win.requestAnimationFrame.bind(win);
+  const root = doc.documentElement;
+  const parentWin = win.parent;
+  const E = Element;
+  const N = Node;
+  const ResizeObs = win.ResizeObserver;
+  const MutationObs = win.MutationObserver;
+  const getter = (proto, name) => Object.getOwnPropertyDescriptor(proto, name).get;
+  const parentOf = getter(N.prototype, 'parentElement');
+  const prevOf = getter(E.prototype, 'previousElementSibling');
+  const nameOf = getter(E.prototype, 'localName');
+  const hasAttr = E.prototype.hasAttribute;
+  const hasAttrNS = E.prototype.hasAttributeNS;
+  const rectOf = E.prototype.getBoundingClientRect;
+  const XLINK = 'http://www.w3.org/1999/xlink';
   const TONES = { seal: '#a5503b', slate: '#6d8196', moss: '#5f8a5b', mist: '#cbcbcb' };
-  const post = (message) => parent.postMessage(Object.assign({ source: 'dp-mockup' }, message), '*');
-  const root = document.documentElement;
-  // Looked up once, by tag: markup like <form name="body"> or <img name="head"> clobbers document.body and document.head.
-  const body = document.querySelector('body');
-  const head = document.querySelector('head');
+  const post = (message) => parentWin.postMessage(Object.assign({ source: 'dp-mockup' }, message), '*');
+  const elementOf = (target) => (target instanceof E ? target : target instanceof N ? parentOf.call(target) : null);
 
-  // Our own elements sit outside <body>, so they never change the selectors of the mockup's elements.
-  const layer = document.createElement('div');
-  layer.setAttribute('data-dp-layer', '');
-  layer.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;z-index:2147483647;';
-  root.appendChild(layer);
-  const outline = document.createElement('div');
-  outline.style.cssText = 'position:absolute;display:none;pointer-events:none;box-sizing:border-box;border:2px solid #6d8196;border-radius:4px;';
-  layer.appendChild(outline);
-
-  let pinMode = false;
-  let markers = [];
-
-  const ours = (node) => node instanceof Node && layer.contains(node);
-  const pickable = (target) => {
-    const el = target instanceof Element ? target : target && target.parentElement;
-    if (!el || ours(el) || el === body || !body.contains(el)) return null;
-    return el;
-  };
-
-  // body > main:nth-of-type(1) > div:nth-of-type(2): stable while the markup keeps its shape.
-  const selectorFor = (el) => {
-    const parts = [];
-    for (let node = el; node && node !== body; node = node.parentElement) {
-      let k = 1;
-      for (let s = node.previousElementSibling; s; s = s.previousElementSibling) if (s.localName === node.localName) k++;
-      parts.unshift(node.localName + ':nth-of-type(' + k + ')');
+  // A mockup is a picture: nothing in it navigates the frame. No CSP directive stops a frame navigating itself, so this
+  // is the guard. It's registered now, in the capture phase, so it sees every click and submit first.
+  const linkLike = (el) => {
+    for (let node = el; node; node = parentOf.call(node)) {
+      const name = nameOf.call(node);
+      if (name === 'a' || name === 'area' || hasAttr.call(node, 'href') || hasAttrNS.call(node, XLINK, 'href')) return true;
     }
-    return ['body'].concat(parts).join(' > ');
+    return false;
   };
-  const textOf = (el) => {
-    const text = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
-    return text ? text.slice(0, 60) : el.localName;
-  };
-
-  const showOutline = (el) => {
-    if (!el) {
-      outline.style.display = 'none';
-      return;
+  listen('click', (e) => {
+    const el = elementOf(e.target);
+    if (el && linkLike(el)) {
+      e.preventDefault();
+      e.stopPropagation();
     }
-    const r = el.getBoundingClientRect();
-    outline.style.left = r.left + window.scrollX - 2 + 'px';
-    outline.style.top = r.top + window.scrollY - 2 + 'px';
-    outline.style.width = r.width + 4 + 'px';
-    outline.style.height = r.height + 4 + 'px';
-    outline.style.display = 'block';
-  };
-  const setPinMode = (on) => {
-    pinMode = on;
-    root.style.cursor = on ? 'crosshair' : '';
-    if (!on) showOutline(null);
-  };
-
-  document.addEventListener('mouseover', (e) => {
-    if (pinMode) showOutline(pickable(e.target));
   }, true);
-  root.addEventListener('mouseleave', () => showOutline(null));
-  document.addEventListener('click', (e) => {
-    if (ours(e.target)) return;
-    // A mockup is a picture: its links go nowhere.
-    if (e.target instanceof Element && e.target.closest('a[href]')) e.preventDefault();
-    if (!pinMode) return;
+  listen('submit', (e) => {
     e.preventDefault();
     e.stopPropagation();
-    const el = pickable(e.target);
-    if (el) post({ type: 'picked', selector: selectorFor(el), text: textOf(el) });
   }, true);
-  document.addEventListener('submit', (e) => e.preventDefault(), true);
 
-  const placeMarkers = () => {
-    const maxLeft = root.clientWidth - 20;
-    for (const m of markers) {
-      const r = m.el.getBoundingClientRect();
-      m.node.style.left = Math.max(0, Math.min(maxLeft, r.right + window.scrollX - 10)) + 'px';
-      m.node.style.top = Math.max(0, r.top + window.scrollY - 10) + 'px';
-    }
-  };
-  let queued = false;
-  const schedulePlace = () => {
-    if (queued) return;
-    queued = true;
-    requestAnimationFrame(() => {
-      queued = false;
-      placeMarkers();
-    });
-  };
-
-  const setPins = (pins) => {
-    for (const m of markers) m.node.remove();
-    markers = [];
-    const missing = [];
-    for (const pin of pins) {
-      if (!pin || typeof pin.id !== 'string') continue;
-      let el = null;
-      try {
-        el = typeof pin.selector === 'string' ? document.querySelector(pin.selector) : null;
-      } catch (err) {
-        el = null;
-      }
-      if (!el || !body.contains(el)) {
-        missing.push(pin.id);
-        continue;
-      }
-      const tone = Object.prototype.hasOwnProperty.call(TONES, pin.tone) ? TONES[pin.tone] : TONES.slate;
-      const node = document.createElement('button');
-      node.type = 'button';
-      node.textContent = String(pin.n);
-      node.title = 'Pin ' + pin.n;
-      node.setAttribute('data-dp-pin', pin.id);
-      node.style.cssText =
-        'position:absolute;width:20px;height:20px;margin:0;padding:0;box-sizing:border-box;border:1.5px solid #fff;border-radius:50%;' +
-        'background:' + tone + ';color:#fff;font:600 11px/17px -apple-system,system-ui,sans-serif;text-align:center;' +
-        'cursor:pointer;pointer-events:auto;box-shadow:0 1px 2px rgba(0,0,0,.25);';
-      node.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        post({ type: 'open-pin', id: pin.id });
-      });
-      layer.appendChild(node);
-      markers.push({ el, node });
-    }
-    placeMarkers();
-    post({ type: 'missing-pins', ids: missing });
-  };
-
-  let lastHeight = -1;
-  const sendSize = () => {
-    const height = Math.ceil(Math.max(body.scrollHeight, body.getBoundingClientRect().bottom + window.scrollY));
-    if (height === lastHeight) return;
-    lastHeight = height;
-    post({ type: 'size', height: height });
-  };
-  const changed = () => {
-    sendSize();
-    schedulePlace();
-  };
-  new ResizeObserver(changed).observe(body);
-  // The Tailwind compiler adds its styles a moment after the page loads, which can move pinned elements.
-  new MutationObserver(schedulePlace).observe(head, { childList: true, subtree: true, characterData: true });
-  window.addEventListener('load', changed);
-  window.addEventListener('resize', changed);
-
-  window.addEventListener('message', (e) => {
+  let ready = false;
+  const pending = [];
+  let handle = () => {};
+  // Messages that arrive before the page has parsed wait for it.
+  winListen('message', (e) => {
     const data = e.data;
-    if (e.source !== parent || !data || data.source !== 'dp-app') return;
-    if (data.type === 'pin-mode') setPinMode(Boolean(data.on));
-    else if (data.type === 'pins' && Array.isArray(data.pins)) setPins(data.pins);
+    if (e.source !== parentWin || !data || data.source !== 'dp-app') return;
+    if (ready) handle(data);
+    else pending.push(data);
   });
-  sendSize();
+
+  const setup = () => {
+    const body = qs('body');
+    const head = qs('head');
+
+    // Our own elements sit outside <body>, so they never change the selectors of the mockup's elements.
+    const layer = create('div');
+    layer.setAttribute('data-dp-layer', '');
+    layer.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;z-index:2147483647;';
+    root.appendChild(layer);
+    const outline = create('div');
+    outline.style.cssText = 'position:absolute;display:none;pointer-events:none;box-sizing:border-box;border:2px solid #6d8196;border-radius:4px;';
+    layer.appendChild(outline);
+
+    let pinMode = false;
+    let markers = [];
+
+    const ours = (node) => node instanceof N && layer.contains(node);
+    const pickable = (target) => {
+      const el = elementOf(target);
+      if (!el || ours(el) || el === body || !body.contains(el)) return null;
+      return el;
+    };
+
+    // body > main:nth-of-type(1) > div:nth-of-type(2): stable while the markup keeps its shape.
+    const selectorFor = (el) => {
+      const parts = [];
+      for (let node = el; node && node !== body; node = parentOf.call(node)) {
+        let k = 1;
+        for (let s = prevOf.call(node); s; s = prevOf.call(s)) if (nameOf.call(s) === nameOf.call(node)) k++;
+        parts.unshift(nameOf.call(node) + ':nth-of-type(' + k + ')');
+      }
+      return ['body'].concat(parts).join(' > ');
+    };
+    const textOf = (el) => {
+      let text = '';
+      try {
+        text = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+      } catch (err) {
+        text = '';
+      }
+      return text ? text.slice(0, 60) : nameOf.call(el);
+    };
+
+    const showOutline = (el) => {
+      if (!el) {
+        outline.style.display = 'none';
+        return;
+      }
+      const r = rectOf.call(el);
+      outline.style.left = r.left + win.scrollX - 2 + 'px';
+      outline.style.top = r.top + win.scrollY - 2 + 'px';
+      outline.style.width = r.width + 4 + 'px';
+      outline.style.height = r.height + 4 + 'px';
+      outline.style.display = 'block';
+    };
+    const setPinMode = (on) => {
+      pinMode = on;
+      root.style.cursor = on ? 'crosshair' : '';
+      if (!on) showOutline(null);
+    };
+
+    listen('mouseover', (e) => {
+      if (pinMode) showOutline(pickable(e.target));
+    }, true);
+    root.addEventListener('mouseleave', () => showOutline(null));
+    // The guard above already stopped links. In pin mode a click picks the element, links included.
+    listen('click', (e) => {
+      if (!pinMode || ours(e.target)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const el = pickable(e.target);
+      if (el) post({ type: 'picked', selector: selectorFor(el), text: textOf(el) });
+    }, true);
+
+    const placeMarkers = () => {
+      const maxLeft = root.clientWidth - 20;
+      for (const m of markers) {
+        const r = rectOf.call(m.el);
+        m.node.style.left = Math.max(0, Math.min(maxLeft, r.right + win.scrollX - 10)) + 'px';
+        m.node.style.top = Math.max(0, r.top + win.scrollY - 10) + 'px';
+      }
+    };
+    let queued = false;
+    const schedulePlace = () => {
+      if (queued) return;
+      queued = true;
+      raf(() => {
+        queued = false;
+        placeMarkers();
+      });
+    };
+
+    const setPins = (pins) => {
+      for (const m of markers) m.node.remove();
+      markers = [];
+      const missing = [];
+      for (const pin of pins) {
+        if (!pin || typeof pin.id !== 'string') continue;
+        let el = null;
+        try {
+          el = typeof pin.selector === 'string' ? qs(pin.selector) : null;
+        } catch (err) {
+          el = null;
+        }
+        if (!el || !body.contains(el)) {
+          missing.push(pin.id);
+          continue;
+        }
+        const tone = Object.prototype.hasOwnProperty.call(TONES, pin.tone) ? TONES[pin.tone] : TONES.slate;
+        const node = create('button');
+        node.type = 'button';
+        node.textContent = String(pin.n);
+        node.title = 'Pin ' + pin.n;
+        node.setAttribute('data-dp-pin', pin.id);
+        node.style.cssText =
+          'position:absolute;width:20px;height:20px;margin:0;padding:0;box-sizing:border-box;border:1.5px solid #fff;border-radius:50%;' +
+          'background:' + tone + ';color:#fff;font:600 11px/17px -apple-system,system-ui,sans-serif;text-align:center;' +
+          'cursor:pointer;pointer-events:auto;box-shadow:0 1px 2px rgba(0,0,0,.25);';
+        node.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          post({ type: 'open-pin', id: pin.id });
+        });
+        layer.appendChild(node);
+        markers.push({ el, node });
+      }
+      placeMarkers();
+      post({ type: 'missing-pins', ids: missing });
+    };
+
+    let lastHeight = -1;
+    const sendSize = () => {
+      const height = Math.ceil(Math.max(body.scrollHeight, rectOf.call(body).bottom + win.scrollY));
+      if (height === lastHeight) return;
+      lastHeight = height;
+      post({ type: 'size', height: height });
+    };
+    const changed = () => {
+      sendSize();
+      schedulePlace();
+    };
+    new ResizeObs(changed).observe(body);
+    // The Tailwind compiler adds its styles a moment after the page loads, which can move pinned elements.
+    new MutationObs(schedulePlace).observe(head, { childList: true, subtree: true, characterData: true });
+    winListen('load', changed);
+    winListen('resize', changed);
+
+    handle = (data) => {
+      if (data.type === 'pin-mode') setPinMode(Boolean(data.on));
+      else if (data.type === 'pins' && Array.isArray(data.pins)) setPins(data.pins);
+    };
+    ready = true;
+    sendSize();
+    for (const data of pending.splice(0)) handle(data);
+  };
+  listen('DOMContentLoaded', setup);
 })();`;
 
 const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 /**
- * A whole mockup document: the Tailwind compiler, the kit (compiled in the frame), the markup and the pin script.
+ * A whole mockup document: the Tailwind compiler, the pin script, the kit (compiled in the frame) and the markup.
  * The style starts with our own `@import "tailwindcss"`. buildKitCss removed the kit's, and the browser compiler only
  * adds one itself when the CSS has no @import at all.
  */
@@ -189,10 +250,11 @@ export function mockupDocument(o: { body: string; kitCss: string; nonce: string;
     '<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">',
     `<title>${escapeHtml(o.title)}</title>`,
     `<script nonce="${o.nonce}" src="/kit/tailwind.js"></script>`,
+    // Both scripts come before anything from the markup, so the markup can't swallow, clobber or steal them.
+    `<script nonce="${o.nonce}">${PIN_SCRIPT}</script>`,
     `<style type="text/tailwindcss">@import "tailwindcss";\n${kit}</style>`,
     '</head><body>',
     o.body,
-    `<script nonce="${o.nonce}">${PIN_SCRIPT}</script>`,
     '</body></html>',
   ].join('\n');
 }
@@ -202,12 +264,12 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 /**
  * One side's markup, or null when there's none. It's read leniently: markup that breaks a write rule (edited by hand,
  * or written by an older version) is still served, because the sandbox and the CSP, not the write check, are what keep
- * it harmless. Meta tags are removed: a refresh tag would navigate the frame away, and no CSP directive stops that.
+ * it harmless. Meta tags are escaped into text, in one pass that can't build a new tag: a refresh tag would navigate the frame away, and no CSP directive stops that.
  */
 export function markupOf(data: unknown, side: 'after' | 'before'): string | null {
   const value = isObject(data) ? data[side] : undefined;
   if (typeof value !== 'string' || !value.trim()) return null;
-  return value.replace(/<meta\b[^>]*>/gi, '');
+  return value.replace(/<(?=meta(?:[\s/>]|$))/gi, '&lt;');
 }
 
 /** The app names a UI item's data points at: its kit first, then its location's app. */

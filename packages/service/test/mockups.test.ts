@@ -1,9 +1,10 @@
 import fs from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { writeJsonAtomic } from '@dev-plumbing/core';
 import { createApp } from '../src/app';
-import { mockupCsp, mockupDocument, PIN_SCRIPT } from '../src/mockup';
+import { markupOf, mockupCsp, mockupDocument, PIN_SCRIPT } from '../src/mockup';
 import { createRuntime } from '../src/runtime';
 import { makeRepo } from '../../core/test/fixtures';
 import { call, makeContext, removeTempDirs } from './helpers';
@@ -92,7 +93,13 @@ describe('mockup documents', () => {
     expect(count(html, '<script')).toBe(2);
     expect(count(html, `nonce="${nonce}"`)).toBe(2);
     // The markup goes in exactly as written: the policy, not a rewrite, is what keeps it harmless.
-    expect(html).toContain(`<body>\n${MARKUP}\n<script nonce="${nonce}">`);
+    expect(html).toContain(`<body>\n${MARKUP}\n</body>`);
+    // Nothing from the markup comes before either script, so it can't swallow, clobber or steal them.
+    const markupAt = html.indexOf(MARKUP);
+    const lastNonce = html.lastIndexOf(`nonce="${nonce}"`);
+    expect(lastNonce).toBeGreaterThan(html.indexOf('<script nonce'));
+    expect(markupAt).toBeGreaterThan(lastNonce);
+    expect(html.indexOf('</head>')).toBeGreaterThan(html.indexOf(PIN_SCRIPT.slice(0, 40)));
   });
 
   it('still serve markup that breaks a write rule, without meta tags', async () => {
@@ -102,8 +109,9 @@ describe('mockup documents', () => {
     const risky = '<img src="https://example.com/x.png"><button onclick="alert(1)">x</button>';
     await fs.writeFile(file, JSON.stringify({ ...item, data: { ...item.data, after: `${risky}<meta http-equiv="refresh" content="0;url=https://example.com">` } }));
     const html = await (await t.get('/items/ui-settings/mockup/after')).text();
-    expect(html).toContain(`<body>\n${risky}\n<script`);
-    expect(html).not.toContain('http-equiv');
+    // The meta tag is escaped into text, so it can't be a live tag.
+    expect(html).toContain(`<body>\n${risky}&lt;meta http-equiv="refresh" content="0;url=https://example.com">\n</body>`);
+    expect(count(html, '<meta')).toBe(2);
   });
 
   it("404 a missing side, an unknown side, and items that aren't UI items", async () => {
@@ -208,5 +216,79 @@ describe('mockup documents', () => {
   it('use a pin script that parses and never closes its own tag', () => {
     expect(() => new Function(PIN_SCRIPT)).not.toThrow();
     expect(PIN_SCRIPT).not.toMatch(/<\/script/i);
+  });
+
+  it('escape meta tags in a way that cannot build a new one', () => {
+    for (const hostile of ['<me<meta>ta http-equiv="refresh" content="0;url=https://x.example/">', '<p>hi</p><meta http-equiv="refresh" content="0;url=https://x.example/"', '<META\nhttp-equiv=refresh>', '<meta']) {
+      const out = markupOf({ after: hostile }, 'after') ?? '';
+      expect(out, hostile).not.toMatch(/<meta/i);
+      const html = mockupDocument({ body: out, kitCss: '', nonce: 'n0', title: 't' });
+      expect(count(html.toLowerCase(), '<meta'), hostile).toBe(2);
+    }
+    expect(markupOf({ after: '<p>no meta here</p>' }, 'after')).toBe('<p>no meta here</p>');
+  });
+});
+
+// jsdom lives in the web package; it's only used here to run the frame's script against hostile markup.
+// It has no types here (the web package owns the dependency), so the little that's used is typed by hand.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type FrameWindow = any;
+const { JSDOM } = createRequire(path.resolve(__dirname, '../../web/package.json'))('jsdom') as {
+  JSDOM: new (html: string, options: { runScripts: string; pretendToBeVisual: boolean; beforeParse: (win: FrameWindow) => void }) => { window: FrameWindow };
+};
+
+/** Loads a whole mockup document in jsdom with its scripts run, and returns the messages the script posts to its parent. */
+async function loadFrame(markup: string) {
+  const html = mockupDocument({ body: markup, kitCss: '', nonce: 'n0', title: 'Hostile' });
+  const posted: { type: string }[] = [];
+  const dom = new JSDOM(html, {
+    runScripts: 'dangerously',
+    pretendToBeVisual: true,
+    beforeParse(win: FrameWindow) {
+      (win as unknown as Record<string, unknown>).ResizeObserver = class {
+        observe() {}
+        disconnect() {}
+      };
+      // A top-level jsdom window is its own parent, so what the script posts to it can be listened for.
+      win.addEventListener('message', (e: Event) => {
+        const d = (e as MessageEvent).data as { source?: string; type: string };
+        if (d?.source === 'dp-mockup') posted.push(d);
+      });
+    },
+  });
+  await new Promise<void>((resolve) => dom.window.addEventListener('load', () => resolve()));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  return { win: dom.window, posted };
+}
+
+describe('the pin script against hostile markup', () => {
+  const HOSTILE =
+    '<a id="a" href="https://x.example/">link</a>' +
+    '<map name="m"><area id="area" href="https://x.example/" shape="rect" coords="0,0,9,9"></map>' +
+    '<svg xmlns:xlink="http://www.w3.org/1999/xlink"><a id="svga" xlink:href="https://x.example/"><text id="svgt">t</text></a></svg>' +
+    '<form id="f"><button id="b">go</button></form>' +
+    '<img name="querySelector"><img name="createElement"><img name="addEventListener"><img name="documentElement">';
+
+  const click = (win: Awaited<ReturnType<typeof loadFrame>>['win'], id: string) => {
+    const ev = new win.MouseEvent('click', { bubbles: true, cancelable: true });
+    win.document.getElementById(id)!.dispatchEvent(ev);
+    return ev.defaultPrevented;
+  };
+
+  it('stops every kind of link and form from navigating, and still reports its size', async () => {
+    const { win, posted } = await loadFrame(HOSTILE);
+    for (const id of ['a', 'area', 'svga', 'svgt']) expect(click(win, id), id).toBe(true);
+    const submit = new win.Event('submit', { bubbles: true, cancelable: true });
+    win.document.getElementById('f')!.dispatchEvent(submit);
+    expect(submit.defaultPrevented).toBe(true);
+    expect(posted.some((m) => m.type === 'size')).toBe(true);
+  });
+
+  it('survives markup that swallows the rest of the document', async () => {
+    for (const tail of ['<plaintext>', '<textarea>', '<style>', '<!--']) {
+      const { win, posted } = await loadFrame(`${HOSTILE}<a id="late" href="https://x.example/">late</a>${tail}`);
+      expect(click(win, 'a'), tail).toBe(true);
+      expect(posted.some((m) => m.type === 'size'), tail).toBe(true);
+    }
   });
 });
