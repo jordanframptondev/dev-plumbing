@@ -28,7 +28,7 @@ cd packages/cli && pnpm link --global
 
 ## Use it
 
-Setup installs the Claude Code plugin for your user (skip it with `--no-plugin`). In any clone of a repo, in Claude Code:
+Setup installs the Claude Code plugin for your user (skip it with `--no-plugin`). `/dev-plumbing` is a Claude Code command, not a terminal command. Plugins load when a Claude Code session starts, so after setup, start a new session (or run `/reload-plugins` in an open one). Then, in any clone of a repo:
 
 ```
 /dev-plumbing docs/specs/my-feature.md
@@ -39,7 +39,9 @@ Setup installs the Claude Code plugin for your user (skip it with `--no-plugin`)
 - **Answer:** in the app, answer threads, then press **Send this thread** or **Submit all**. Claude answers each thread with a subagent and listens for more.
 - **Keep chatting:** after two minutes the listening call moves to the background, so you can keep using the Claude window.
 - **No arguments:** `/dev-plumbing` lists this repo's plumbing projects to reopen.
-- **Keep this checkout:** the plugin runs from its build here, so after you pull, run `pnpm build` again.
+- **Keep this checkout:** the plugin and the app both run from its build here. After you pull, run `pnpm build`, restart the app (`dev-plumbing stop`, then `dev-plumbing start`), and start a new Claude Code session.
+
+How the app, the plugin, its agents and its tools fit together is explained in [docs/how-it-works.md](docs/how-it-works.md).
 
 ## Commands
 
