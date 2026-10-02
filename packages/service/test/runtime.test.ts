@@ -65,4 +65,15 @@ describe('listening windows', () => {
     expect(l.state('acme/x')).toBe('waiting');
     await waiting;
   });
+
+  it('a ping during a wait does not keep the window alive forever', async () => {
+    let t = 0;
+    const l = new Listeners({ now: () => t, aliveMs: 90_000 });
+    const waiting = l.wait('w1', 'acme/x', 20);
+    l.seen('w1');
+    await waiting;
+    t = 200_000;
+    expect(l.isAlive('w1')).toBe(false);
+    expect(l.state('acme/x')).toBeNull();
+  });
 });

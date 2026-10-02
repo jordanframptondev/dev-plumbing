@@ -34,8 +34,15 @@ export class Listeners {
     const w = this.windows.get(windowId);
     const nextKey = key ?? w?.key;
     if (!nextKey) return;
-    this.windows.set(windowId, { key: nextKey, lastSeen: this.now(), waits: w?.waits ?? 0, busy: w?.busy ?? false });
-    this.check(nextKey, ...(w && w.key !== nextKey ? [w.key] : []));
+    // Update in place: wait() holds this object and decrements `waits` on it when it ends.
+    const previousKey = w?.key;
+    if (w) {
+      w.key = nextKey;
+      w.lastSeen = this.now();
+    } else {
+      this.windows.set(windowId, { key: nextKey, lastSeen: this.now(), waits: 0, busy: false });
+    }
+    this.check(nextKey, ...(previousKey && previousKey !== nextKey ? [previousKey] : []));
   }
 
   isAlive(windowId: string): boolean {

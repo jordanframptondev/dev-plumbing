@@ -173,4 +173,11 @@ describe('opening the plan file', () => {
     const home = (await (await call(app, '/api/projects/acme/restock-reminders')).json()) as { listening: string | null };
     expect(home.listening).toBe('waiting');
   });
+
+  it('says 404 when asked to open the source of an unknown project', async () => {
+    const { ctx } = await makeContext();
+    const res = await call(createApp(ctx), '/api/open', { method: 'POST', body: JSON.stringify({ target: 'source', repo: 'acme', id: 'nope' }) });
+    expect(res.status).toBe(404);
+    expect(((await res.json()) as { error: string }).error).toMatch(/doesn't exist/);
+  });
 });
