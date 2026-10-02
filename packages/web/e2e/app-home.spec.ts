@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { noSideScroll } from './env';
+import fs from 'node:fs';
+import { configPath, noSideScroll, writeJson } from './env';
 
 test('search sits at the very top', async ({ page }) => {
   await page.goto('/');
@@ -29,7 +30,7 @@ test('active is the default tab and finalized projects have their own', async ({
 });
 
 test('the empty state depends on the tab', async ({ page }) => {
-  await page.route((url) => url.pathname === '/api/projects', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [], total: 0 }) }));
+  await page.route((url) => url.pathname === '/api/projects', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [], total: 0, problems: [] }) }));
   await page.goto('/');
   const empty = page.getByTestId('empty-state');
   await expect(empty).toHaveText('No active plumbing projects.');
@@ -62,4 +63,16 @@ test.describe('on a phone', () => {
     await expect(page.getByTestId('project-row').first()).toBeVisible();
     expect(await noSideScroll(page)).toEqual([]);
   });
+});
+
+test("explains a projects folder that can't be read", async ({ page }) => {
+  fs.mkdirSync(configPath('repos'), { recursive: true });
+  writeJson('repos/ghost.json', { name: 'ghost', match: ['github.com/acme/ghost'], projectsFolder: '~/no-such-folder' });
+  try {
+    await page.goto('/');
+    await expect(page.getByTestId('discovery-problem')).toContainText('repo profile "ghost"');
+    await expect(page.getByTestId('discovery-problem')).toContainText("doesn't exist");
+  } finally {
+    fs.rmSync(configPath('repos/ghost.json'), { force: true });
+  }
 });

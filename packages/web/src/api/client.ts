@@ -1,6 +1,7 @@
 import type {
   AgentsConfig,
   ConfigProblem,
+  DiscoveryProblem,
   ProjectHome,
   ProjectSummary,
   RepoProfile,
@@ -38,7 +39,7 @@ export type FileResponse = { text: string; hasDefault: boolean };
 export const api = {
   config: () => request<ConfigResponse>('/api/config'),
   projects: (p: { q: string; tab: Tab; offset: number; limit: number }) =>
-    request<{ items: ProjectSummary[]; total: number }>(`/api/projects?${new URLSearchParams({ q: p.q, tab: p.tab, offset: String(p.offset), limit: String(p.limit) })}`),
+    request<{ items: ProjectSummary[]; total: number; problems: DiscoveryProblem[] }>(`/api/projects?${new URLSearchParams({ q: p.q, tab: p.tab, offset: String(p.offset), limit: String(p.limit) })}`),
   projectHome: (repo: string, id: string) => request<ProjectHome>(`/api/projects/${enc(repo)}/${enc(id)}`),
   typeItems: (repo: string, id: string, type: string) => request<{ type: TypeEntry; items: TypeItemRow[] }>(`/api/projects/${enc(repo)}/${enc(id)}/types/${enc(type)}`),
   document: (repo: string, id: string, which: string) => request<{ text: string | null }>(`/api/projects/${enc(repo)}/${enc(id)}/docs/${enc(which)}`),

@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import type { Dirent } from 'node:fs';
 import path from 'node:path';
 import { expandHome } from '../paths';
 import {
@@ -7,6 +8,7 @@ import {
   itemSchema,
   plumbingProjectSchema,
   threadSchema,
+  type DiscoveryProblem,
   type InboxEntry,
   type Item,
   type PlumbingProject,
@@ -25,24 +27,49 @@ export class ProjectUnreadableError extends Error {}
 
 const exists = (p: string) => fs.access(p).then(() => true, () => false);
 
-async function subdirs(dir: string): Promise<string[]> {
+/** Sub-folder names, following symlinks to folders. An error code if the folder itself can't be listed. */
+async function readSubdirs(dir: string): Promise<{ names: string[]; error?: string }> {
+  let entries: Dirent[];
   try {
-    return (await fs.readdir(dir, { withFileTypes: true }))
-      .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
-      .map((d) => d.name)
-      .sort();
-  } catch {
-    return [];
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch (e) {
+    return { names: [], error: (e as NodeJS.ErrnoException).code ?? 'UNKNOWN' };
   }
+  const names: string[] = [];
+  for (const d of entries) {
+    if (d.name.startsWith('.')) continue;
+    if (d.isDirectory()) names.push(d.name);
+    else if (d.isSymbolicLink()) {
+      const target = await fs.stat(path.join(dir, d.name)).catch(() => null);
+      if (target?.isDirectory()) names.push(d.name);
+    }
+  }
+  return { names: names.sort() };
+}
+
+function folderProblem(code: string): string {
+  if (code === 'ENOENT') return "doesn't exist";
+  if (code === 'ENOTDIR') return "isn't a folder";
+  if (code === 'EACCES' || code === 'EPERM') return "can't be read (no permission)";
+  return `can't be read (${code})`;
 }
 
 async function looksLikeProject(dir: string): Promise<boolean> {
   return (await exists(path.join(dir, 'project.json'))) || (await exists(path.join(dir, 'threads'))) || (await exists(path.join(dir, 'items')));
 }
 
-/** Repo-profile folders first (<folder>/<project>), then settings.projectsFolder (<folder>/<repo>/<project>). Each real folder once. */
-export async function findProjects(settings: Settings, repos: RepoProfile[], home?: string): Promise<ProjectRef[]> {
+/**
+ * Repo-profile folders first (<folder>/<project>), then settings.projectsFolder (<folder>/<repo>/<project>).
+ * Each real folder once. A folder that can't be listed is reported, except a main projects folder that
+ * doesn't exist yet (that's just a fresh install).
+ */
+export async function discoverProjects(
+  settings: Settings,
+  repos: RepoProfile[],
+  home?: string,
+): Promise<{ refs: ProjectRef[]; problems: DiscoveryProblem[] }> {
   const refs: ProjectRef[] = [];
+  const problems: DiscoveryProblem[] = [];
   const seen = new Set<string>();
   const add = async (repo: string, id: string, dir: string) => {
     if (!(await looksLikeProject(dir))) return;
@@ -54,13 +81,30 @@ export async function findProjects(settings: Settings, repos: RepoProfile[], hom
   for (const profile of repos) {
     if (!profile.projectsFolder) continue;
     const folder = expandHome(profile.projectsFolder, home);
-    for (const id of await subdirs(folder)) await add(profile.name, id, path.join(folder, id));
+    const r = await readSubdirs(folder);
+    if (r.error) {
+      problems.push({
+        folder: profile.projectsFolder,
+        message: `The projects folder for repo profile "${profile.name}" ${folderProblem(r.error)}. Check it in Settings → Repos.`,
+      });
+    }
+    for (const id of r.names) await add(profile.name, id, path.join(folder, id));
   }
   const root = expandHome(settings.projectsFolder, home);
-  for (const repo of await subdirs(root)) {
-    for (const id of await subdirs(path.join(root, repo))) await add(repo, id, path.join(root, repo, id));
+  const top = await readSubdirs(root);
+  if (top.error && top.error !== 'ENOENT') {
+    problems.push({ folder: settings.projectsFolder, message: `The projects folder ${folderProblem(top.error)}. Check it in Settings.` });
   }
-  return refs;
+  for (const repo of top.names) {
+    const r = await readSubdirs(path.join(root, repo));
+    if (r.error) problems.push({ folder: path.join(root, repo), message: `This folder ${folderProblem(r.error)}.` });
+    for (const id of r.names) await add(repo, id, path.join(root, repo, id));
+  }
+  return { refs, problems };
+}
+
+export async function findProjects(settings: Settings, repos: RepoProfile[], home?: string): Promise<ProjectRef[]> {
+  return (await discoverProjects(settings, repos, home)).refs;
 }
 
 async function readJson(file: string): Promise<{ ok: true; value: unknown } | { ok: false; error: string }> {

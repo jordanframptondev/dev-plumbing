@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
+import { writeJsonAtomic } from '@dev-plumbing/core';
 import { createApp } from '../src/app';
 import { call, makeContext, removeTempDirs } from './helpers';
 
@@ -22,6 +23,14 @@ describe('projects API', () => {
     expect(page.total).toBe(3);
     const found = (await (await call(app, '/api/projects?tab=all&q=onboarding')).json()) as Record<string, unknown>;
     expect((found.items as Array<{ id: string }>).map((s) => s.id)).toEqual(['onboarding-emails']);
+  });
+
+  it('lists project folders that could not be read', async () => {
+    const { ctx } = await makeContext();
+    await writeJsonAtomic(path.join(ctx.configDir, 'repos', 'ghost.json'), { name: 'ghost', match: ['github.com/acme/ghost'], projectsFolder: '/no/such/folder' });
+    const res = await call(createApp(ctx), '/api/projects?tab=all');
+    const body = (await res.json()) as { problems: { folder: string; message: string }[] };
+    expect(body.problems).toEqual([{ folder: '/no/such/folder', message: expect.stringMatching(/"ghost".*doesn't exist/) }]);
   });
 
   it('returns the project home, and 404 for an unknown project', async () => {

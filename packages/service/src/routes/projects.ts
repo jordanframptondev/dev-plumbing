@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Hono, type Context } from 'hono';
 import {
+  discoverProjects,
   expandHome,
   findProjects,
   listProjectSummaries,
@@ -40,16 +41,15 @@ export function projectRoutes(ctx: AppContext): Hono {
 
   r.get('/projects', async (c) => {
     const cfg = await loadConfig(ctx.configDir);
-    const refs = await findProjects(cfg.settings, cfg.repos, ctx.home);
+    const { refs, problems } = await discoverProjects(cfg.settings, cfg.repos, ctx.home);
     const tab = TABS.find((t) => t === c.req.query('tab')) ?? 'active';
-    return c.json(
-      await listProjectSummaries(refs, {
-        q: c.req.query('q') ?? '',
-        tab,
-        offset: clampInt(c.req.query('offset'), 0, 1_000_000, 0),
-        limit: clampInt(c.req.query('limit'), 1, 200, cfg.settings.homePageSize),
-      }),
-    );
+    const list = await listProjectSummaries(refs, {
+      q: c.req.query('q') ?? '',
+      tab,
+      offset: clampInt(c.req.query('offset'), 0, 1_000_000, 0),
+      limit: clampInt(c.req.query('limit'), 1, 200, cfg.settings.homePageSize),
+    });
+    return c.json({ ...list, problems });
   });
 
   r.get('/projects/:repo/:id', async (c) => {

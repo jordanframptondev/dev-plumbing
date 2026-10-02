@@ -63,6 +63,11 @@ export function AppHome() {
           ]}
         />
       </div>
+      {projects.data?.problems.map((p) => (
+        <p key={p.folder} className="mt-3 text-[12.5px] text-seal" data-testid="discovery-problem">
+          <span className="break-all font-mono text-[11.5px]">{p.folder}</span>: {p.message}
+        </p>
+      ))}
 
       {projects.error && <p className="mt-6 text-[13px] text-seal">{(projects.error as Error).message}</p>}
 

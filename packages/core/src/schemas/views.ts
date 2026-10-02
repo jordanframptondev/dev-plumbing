@@ -82,3 +82,6 @@ export type ProjectHome = {
 };
 
 export type TypeItemRow = { id: string; title: string; summary: string; status: DisplayStatus; blocking: boolean };
+
+/** A projects folder that couldn't be read while listing plumbing projects. */
+export type DiscoveryProblem = { folder: string; message: string };

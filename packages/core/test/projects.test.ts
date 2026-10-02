@@ -5,6 +5,7 @@ import { installDefaults, loadConfig } from '../src/config';
 import { writeDemoProjects } from '../src/demo';
 import { defaultSettings, repoProfileSchema } from '../src/schemas';
 import {
+  discoverProjects,
   findProjects,
   listProjectSummaries,
   loadProjectHome,
@@ -174,5 +175,42 @@ describe('project store', () => {
     const s = await summarizeProject(ref('beta', 'file-threads'));
     expect(s.error).toMatch(/thread file couldn't be read/);
     expect(s.status).toBe('active');
+  });
+});
+
+describe('discoverProjects', () => {
+  it("says when a repo profile's projects folder doesn't exist", async () => {
+    const profile = repoProfileSchema.parse({ name: 'ghost', match: ['github.com/acme/ghost'], projectsFolder: path.join(root, 'nowhere') });
+    const { refs, problems } = await discoverProjects(settings(), [profile]);
+    expect(refs).toHaveLength(3);
+    expect(problems).toEqual([{ folder: path.join(root, 'nowhere'), message: expect.stringMatching(/repo profile "ghost".*doesn't exist/) }]);
+  });
+
+  it("stays quiet when the main projects folder doesn't exist yet", async () => {
+    const { refs, problems } = await discoverProjects({ ...defaultSettings, projectsFolder: path.join(root, 'not-yet') }, []);
+    expect(refs).toEqual([]);
+    expect(problems).toEqual([]);
+  });
+
+  it("says when the main projects folder can't be read", async () => {
+    await fs.chmod(root, 0o000);
+    try {
+      const { problems } = await discoverProjects(settings(), []);
+      expect(problems[0]?.message).toMatch(/can't be read/);
+    } finally {
+      await fs.chmod(root, 0o700);
+    }
+  });
+
+  it('finds projects and repo folders reached through symlinks', async () => {
+    const elsewhere = tempDir('dp-linked-');
+    await writeDemoProjects(elsewhere, NOW);
+    await fs.mkdir(path.join(root, 'linked'), { recursive: true });
+    await fs.symlink(path.join(elsewhere, 'acme', 'restock-reminders'), path.join(root, 'linked', 'restock-copy'));
+    await fs.symlink(path.join(elsewhere, 'beta'), path.join(root, 'beta-link'));
+    const { refs } = await discoverProjects(settings(), []);
+    const ids = refs.map((r) => `${r.repo}/${r.id}`);
+    expect(ids).toContain('linked/restock-copy');
+    expect(ids).toContain('beta-link/checkout-redesign');
   });
 });
