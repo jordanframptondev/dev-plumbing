@@ -46,6 +46,26 @@ describe('recording changes', () => {
     expect(applied.appliedAt).toBeDefined();
     expect(await draftOf(dir)).toContain('one row per send');
   });
+  it('a write that fails part-way leaves the draft, items and history as they were', async () => {
+    if (process.getuid?.() === 0) return;
+    const dir = await seedProject({ pairs: [pair('q1')] });
+    await fs.chmod(path.join(dir, 'items'), 0o500);
+    try {
+      const attempt = recordChange(dir, {
+        threadId: 't-q1',
+        kind: 'small-edit',
+        summary: 's',
+        change: { ...tableChange, items: [{ itemId: 'q1', patch: { title: 'Rows per send?' } }] },
+        apply: true,
+      });
+      await expect(attempt).rejects.toThrow();
+    } finally {
+      await fs.chmod(path.join(dir, 'items'), 0o700);
+    }
+    expect(await draftOf(dir)).toBe(DRAFT);
+    expect(await readHistory(dir)).toEqual([]);
+    expect((await readItem(dir, 'q1')).title).toBe('Question q1');
+  });
 });
 
 describe('undo', () => {

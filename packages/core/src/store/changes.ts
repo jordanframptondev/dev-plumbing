@@ -26,8 +26,18 @@ export const patchItem = (item: Item, patch: ItemPatch): Item => ({
   ...(patch.fields ? { fields: { ...(item.fields ?? {}), ...patch.fields } } : {}),
 });
 
-/** Applies a change to draft.md and the items. Throws ConflictError, writing nothing, if any part doesn't fit. */
-async function write(dir: string, change: Change, now: Date): Promise<{ itemsBefore: Record<string, Item>; itemsAfter: Record<string, Item> }> {
+type Snapshot = { itemsBefore: Record<string, Item>; itemsAfter: Record<string, Item> };
+const quiet = () => undefined;
+
+/** Updates the project's timestamp. It's only a timestamp, so a failure here is ignored. */
+const touch = (dir: string, now: Date) => touchProject(dir, now).catch(quiet);
+
+/**
+ * Applies a change to draft.md and the items. Throws ConflictError, writing nothing, if any part doesn't fit.
+ * If a write fails part-way, the draft and items are put back and the error is rethrown. On success, `restore`
+ * puts them back, for a caller whose next write fails.
+ */
+async function write(dir: string, change: Change): Promise<Snapshot & { restore: () => Promise<void> }> {
   const project = await readProjectFile(dir);
   const draft = await readDocText(dir, project.docs.draft);
   const { values: items } = await readItems(dir);
@@ -41,10 +51,18 @@ async function write(dir: string, change: Change, now: Date): Promise<{ itemsBef
     if (!(c.itemId in itemsBefore)) itemsBefore[c.itemId] = before;
     itemsAfter[c.itemId] = patchItem(before, c.patch);
   }
-  if (md?.ok) await writeDocText(dir, project.docs.draft, md.text);
-  for (const item of Object.values(itemsAfter)) await writeItem(dir, item);
-  await touchProject(dir, now);
-  return { itemsBefore, itemsAfter };
+  const restore = async () => {
+    await writeDocText(dir, project.docs.draft, draft).catch(quiet);
+    for (const item of Object.values(itemsBefore)) await writeItem(dir, item).catch(quiet);
+  };
+  try {
+    if (md?.ok) await writeDocText(dir, project.docs.draft, md.text);
+    for (const item of Object.values(itemsAfter)) await writeItem(dir, item);
+  } catch (error) {
+    await restore();
+    throw error;
+  }
+  return { itemsBefore, itemsAfter, restore };
 }
 
 export async function recordChange(
@@ -63,8 +81,16 @@ export async function recordChange(
     itemsAfter: {},
   };
   if (o.apply) {
-    const snapshot = await write(dir, o.change, now);
+    const { restore, ...snapshot } = await write(dir, o.change);
     Object.assign(entry, { appliedAt: entry.at, ...snapshot });
+    try {
+      await writeHistoryEntry(dir, entry);
+    } catch (error) {
+      await restore();
+      throw error;
+    }
+    await touch(dir, now);
+    return entry;
   }
   await writeHistoryEntry(dir, entry);
   return entry;
@@ -74,9 +100,15 @@ export async function recordChange(
 export async function applyPendingChange(dir: string, changeId: string, now: Date = new Date()): Promise<HistoryEntry> {
   const entry = await readHistoryEntry(dir, changeId);
   if (entry.appliedAt && !entry.undoneAt) throw new ConflictError('That change is already applied.');
-  const snapshot = await write(dir, entry.change, now);
+  const { restore, ...snapshot } = await write(dir, entry.change);
   const updated: HistoryEntry = { ...entry, appliedAt: now.toISOString(), undoneAt: undefined, ...snapshot };
-  await writeHistoryEntry(dir, updated);
+  try {
+    await writeHistoryEntry(dir, updated);
+  } catch (error) {
+    await restore();
+    throw error;
+  }
+  await touch(dir, now);
   return updated;
 }
 
@@ -87,10 +119,12 @@ export async function undoChange(dir: string, changeId: string, now: Date = new 
   if (!entry.appliedAt || entry.undoneAt) throw new ConflictError("That change isn't applied.");
   const project = await readProjectFile(dir);
   let draftText: string | null = null;
+  let currentDraft: string | null = null;
   if (entry.change.md?.length) {
     const inverse = invertMdPatches(entry.change.md);
     if (!inverse.ok) throw new ConflictError(inverse.error);
-    const r = applyMdPatches(await readDocText(dir, project.docs.draft), inverse.patches);
+    currentDraft = await readDocText(dir, project.docs.draft);
+    const r = applyMdPatches(currentDraft, inverse.patches);
     if (!r.ok) throw new ConflictError(`The draft has changed there since, so this can't be undone. ${r.error}`);
     draftText = r.text;
   }
@@ -98,10 +132,16 @@ export async function undoChange(dir: string, changeId: string, now: Date = new 
     const current = await readItem(dir, id);
     if (stable(current) !== stable(after)) throw new ConflictError(`"${current.title}" has changed since, so this can't be undone.`);
   }
-  if (draftText !== null) await writeDocText(dir, project.docs.draft, draftText);
-  for (const before of Object.values(entry.itemsBefore)) await writeItem(dir, itemSchema.parse(before));
-  await touchProject(dir, now);
   const updated: HistoryEntry = { ...entry, undoneAt: now.toISOString() };
-  await writeHistoryEntry(dir, updated);
+  try {
+    if (draftText !== null) await writeDocText(dir, project.docs.draft, draftText);
+    for (const before of Object.values(entry.itemsBefore)) await writeItem(dir, itemSchema.parse(before));
+    await writeHistoryEntry(dir, updated);
+  } catch (error) {
+    if (currentDraft !== null) await writeDocText(dir, project.docs.draft, currentDraft).catch(quiet);
+    for (const after of Object.values(entry.itemsAfter)) await writeItem(dir, itemSchema.parse(after)).catch(quiet);
+    throw error;
+  }
+  await touch(dir, now);
   return updated;
 }
