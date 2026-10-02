@@ -17,6 +17,21 @@ export async function health(port: number, timeoutMs = 1000): Promise<{ pid: num
   }
 }
 
+/** Whether a process with this pid still exists. Only ESRCH means it's gone (EPERM means it's someone else's). */
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+}
+
+/** A failed health check may just be a slow service: only remove its run file once its process is gone. */
+async function removeStaleRunFile(configDir: string, pid: number): Promise<void> {
+  if (!pidAlive(pid)) await removeRunFile(configDir, pid);
+}
+
 async function tail(file: string, lines = 15): Promise<string> {
   const text = await fs.readFile(file, 'utf8').catch(() => '');
   return text.trim().split('\n').slice(-lines).join('\n');
@@ -28,7 +43,7 @@ export async function startService(o: { configDir: string; serviceEntry: string;
   if (run) {
     const h = await health(run.port);
     if (h && h.pid === run.pid) return { status: 'already-running' as const, url: `http://localhost:${run.port}`, pid: run.pid };
-    await removeRunFile(o.configDir);
+    await removeStaleRunFile(o.configDir, run.pid);
   }
   const running = await health(settings.port);
   if (running) return { status: 'already-running' as const, url: `http://localhost:${settings.port}`, pid: running.pid };
@@ -66,7 +81,7 @@ export async function stopService(configDir: string, waitMs = 5000): Promise<'st
   if (!run) return 'not-running';
   const h = await health(run.port);
   if (!h || h.pid !== run.pid) {
-    await removeRunFile(configDir);
+    await removeStaleRunFile(configDir, run.pid);
     return 'not-running';
   }
   process.kill(run.pid, 'SIGTERM');
