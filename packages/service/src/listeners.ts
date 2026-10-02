@@ -1,10 +1,14 @@
 import type { ListeningState } from '@dev-plumbing/core';
 
-type Window = { key: string; lastSeen: number; waits: number; busy: boolean };
+type Window = { key: string; lastSeen: number; lastWait?: number; waits: number; busy: boolean };
+
+/** How long after its last wait a window still counts as listening: the gap before its next poll. */
+export const LISTEN_GAP_MS = 10_000;
 
 /**
  * The Claude windows working on each plumbing project (key = "repo/id").
  * - A window is alive while it's inside a wait, or for `aliveMs` after it was last seen. The MCP server pings every 30 s.
+ * - A live window is listening while it's inside a wait, or within LISTEN_GAP_MS of its last one. Pings alone don't count.
  * - A project is "waiting" if a live window is listening, "busy" if a live window is answering a submission, otherwise null.
  */
 export class Listeners {
@@ -31,18 +35,34 @@ export class Listeners {
 
   /** The window is alive. With a key, it is now working on that project. */
   seen(windowId: string, key?: string): void {
+    this.update(windowId, key, false);
+  }
+
+  /** The window asked for work on this project (a /wait), so it's listening there, even if it doesn't wait. */
+  polled(windowId: string, key: string): void {
+    this.update(windowId, key, true);
+  }
+
+  private update(windowId: string, key: string | undefined, polled: boolean): void {
     const w = this.windows.get(windowId);
     const nextKey = key ?? w?.key;
     if (!nextKey) return;
     // Update in place: wait() holds this object and decrements `waits` on it when it ends.
     const previousKey = w?.key;
+    const now = this.now();
     if (w) {
       w.key = nextKey;
-      w.lastSeen = this.now();
+      w.lastSeen = now;
+      if (polled) w.lastWait = now;
     } else {
-      this.windows.set(windowId, { key: nextKey, lastSeen: this.now(), waits: 0, busy: false });
+      this.windows.set(windowId, { key: nextKey, lastSeen: now, waits: 0, busy: false, ...(polled ? { lastWait: now } : {}) });
     }
     this.check(nextKey, ...(previousKey && previousKey !== nextKey ? [previousKey] : []));
+  }
+
+  /** Inside a wait, or between polls. */
+  private listening(w: Window): boolean {
+    return w.waits > 0 || (w.lastWait !== undefined && this.now() - w.lastWait < LISTEN_GAP_MS);
   }
 
   /** Whether the window is inside a wait on this project right now. */
@@ -62,7 +82,7 @@ export class Listeners {
     for (const [id, w] of this.windows) {
       if (w.key !== key || !this.isAlive(id)) continue;
       if (w.busy) busy = true;
-      else waiting = true;
+      else if (this.listening(w)) waiting = true;
     }
     return waiting ? 'waiting' : busy ? 'busy' : null;
   }
@@ -100,6 +120,7 @@ export class Listeners {
     } finally {
       w.waits--;
       w.lastSeen = this.now();
+      w.lastWait = w.lastSeen;
       this.check(w.key);
     }
   }

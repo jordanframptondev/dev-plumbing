@@ -250,7 +250,7 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
       // Another wait from this window is still open here (an older dp_wait call), so this call isn't the window
       // coming back from its last submission: leave what it picked up, and its busy mark, alone.
       const alreadyWaiting = rt.listeners.inWait(body.windowId, key);
-      rt.listeners.seen(body.windowId, key);
+      rt.listeners.polled(body.windowId, key);
       if (!alreadyWaiting) rt.listeners.setBusy(body.windowId, false);
       const importDone = await rt.withLock(key, async () => {
         if (body.finished) {

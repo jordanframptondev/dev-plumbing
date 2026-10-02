@@ -41,7 +41,7 @@ async function setup() {
     });
   }
   const dir = path.join(s.root, 'acme-app', 'restock-reminders');
-  return { ...s, rt, app, send, dir };
+  return { ...s, rt, app, send, dir, repo };
 }
 
 describe('thread routes', () => {
@@ -74,6 +74,16 @@ describe('thread routes', () => {
     await t.send('PUT', `${P}/threads/t-questions-channels/draft`, { text: 'Both.' });
     const sent = await t.send('POST', `${P}/submit`, { scope: 'all' });
     expect(sent.body).toMatchObject({ sent: 1, listening: null, message: 'Saved. No Claude window is listening. Run /dev-plumbing in any clone.' });
+  });
+
+  it("a window that only opened the project and pinged isn't listening", async () => {
+    const t = await setup();
+    expect((await t.send('POST', '/api/claude/open', { cwd: t.repo, project: 'restock-reminders', windowId: 'w-idle' })).status).toBe(200);
+    expect((await t.send('POST', '/api/claude/alive', { windowId: 'w-idle' })).body).toEqual({ ok: true });
+    await t.send('PUT', `${P}/threads/t-questions-channels/draft`, { text: 'Both.' });
+    const sent = await t.send('POST', `${P}/submit`, { scope: 'all' });
+    expect(sent.body).toMatchObject({ sent: 1, listening: null, message: 'Saved. No Claude window is listening. Run /dev-plumbing in any clone.' });
+    expect(t.rt.listeners.isAlive('w-idle')).toBe(true);
   });
 
   it('tells a waiting window about the submission at once', async () => {

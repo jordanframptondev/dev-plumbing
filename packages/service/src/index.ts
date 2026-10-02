@@ -42,8 +42,8 @@ async function main() {
     process.exit(1);
   }
   await writeRunFile(dir, { pid: process.pid, port: settings.port, token, startedAt: new Date().toISOString(), version: VERSION });
-  // Quiet windows stop showing as "Claude listening" even when nothing else happens.
-  setInterval(() => rt.listeners.sweep(), 15_000).unref();
+  // Quiet windows stop showing as "Claude listening" even when nothing else happens. Often enough for the 10 s gap between polls.
+  setInterval(() => rt.listeners.sweep(), 5_000).unref();
   console.log(`dev-plumbing is running at http://localhost:${settings.port}`);
 
   const stop = async () => {

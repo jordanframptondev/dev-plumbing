@@ -166,8 +166,8 @@ describe('opening the plan file', () => {
     const { ctx } = await makeContext();
     const rt = createRuntime();
     const app = createApp(ctx, rt);
-    rt.listeners.seen('w-1', 'acme/restock-reminders');
-    const list = (await (await call(app, '/api/projects?tab=all')).json()) as { items: { id: string; listening: string | null }[] };
+    rt.listeners.polled('w-1', 'acme/restock-reminders');
+    const list =(await (await call(app, '/api/projects?tab=all')).json()) as { items: { id: string; listening: string | null }[] };
     expect(list.items.find((p) => p.id === 'restock-reminders')?.listening).toBe('waiting');
     expect(list.items.find((p) => p.id === 'onboarding-emails')?.listening).toBeNull();
     const home = (await (await call(app, '/api/projects/acme/restock-reminders')).json()) as { listening: string | null };

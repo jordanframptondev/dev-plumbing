@@ -34,6 +34,8 @@ describe('listening windows', () => {
     const l = new Listeners({ now: () => t, aliveMs: 90_000, onChange: (k) => changes.push(k) });
     expect(l.state('acme/x')).toBeNull();
     l.seen('w1', 'acme/x');
+    expect(l.state('acme/x')).toBeNull();
+    l.polled('w1', 'acme/x');
     expect(l.state('acme/x')).toBe('waiting');
     l.setBusy('w1', true);
     expect(l.state('acme/x')).toBe('busy');
@@ -42,6 +44,27 @@ describe('listening windows', () => {
     expect(l.state('acme/x')).toBeNull();
     expect(l.isAlive('w1')).toBe(false);
     expect(changes).toEqual(['acme/x', 'acme/x', 'acme/x']);
+  });
+
+  it('a window is listening only inside a wait, or within 10 s of its last one, never from pings alone', async () => {
+    let t = 0;
+    const l = new Listeners({ now: () => t, aliveMs: 90_000 });
+    l.seen('w1', 'acme/x');
+    expect(l.isAlive('w1')).toBe(true);
+    expect(l.state('acme/x')).toBeNull();
+    const waiting = l.wait('w1', 'acme/x', 10);
+    expect(l.state('acme/x')).toBe('waiting');
+    await waiting;
+    t = 9_999;
+    expect(l.state('acme/x')).toBe('waiting');
+    t = 10_000;
+    expect(l.state('acme/x')).toBeNull();
+    l.seen('w1');
+    expect(l.isAlive('w1')).toBe(true);
+    expect(l.state('acme/x')).toBeNull();
+    // A /wait that returns straight away is a wait too.
+    l.polled('w1', 'acme/x');
+    expect(l.state('acme/x')).toBe('waiting');
   });
 
   it('wakes a waiting window when work arrives, and times out otherwise', async () => {
