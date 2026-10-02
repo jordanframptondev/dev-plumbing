@@ -50,22 +50,38 @@ test('a plain accept applies straight away and resolves the thread', async ({ pa
   await expect(page.getByRole('button', { name: 'Park' })).toBeHidden();
 });
 
-test("a note on another option isn't sent", async ({ page }) => {
+test("a note on another option isn't saved", async ({ page }) => {
   const p = await importProject('loop-hidden', 'Loop hidden note', { questions: [rows] });
   await page.goto(`${p.url}/th/t-questions-rows`);
   await page.getByRole('radio', { name: /One row per send/ }).check();
   await page.getByRole('textbox', { name: 'Note for One row per send' }).fill('Delete rows after 180 days.');
-  await page.getByRole('radio', { name: /One row per subscription/ }).check();
+  await page.getByRole('radio', { name: 'Custom answer' }).check();
+  await page.getByRole('textbox', { name: 'Custom answer' }).fill('Ask support first.');
+  await expect(page.getByText('Draft saved · goes with Submit all')).toBeVisible();
+  await expect
+    .poll(async () => (await api(`/api/projects/${p.repo}/${p.project}/threads/t-questions-rows`)).thread.draft?.text)
+    .toBe('Ask support first.');
+  const draft = (await api(`/api/projects/${p.repo}/${p.project}/threads/t-questions-rows`)).thread.draft;
+  expect(draft.optionId).toBe('custom');
+  expect(draft.note ?? '').toBe('');
+  // Switching back shows the typed note again.
   await page.getByRole('radio', { name: /One row per send/ }).check();
   await expect(page.getByRole('textbox', { name: 'Note for One row per send' })).toHaveValue('Delete rows after 180 days.');
-  // A note typed for another option stays out of the draft: this plain accept still resolves.
-  await page.getByRole('radio', { name: /One row per subscription/ }).check();
-  await page.getByRole('textbox', { name: 'Note for One row per subscription' }).fill('Not this one.');
+});
+
+test('a failed Send keeps autosave working', async ({ page }) => {
+  const p = await importProject('loop-failsend', 'Loop failed send', { questions: [rows] });
+  await page.goto(`${p.url}/th/t-questions-rows`);
+  await page.route('**/submit', (r) => r.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'boom' }) }));
   await page.getByRole('radio', { name: /One row per send/ }).check();
-  await page.getByRole('textbox', { name: 'Note for One row per send' }).fill('');
   await page.getByRole('button', { name: 'Send this thread' }).click();
-  await expect(page.getByTestId('send-notice')).toHaveText('Applied. 1 thread resolved.');
-  await expect(page.getByTestId('thread-status')).toHaveText('Resolved');
+  await expect(page.getByRole('alert')).toContainText('boom');
+  await page.unroute('**/submit');
+  await page.getByRole('textbox', { name: 'Note for One row per send' }).fill('Still saved.');
+  await expect(page.getByText('Draft saved · goes with Submit all')).toBeVisible();
+  await expect
+    .poll(async () => (await api(`/api/projects/${p.repo}/${p.project}/threads/t-questions-rows`)).thread.draft?.note)
+    .toBe('Still saved.');
 });
 
 test('only one primary button on the desktop thread view', async ({ page }) => {

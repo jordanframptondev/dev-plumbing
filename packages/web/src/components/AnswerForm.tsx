@@ -78,6 +78,7 @@ export function AnswerForm(p: Props) {
       if (closed.current) return;
       api.saveDraft(p.repo, p.project, p.threadId, current()).then(
         () => {
+          dirty.current = false;
           setSaved('saved');
           refresh();
         },
@@ -93,6 +94,12 @@ export function AnswerForm(p: Props) {
     fn();
   };
 
+  // A failed Send or Park leaves the form open: autosave and the unmount flush must work again.
+  const reopen = () => {
+    closed.current = false;
+    dirty.current = true;
+  };
+
   const send = useMutation({
     mutationFn: async () => {
       clearTimeout(timer.current);
@@ -106,6 +113,7 @@ export function AnswerForm(p: Props) {
       p.onSent?.(r);
       refresh();
     },
+    onError: reopen,
   });
   const park = useMutation({
     mutationFn: async () => {
@@ -117,6 +125,7 @@ export function AnswerForm(p: Props) {
       return api.park(p.repo, p.project, p.threadId, true);
     },
     onSuccess: refresh,
+    onError: reopen,
   });
 
   const busy = send.isPending || park.isPending;
