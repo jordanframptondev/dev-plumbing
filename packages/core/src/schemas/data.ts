@@ -169,11 +169,20 @@ function tableProblems(t: TableDiff): string[] {
 /** Each distinct tag name the pattern finds, lowercased. */
 const tagsIn = (markup: string, pattern: RegExp) => [...new Set([...markup.matchAll(pattern)].map((m) => m[1].toLowerCase()))];
 
-/** Whether any src or srcset attribute points at a file on another site. */
+/**
+ * Whether the markup loads a file from another site: a src, srcset or poster attribute, or an href on SVG <image> or <use>.
+ * Entity-encoded URLs (&#104;ttp...) are left to the frame's CSP, which is the real guard.
+ */
 function loadsOutsideFiles(markup: string): boolean {
-  for (const m of markup.matchAll(/\s(?:src|srcset)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
+  // Not preceded by a word character or dash, so data-src stays allowed and `<img/src=...>` is caught.
+  for (const m of markup.matchAll(/(?<![\w-])(?:src|srcset|poster)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
     const value = (m[1] ?? m[2] ?? m[3] ?? '').trim();
     if (/(?:^|[\s,])(?:https?:|\/\/)/i.test(value)) return true;
+  }
+  for (const tag of markup.matchAll(/<(?:image|use)\b[^>]*>/gi)) {
+    for (const m of tag[0].matchAll(/(?<![\w-])href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
+      if (/^\s*(?:https?:|\/\/)/i.test(m[1] ?? m[2] ?? m[3] ?? '')) return true;
+    }
   }
   return false;
 }

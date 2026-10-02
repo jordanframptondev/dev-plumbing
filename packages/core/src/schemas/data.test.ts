@@ -241,6 +241,13 @@ describe('visual data shapes', () => {
     expect(withAfter('<img src="https://cdn.acme.test/logo.png">')).toEqual([outside]);
     expect(withAfter("<img src='//cdn.acme.test/logo.png'>")).toEqual([outside]);
     expect(withAfter('<img SRC=http://acme.test/a.png>')).toEqual([outside]);
+    expect(withAfter('<img/src="https://cdn.acme.test/a.png">')).toEqual([outside]);
+    expect(withAfter('<img alt="x"src="https://cdn.acme.test/a.png">')).toEqual([outside]);
+    expect(withAfter('<svg viewBox="0 0 4 4"><image href="https://cdn.acme.test/a.png"/></svg>')).toEqual([outside]);
+    expect(withAfter('<svg viewBox="0 0 4 4"><use href="//cdn.acme.test/a.svg#x"/></svg>')).toEqual([outside]);
+    expect(withAfter('<video poster="https://cdn.acme.test/a.png"></video>')).toEqual([outside]);
+    expect(withAfter('<a href="https://acme.test">Docs</a>')).toEqual([]);
+    expect(withAfter('<img data-src="https://cdn.acme.test/a.png">')).toEqual([]);
     expect(withAfter('<img srcset="small.png 1x, https://cdn.acme.test/big.png 2x">')).toEqual([outside]);
     expect(withAfter('<img data-src="https://cdn.acme.test/a.png" src="data:image/png;base64,AA=="><svg viewBox="0 0 4 4"><rect width="4" height="4"/></svg>')).toEqual([]);
     expect(problemsOf('mockups', { ...mockup, before: '<script src="/x.js"></script>' })).toEqual(["before: remove the <script> tags. Mockups can't run scripts."]);
