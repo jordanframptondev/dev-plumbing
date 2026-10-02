@@ -80,12 +80,16 @@ function ListRow({ row, type, repo, project, onSent }: { row: TypeItemRow; type:
 
 export function ListScreen({ repo, project, data }: { repo: string; project: string; data: { type: TypeEntry; items: TypeItemRow[] } }) {
   const { type, items } = data;
-  const needs = items.filter((i) => i.status === 'your_turn' || i.status === 'draft' || i.status === 'idle');
+  const needs = items.filter((i) => i.status === 'your_turn' || i.status === 'draft');
   const withClaude = items.filter((i) => i.status === 'with_claude');
   const done = items.filter((i) => i.status === 'resolved' || i.status === 'parked');
-  const [filter, setFilter] = useState<Filter>(needs.length ? 'needs' : 'all');
+  const [filter, setFilterState] = useState<Filter>(needs.length ? 'needs' : 'all');
   const [adding, setAdding] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const setFilter = (f: Filter) => {
+    setFilterState(f);
+    setNotice(null);
+  };
   const shown = filter === 'needs' ? needs : filter === 'claude' ? withClaude : filter === 'resolved' ? done : items;
   const blockingOpen = items.filter((i) => i.blocking && i.status !== 'resolved' && i.status !== 'parked').length;
 
@@ -129,7 +133,7 @@ export function ListScreen({ repo, project, data }: { repo: string; project: str
           ))}
         </Group>
       ) : (
-        <p className="mt-6 text-[13px] text-ink-3">Nothing here.</p>
+        <p className="mt-6 text-[13px] text-ink-3">{filter === 'needs' ? 'Nothing needs you right now.' : 'Nothing here.'}</p>
       )}
     </div>
   );

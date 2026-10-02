@@ -78,3 +78,22 @@ test('+ Question starts a thread with your message and sends it', async ({ page 
   await expect(page.getByText('Legal will ask for one. Can we add it?')).toBeVisible();
   await expect(page.getByTestId('thread-status')).toHaveText('With Claude');
 });
+
+test('Needs you counts only rows waiting on you; idle rows live under All', async ({ page }) => {
+  const p = await importProject('list-idle', 'List idle', {
+    questions: [questions[2]!, { key: 'info', title: 'Background note', summary: 'Just information.' }],
+  });
+  await page.goto(`${p.url}/t/questions`);
+  await expect(page.getByRole('tab', { name: 'Needs you · 1' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('list-row')).toHaveCount(1);
+  await page.getByRole('tab', { name: 'All' }).click();
+  await expect(page.getByTestId('list-row')).toHaveCount(2);
+  await page.getByRole('tab', { name: 'Needs you · 1' }).click();
+  const row = rowFor(page, 'How long to keep rows?');
+  await row.getByRole('radio', { name: /Keep 180 days/ }).check();
+  await row.getByRole('button', { name: 'Send this thread' }).click();
+  await expect(page.getByTestId('send-notice')).toBeVisible();
+  await expect(page.getByText('Nothing needs you right now.')).toBeVisible();
+  await page.getByRole('tab', { name: 'All' }).click();
+  await expect(page.getByTestId('send-notice')).toHaveCount(0);
+});
