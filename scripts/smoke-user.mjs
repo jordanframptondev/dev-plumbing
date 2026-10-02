@@ -51,15 +51,20 @@ if (long) {
   log('Waiting 35 minutes before answering, to check the long wait survives...');
   await sleep(35 * 60_000);
 }
-await call(`${P}/threads/${target.threadId}/draft`, 'PUT', draft);
-const sent = (await call(`${P}/submit`, 'POST', { scope: 'thread', threadId: target.threadId })).body;
+const saved = await call(`${P}/threads/${target.threadId}/draft`, 'PUT', draft);
+if (!saved.ok) throw new Error(`Saving the draft failed: ${saved.body.error}`);
+const before = detail.thread.messages.length;
+const submitted = await call(`${P}/submit`, 'POST', { scope: 'thread', threadId: target.threadId });
+if (!submitted.ok) throw new Error(`Submitting failed: ${submitted.body.error}`);
+const sent = submitted.body;
 log(`Answered "${target.itemTitle}": ${sent.message}`);
+if (sent.sent !== 1) throw new Error(`Expected 1 thread sent to Claude, got ${sent.sent}.`);
 
 const sentAt = Date.now();
 const reply = await until("Claude's reply", async () => {
   const d = (await call(`${P}/threads/${target.threadId}`)).body;
   const last = d.thread.messages.at(-1);
-  return last?.author === 'claude' && d.thread.status !== 'with_claude' ? last : null;
+  return d.thread.messages.length > before && last?.author === 'claude' && d.thread.status !== 'with_claude' ? last : null;
 }, 15);
 log(`Claude replied in ${Math.round((Date.now() - sentAt) / 1000)} s: ${reply.text.slice(0, 160)}`);
 log('Smoke test passed.');
