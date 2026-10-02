@@ -1,4 +1,14 @@
-import { applyMdPatches, type Change, type Option, type PlumbingType } from '../schemas';
+import {
+  applyMdPatches,
+  dataKindOf,
+  dataProblems,
+  type Change,
+  type DataContext,
+  type DataKind,
+  type Item,
+  type Option,
+  type PlumbingType,
+} from '../schemas';
 import { InputError } from './io';
 
 /** Why a change wouldn't apply to this draft and these items. Empty when it applies cleanly. */
@@ -31,6 +41,37 @@ export function fieldProblems(fields: Record<string, string> | undefined, type: 
   return Object.keys(fields ?? {})
     .filter((f) => !type.fields.includes(f))
     .map((f) => `"${f}" isn't a field of ${type.title}. Allowed: ${type.fields.join(', ') || 'none'}.`);
+}
+
+/**
+ * What data checks need to know about a project's items. kindOfItem gives an item's data kind (null for plain list
+ * items and items whose type is gone), or undefined when there's no such item. mockupItemIds are the UI items.
+ */
+export function itemDataKinds(items: Item[], types: PlumbingType[]): { kindOfItem: (itemId: string) => DataKind | null | undefined; mockupItemIds: Set<string> } {
+  const typeById = new Map(types.map((t) => [t.id, t]));
+  const kinds = new Map<string, DataKind | null>();
+  for (const i of items) {
+    const type = typeById.get(i.type);
+    kinds.set(i.id, type ? dataKindOf(type) : null);
+  }
+  return { kindOfItem: (id) => kinds.get(id), mockupItemIds: new Set(items.filter((i) => kinds.get(i.id) === 'mockups').map((i) => i.id)) };
+}
+
+/** Problems with the data a change would write into items. Items that don't exist are left to changeProblems. */
+export function changeDataProblems(change: Change, kindOfItem: (itemId: string) => DataKind | null | undefined, ctx: DataContext): string[] {
+  const problems: string[] = [];
+  for (const c of change.items ?? []) {
+    if (c.patch.data === undefined) continue;
+    const kind = kindOfItem(c.itemId);
+    if (kind === undefined) continue;
+    problems.push(...dataProblems(kind, c.patch.data, ctx).map((p) => `Item "${c.itemId}": ${p}`));
+  }
+  return problems;
+}
+
+/** changeDataProblems for every option's change, each prefixed with its option id. */
+export function optionDataProblems(options: Option[] | undefined, kindOfItem: (itemId: string) => DataKind | null | undefined, ctx: DataContext): string[] {
+  return (options ?? []).flatMap((o) => (o.change ? changeDataProblems(o.change, kindOfItem, ctx).map((p) => `Option "${o.id}": ${p}`) : []));
 }
 
 export const nothingSaved = (problems: string[], retry: string) => new InputError(`Nothing was saved. Fix these and ${retry}:\n- ${problems.join('\n- ')}`);

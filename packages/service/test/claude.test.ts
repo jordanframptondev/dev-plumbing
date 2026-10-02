@@ -140,6 +140,16 @@ describe('importing', () => {
     expect(r.status).toBe(400);
     expect(r.body.error).toMatch(/Nothing was saved[\s\S]*key is used twice/);
   });
+  it('refuses a diagram whose line ends at a missing box', async () => {
+    const t = await setup();
+    const open = await t.claude('/open', { cwd: t.repo, plan: PLAN });
+    const data = { kind: 'system', nodes: [{ id: 'job', label: 'Daily reminder job', status: 'new' }], edges: [{ id: 'e1', from: 'job', to: 'db' }] };
+    const r = await t.claude('/items', { repo: 'acme-app', project: open.body.project, type: 'architecture', items: [{ key: 'map', title: 'Reminder job', summary: 's', data }] });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toMatch(/Item 1 \(map\): Edge "e1" ends at "db", which isn't one of the node ids\./);
+    const ok = await t.claude('/items', { repo: 'acme-app', project: open.body.project, type: 'architecture', items: [{ key: 'map', title: 'Reminder job', summary: 's', data: { ...data, edges: [] } }] });
+    expect(ok.body.itemIds).toEqual(['architecture-map']);
+  });
 
   it("finishes the import when the window starts listening, even if an importer never wrote", async () => {
     const t = await setup();

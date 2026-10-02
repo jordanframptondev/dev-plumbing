@@ -1,10 +1,10 @@
-import { applyMdPatches, type ClaudeMessage, type HistoryEntry, type PlumbingType, type ReplyInput, type Thread } from '../schemas';
+import { applyMdPatches, dataKindOf, dataProblems, type ClaudeMessage, type HistoryEntry, type PlumbingType, type ReplyInput, type Thread } from '../schemas';
 import { recordChange } from './changes';
 import { addDecision } from './decisions';
 import { uniqueId, verifyCodeRefs } from './importItems';
 import { InputError, newId, readDecisions, readDocText, readItem, readItems, readProjectFile, readThread, StoreError, touchProject, writeItem, writeThread } from './io';
 import { slugify } from './open';
-import { fieldProblems, messageProblems, nothingSaved } from './validate';
+import { changeDataProblems, fieldProblems, itemDataKinds, messageProblems, nothingSaved, optionDataProblems } from './validate';
 
 export async function postReply(
   dir: string,
@@ -28,6 +28,16 @@ export async function postReply(
   const draft = await readDocText(dir, project.docs.draft);
   const { values: items } = await readItems(dir);
   const itemIds = new Set(items.map((i) => i.id));
+  const enabled = new Map(o.types.filter((t) => t.enabled).map((t) => [t.id, t]));
+  const newItems = r.newItems ?? [];
+  // New items' ids are worked out up front, so data in this reply may name them.
+  const taken = new Set(itemIds);
+  const newIds = newItems.map((n) => uniqueId(`${n.type}-${slugify(n.title)}`, taken));
+  const { kindOfItem, mockupItemIds } = itemDataKinds(items, o.types);
+  const ctx = {
+    itemIds: new Set([...itemIds, ...newIds]),
+    mockupItemIds: new Set([...mockupItemIds, ...newIds.filter((_, i) => enabled.get(newItems[i].type)?.screen === 'mockups')]),
+  };
   const problems: string[] = [];
   if (r.resolve && r.options) problems.push('Send options or resolve, not both.');
   if (r.recommended && !r.options) problems.push('recommended needs options.');
@@ -43,12 +53,13 @@ export async function postReply(
       else problems.push(`${where}: ${res.error}`);
     }
     for (const c of e.change.items ?? []) if (!itemIds.has(c.itemId)) problems.push(`${where}: there's no item "${c.itemId}".`);
+    problems.push(...changeDataProblems(e.change, kindOfItem, ctx).map((p) => `${where}: ${p}`));
   });
   // Options must fit the draft as the user will see it: after the small edits, when those apply straight away.
   const base = o.autoApply ? edited : draft;
   problems.push(...messageProblems(r, base, itemIds));
-  const enabled = new Map(o.types.filter((t) => t.enabled).map((t) => [t.id, t]));
-  (r.newItems ?? []).forEach((n, i) => {
+  problems.push(...optionDataProblems(r.options, kindOfItem, ctx));
+  newItems.forEach((n, i) => {
     const where = `New item ${i + 1} (${n.title})`;
     const type = enabled.get(n.type);
     if (!type) {
@@ -56,7 +67,9 @@ export async function postReply(
       return;
     }
     problems.push(...fieldProblems(n.fields, type).map((p) => `${where}: ${p}`));
+    problems.push(...dataProblems(dataKindOf(type), n.data, ctx).map((p) => `${where}: ${p}`));
     problems.push(...messageProblems(n.message, base, itemIds).map((p) => `${where}: ${p}`));
+    problems.push(...optionDataProblems(n.message.options, kindOfItem, ctx).map((p) => `${where}: ${p}`));
   });
   for (const imp of r.impacts ?? []) if (!itemIds.has(imp.itemId)) problems.push(`Impacts: there's no item "${imp.itemId}".`);
   for (const id of r.resolve?.itemIds ?? []) if (!itemIds.has(id)) problems.push(`resolve.itemIds: there's no item "${id}".`);
@@ -64,17 +77,16 @@ export async function postReply(
 
   // Everything that can fail on a read happens before the first write, so a refused reply leaves nothing behind.
   if (r.resolve) await readDecisions(dir);
-  const codeRefs = await Promise.all((r.newItems ?? []).map((n) => (n.codeRefs?.length ? verifyCodeRefs(o.clone, n.codeRefs) : Promise.resolve(undefined))));
+  const codeRefs = await Promise.all(newItems.map((n) => (n.codeRefs?.length ? verifyCodeRefs(o.clone, n.codeRefs) : Promise.resolve(undefined))));
 
   const edits: HistoryEntry[] = [];
   for (const e of r.smallEdits ?? []) {
     edits.push(await recordChange(dir, { threadId: thread.id, kind: 'small-edit', summary: e.summary, change: e.change, apply: o.autoApply, now }));
   }
 
-  const taken = new Set(itemIds);
   const newItemIds: string[] = [];
-  for (const [i, n] of (r.newItems ?? []).entries()) {
-    const id = uniqueId(`${n.type}-${slugify(n.title)}`, taken);
+  for (const [i, n] of newItems.entries()) {
+    const id = newIds[i];
     await writeItem(dir, {
       id,
       type: n.type,

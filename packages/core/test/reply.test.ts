@@ -1,10 +1,11 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
+import { undoChange } from '../src/store/changes';
 import { InputError, projectFiles, readDecisions, readHistory, readItem, readItems, readThread, StoreError } from '../src/store/io';
 import { postReply } from '../src/store/reply';
 import { removeTempDirs } from '../../../testkit/tmp';
-import { DRAFT, pair, seedProject, TYPES } from './fixtures';
+import { DRAFT, listType, pair, seedProject, TYPES } from './fixtures';
 
 afterAll(removeTempDirs);
 
@@ -132,5 +133,145 @@ describe('a reply is all or nothing', () => {
     expect(await readHistory(dir)).toEqual([]);
     expect((await readItems(dir)).values.map((i) => i.id).sort()).toEqual(before);
     expect((await readThread(dir, 't-q1')).status).toBe('with_claude');
+  });
+});
+
+describe('drawings in replies', () => {
+  const ui = listType('ui', { title: 'UI changes', screen: 'mockups', order: 3 });
+  const flows = listType('flows', { title: 'Flows', screen: 'flows', order: 4 });
+  const phases = listType('phases', { title: 'Phases & milestones', timeline: true, order: 7 });
+  const ALL = [...TYPES, ui, flows, phases];
+  const drawingReply = (dir: string, r: Parameters<typeof postReply>[1]['reply']) => postReply(dir, { reply: r, types: ALL, autoApply: true, clone: '/nowhere' });
+  const withData = (p: ReturnType<typeof pair>, data: unknown) => ({ ...p, item: { ...p.item, data } });
+  const signup = {
+    kind: 'system',
+    lanes: [
+      { id: 'web', label: 'Web app', status: 'changed' },
+      { id: 'db', label: 'Postgres', status: 'unchanged' },
+    ],
+    steps: [
+      { n: 1, from: 'web', to: 'db', label: 'Save the lead time' },
+      { n: 2, from: 'web', to: 'web', label: 'Show the saved card' },
+    ],
+  };
+  const map = {
+    kind: 'system',
+    groups: [],
+    nodes: [
+      { id: 'job', label: 'Daily reminder job', status: 'new' },
+      { id: 'db', label: 'Postgres', status: 'unchanged' },
+    ],
+    edges: [{ id: 'e1', from: 'job', to: 'db' }],
+  };
+
+  it('a reply whose data patch breaks a reference writes nothing', async () => {
+    // Review Focus 4: one bad patch of each kind, each in its own option.
+    const phase = { order: 1, goal: 'Ship.', doneWhen: ['Live'], itemIds: ['flows-save'] };
+    const card = { location: { app: 'web', route: '/account', files: [] }, kit: 'web', after: '<div class="p-4">Restock soon</div>' };
+    const dir = await seedProject({
+      pairs: [
+        withData(asked('flows-save', { type: 'flows' }), signup),
+        withData(pair('architecture-map', { type: 'architecture' }), map),
+        withData(pair('phases-build', { type: 'phases' }), phase),
+        withData(pair('ui-card', { type: 'ui' }), card),
+      ],
+    });
+    const broken = {
+      flow: { ...signup, steps: [...signup.steps, { n: 3, from: 'queue', to: 'db', label: 'Retry later' }] },
+      diagram: { ...map, edges: [...map.edges, { id: 'e2', from: 'job', to: 'email' }] },
+      phase: { ...phase, itemIds: ['flows-save', 'ghost'] },
+      mockup: { ...card, after: '<div class="p-4">Restock soon</div><script>alert(1)</script>' },
+    };
+    const attempt = drawingReply(dir, {
+      threadId: 't-flows-save',
+      text: 'A queue would let failed saves retry.',
+      smallEdits: [{ summary: 'Wording', change: { md: [{ find: 'Log reminders in a table.', replace: 'Log each reminder in a table.' }] } }],
+      options: [
+        { id: 'queue', label: 'Retry through a queue', change: { items: [{ itemId: 'flows-save', patch: { data: broken.flow } }] } },
+        { id: 'email', label: 'Send an email too', change: { items: [{ itemId: 'architecture-map', patch: { data: broken.diagram } }] } },
+        { id: 'later', label: 'Plan it in the first phase', change: { items: [{ itemId: 'phases-build', patch: { data: broken.phase } }] } },
+        { id: 'banner', label: 'Show it on the card', change: { items: [{ itemId: 'ui-card', patch: { data: broken.mockup } }] } },
+        { id: 'keep', label: 'Keep it as it is' },
+      ],
+    });
+    await expect(attempt).rejects.toThrow(InputError);
+    const message = await attempt.catch((e: Error) => e.message);
+    expect(message).toMatch(/Option "queue": Item "flows-save": Step 3 starts on lane "queue", which isn't one of the lane ids\./);
+    expect(message).toMatch(/Option "email": Item "architecture-map": Edge "e2" ends at "email", which isn't one of the node ids\./);
+    expect(message).toMatch(/Option "later": Item "phases-build": itemIds: there's no item "ghost"\./);
+    expect(message).toMatch(/Option "banner": Item "ui-card": after: remove the <script> tags\. Mockups can't run scripts\./);
+    // Nothing is written: not the small edit, not the message, not any item.
+    const thread = await readThread(dir, 't-flows-save');
+    expect(thread.status).toBe('with_claude');
+    expect(thread.messages).toHaveLength(2);
+    expect(await draftOf(dir)).toBe(DRAFT);
+    expect(await readHistory(dir)).toEqual([]);
+    expect((await readItem(dir, 'flows-save')).data).toEqual(signup);
+    expect((await readItem(dir, 'architecture-map')).data).toEqual(map);
+    expect((await readItem(dir, 'phases-build')).data).toEqual(phase);
+    expect((await readItem(dir, 'ui-card')).data).toEqual(card);
+  });
+
+  it('a small edit with valid data applies and can be undone', async () => {
+    const dir = await seedProject({ pairs: [withData(asked('architecture-map', { type: 'architecture' }), map)] });
+    const renamed = { ...map, nodes: [{ id: 'job', label: 'Nightly reminder job', status: 'new' }, map.nodes[1]] };
+    const r = await drawingReply(dir, {
+      threadId: 't-architecture-map',
+      text: 'Renamed the job box.',
+      smallEdits: [{ summary: 'Box name', change: { items: [{ itemId: 'architecture-map', patch: { data: renamed } }] } }],
+    });
+    expect((await readItem(dir, 'architecture-map')).data).toEqual(renamed);
+    await undoChange(dir, r.edits[0].id);
+    expect((await readItem(dir, 'architecture-map')).data).toEqual(map);
+  });
+
+  it("checks small edits' and new items' data against the project", async () => {
+    const phase = { order: 1, goal: 'Ship.', doneWhen: ['Live'], itemIds: [] };
+    const dir = await seedProject({ pairs: [asked('q1'), withData(pair('phases-build', { type: 'phases' }), phase)] });
+    const attempt = drawingReply(dir, {
+      threadId: 't-q1',
+      text: 'x',
+      smallEdits: [{ summary: 'Phase items', change: { items: [{ itemId: 'phases-build', patch: { data: { ...phase, itemIds: ['ghost'] } } }] } }],
+      newItems: [
+        { type: 'flows', title: 'Turn on reminders', summary: 's', data: { kind: 'user', steps: [{ n: 1, label: 'Opens settings', mockupId: 'q1' }] }, message: { text: 'Is this the flow?' } },
+        { type: 'questions', title: 'Lead time?', summary: 's', data: { order: 1 }, message: { text: 'How many days?' } },
+      ],
+    });
+    await expect(attempt).rejects.toThrow(InputError);
+    const message = await attempt.catch((e: Error) => e.message);
+    expect(message).toMatch(/Small edit 1: Item "phases-build": itemIds: there's no item "ghost"\./);
+    expect(message).toMatch(/New item 1 \(Turn on reminders\): Step 1: mockupId "q1" isn't a UI item\./);
+    expect(message).toMatch(/New item 2 \(Lead time\?\): This plumbing type's items don't take data\./);
+    expect((await readItems(dir)).values).toHaveLength(2);
+    expect(await readHistory(dir)).toEqual([]);
+  });
+
+  it('a new flow may point at a UI item from the same reply', async () => {
+    const dir = await seedProject({ pairs: [asked('q1')] });
+    const r = await drawingReply(dir, {
+      threadId: 't-q1',
+      text: 'Here is the screen, and the flow through it.',
+      newItems: [
+        { type: 'ui', title: 'Restock card', summary: 's', data: { location: { app: 'web', route: '/account', files: [] }, kit: 'web', after: '<div class="p-4">Restock soon</div>' }, message: { text: 'Like this?' } },
+        { type: 'flows', title: 'Turn on reminders', summary: 's', data: { kind: 'user', steps: [{ n: 1, label: 'Opens the card', mockupId: 'ui-restock-card' }] }, message: { text: 'And this flow?' } },
+      ],
+    });
+    expect(r.newThreadIds).toEqual(['t-ui-restock-card', 't-flows-turn-on-reminders']);
+  });
+
+  it('items without data still take replies', async () => {
+    const legacyUi = withData(asked('ui-account', { type: 'ui' }), { location: { app: 'web', route: '/account', files: [] }, kit: 'web' });
+    const dir = await seedProject({ pairs: [legacyUi, asked('flows-old', { type: 'flows' })] });
+    await drawingReply(dir, { threadId: 't-ui-account', text: 'Renamed it.', smallEdits: [{ summary: 'Title', change: { items: [{ itemId: 'ui-account', patch: { title: 'Account page' } }] } }] });
+    await drawingReply(dir, {
+      threadId: 't-flows-old',
+      text: 'Which way?',
+      options: [
+        { id: 'short', label: 'Shorter summary', change: { items: [{ itemId: 'flows-old', patch: { summary: 'Shorter.' } }] } },
+        { id: 'keep', label: 'Keep it' },
+      ],
+    });
+    expect((await readItem(dir, 'ui-account')).title).toBe('Account page');
+    expect((await readThread(dir, 't-flows-old')).status).toBe('your_turn');
   });
 });

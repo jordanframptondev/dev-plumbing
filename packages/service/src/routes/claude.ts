@@ -217,7 +217,7 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
       if (!type) throw new InputError(`"${body.type}" isn't an enabled plumbing type.`);
       const clone = await cloneFor(body.cwd, ref);
       const result = await rt.withLock(projectKey(ref.repo, ref.id), () =>
-        writeImportBatch({ dir: ref.dir, type, batch: { items: body.items, noChanges: body.noChanges }, clone }),
+        writeImportBatch({ dir: ref.dir, type, types: cfg.types, batch: { items: body.items, noChanges: body.noChanges }, clone }),
       );
       changed(ref);
       if (result.importFinished) await openInBrowser(cfg, ref);

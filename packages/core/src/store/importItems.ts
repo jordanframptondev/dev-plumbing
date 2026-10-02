@@ -1,8 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { CodeRef, ImportBatch, Item, Message, PlumbingType } from '../schemas';
+import { dataKindOf, dataProblems, parseData, type CodeRef, type ImportBatch, type Item, type Message, type PlumbingType } from '../schemas';
 import { InputError, newId, readDocText, readItems, readProjectFile, writeItem, writeProjectFile, writeThread } from './io';
-import { fieldProblems, messageProblems, nothingSaved } from './validate';
+import { fieldProblems, itemDataKinds, messageProblems, nothingSaved, optionDataProblems } from './validate';
 
 export const IMPORT_DID_NOT_FINISH = "The importer didn't finish for this plumbing type.";
 
@@ -33,9 +33,17 @@ export function uniqueId(base: string, taken: Set<string>): string {
   return id;
 }
 
+/** Phase data may list items by batch key, like links. They're written as item ids. */
+function phaseWithIds(data: unknown, idFor: Map<string, string>): unknown {
+  const parsed = parseData('timeline', data);
+  return parsed.ok ? { ...parsed.data, itemIds: parsed.data.itemIds.map((k) => idFor.get(k) ?? k) } : data;
+}
+
 export async function writeImportBatch(o: {
   dir: string;
   type: PlumbingType;
+  /** Every plumbing type, so data can be checked against other items (a flow step's mockupId must be a UI item). */
+  types: PlumbingType[];
   batch: ImportBatch;
   clone: string;
   now?: Date;
@@ -58,6 +66,18 @@ export async function writeImportBatch(o: {
   const draft = await readDocText(o.dir, project.docs.draft);
   const { values: existing } = await readItems(o.dir);
   const existingIds = new Set(existing.map((i) => i.id));
+  const taken = new Set(existingIds);
+  const idFor = new Map(items.map((it) => [it.key, uniqueId(`${o.type.id}-${it.key}`, taken)]));
+  const kind = dataKindOf(o.type);
+  const { kindOfItem, mockupItemIds } = itemDataKinds(existing, o.types);
+  const newIds = [...idFor.values()];
+  // Option changes are stored as written, so they name items by id. An item's own data may also use keys from this
+  // batch, as links do: phase itemIds are swapped for ids when the item is written.
+  const changeCtx = {
+    itemIds: new Set([...existingIds, ...newIds]),
+    mockupItemIds: kind === 'mockups' ? new Set([...mockupItemIds, ...newIds]) : mockupItemIds,
+  };
+  const dataCtx = { ...changeCtx, itemIds: new Set([...changeCtx.itemIds, ...items.map((it) => it.key)]) };
   const keys = new Set<string>();
   const problems: string[] = [];
   items.forEach((it, i) => {
@@ -65,7 +85,11 @@ export async function writeImportBatch(o: {
     if (keys.has(it.key)) problems.push(`${where}: the key is used twice.`);
     keys.add(it.key);
     problems.push(...fieldProblems(it.fields, o.type).map((p) => `${where}: ${p}`));
-    if (it.message) problems.push(...messageProblems(it.message, draft, existingIds).map((p) => `${where}: ${p}`));
+    problems.push(...dataProblems(kind, it.data, dataCtx).map((p) => `${where}: ${p}`));
+    if (it.message) {
+      problems.push(...messageProblems(it.message, draft, existingIds).map((p) => `${where}: ${p}`));
+      problems.push(...optionDataProblems(it.message.options, kindOfItem, changeCtx).map((p) => `${where}: ${p}`));
+    }
   });
   for (const it of items) {
     for (const link of it.links ?? []) {
@@ -74,8 +98,6 @@ export async function writeImportBatch(o: {
   }
   if (problems.length) throw nothingSaved(problems, 'call dp_write_items again with the whole batch');
 
-  const taken = new Set(existingIds);
-  const idFor = new Map(items.map((it) => [it.key, uniqueId(`${o.type.id}-${it.key}`, taken)]));
   const itemIds: string[] = [];
   for (const it of items) {
     const id = idFor.get(it.key)!;
@@ -91,7 +113,7 @@ export async function writeImportBatch(o: {
       ...(it.mdAnchor ? { mdAnchor: it.mdAnchor } : {}),
       ...(it.codeRefs?.length ? { codeRefs: await verifyCodeRefs(o.clone, it.codeRefs) } : {}),
       ...(it.links?.length ? { links: it.links.map((l) => idFor.get(l) ?? l) } : {}),
-      ...(it.data !== undefined ? { data: it.data } : {}),
+      ...(it.data !== undefined ? { data: kind === 'timeline' ? phaseWithIds(it.data, idFor) : it.data } : {}),
       threadId,
       createdBy: 'import',
     };
