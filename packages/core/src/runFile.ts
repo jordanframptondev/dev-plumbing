@@ -27,3 +27,24 @@ export async function removeRunFile(configDir: string, pid?: number): Promise<vo
   }
   await fs.rm(runFilePath(configDir), { force: true });
 }
+
+/** Written by `dev-plumbing setup`: how the plugin's MCP server starts Node and the service. */
+export type InstallInfo = { nodePath: string; cliPath: string; repoRoot: string; version: string; installedAt: string };
+
+export const installInfoPath = (configDir: string) => path.join(configDir, 'run', 'install.json');
+/** One line: the Node binary. plugin/bin/dp-mcp.sh reads it without parsing JSON. */
+export const nodePathFile = (configDir: string) => path.join(configDir, 'run', 'node');
+
+export async function writeInstallInfo(configDir: string, info: InstallInfo): Promise<void> {
+  await writeFileAtomic(installInfoPath(configDir), `${JSON.stringify(info, null, 2)}\n`);
+  await writeFileAtomic(nodePathFile(configDir), `${info.nodePath}\n`);
+}
+
+export async function readInstallInfo(configDir: string): Promise<InstallInfo | null> {
+  try {
+    const v = JSON.parse(await fs.readFile(installInfoPath(configDir), 'utf8'));
+    return typeof v?.nodePath === 'string' && typeof v?.cliPath === 'string' ? (v as InstallInfo) : null;
+  } catch {
+    return null;
+  }
+}
