@@ -4,10 +4,12 @@ import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { configDir, disableLoginItem, enableLoginItem, expandHome, loadConfig, VERSION, writeDemoProjects, writeReadme } from '@dev-plumbing/core';
 import { serviceStatus, startService, stopService } from './control';
+import { installPlugin } from './plugin';
 import { runSetup } from './setup';
 
 const here = (rel: string) => fileURLToPath(new URL(rel, import.meta.url));
 const SERVICE_ENTRY = here('../../service/dist/index.js');
+const REPO_ROOT = here('../../..');
 const DEFAULTS_DIR = process.env.DEV_PLUMBING_DEFAULTS ?? here('../../../defaults');
 const CLI_PATH = fileURLToPath(import.meta.url);
 
@@ -43,8 +45,9 @@ program
   .option('--port <number>', 'port for the app', (v) => Number(v))
   .option('--no-login-item', "don't start at login, and don't touch the login item")
   .option('--no-start', "don't start the service or open the browser afterwards")
+  .option('--no-plugin', "don't install the Claude Code plugin")
   .option('-y, --yes', 'keep the current or default answers without asking')
-  .action((opts: { projectsFolder?: string; port?: number; loginItem: boolean; start: boolean; yes?: boolean }) =>
+  .action((opts: { projectsFolder?: string; port?: number; loginItem: boolean; start: boolean; plugin: boolean; yes?: boolean }) =>
     run(async () => {
       const dir = configDir();
       await runSetup({
@@ -62,6 +65,9 @@ program
           await disableLoginItem();
         },
         log: (line) => console.log(line),
+        plugin: opts.plugin,
+        install: { nodePath: process.execPath, cliPath: CLI_PATH, repoRoot: REPO_ROOT, version: VERSION },
+        installPlugin: () => installPlugin(REPO_ROOT),
       });
       if (opts.start) {
         const r = await startService({ configDir: dir, serviceEntry: SERVICE_ENTRY });

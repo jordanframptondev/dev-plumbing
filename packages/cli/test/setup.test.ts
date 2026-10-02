@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { loadConfig } from '@dev-plumbing/core';
+import { loadConfig, readInstallInfo } from '@dev-plumbing/core';
 import { runSetup, type SetupOptions } from '../src/setup';
 import { removeTempDirs, tempDir } from '../../../testkit/tmp';
 
@@ -30,6 +30,12 @@ function options(over: Partial<SetupOptions> = {}): SetupOptions {
       calls.push('disable');
     },
     log: () => {},
+    plugin: false,
+    install: { nodePath: '/opt/node/bin/node', cliPath: '/repo/packages/cli/dist/index.js', repoRoot: '/repo', version: '0.1.0' },
+    installPlugin: async () => {
+      calls.push('plugin');
+      return 'Installed the Claude Code plugin.';
+    },
     ...over,
   };
 }
@@ -41,6 +47,21 @@ beforeEach(async () => {
 });
 
 describe('setup', () => {
+  it('records where Node and the CLI are, for the plugin', async () => {
+    await runSetup(options());
+    expect(await readInstallInfo(dir)).toMatchObject({ nodePath: '/opt/node/bin/node', cliPath: '/repo/packages/cli/dist/index.js', repoRoot: '/repo' });
+  });
+
+  it('installs the plugin, and finishes setup even if that fails', async () => {
+    const lines: string[] = [];
+    await runSetup(options({ plugin: true, log: (l) => lines.push(l) }));
+    expect(calls).toContain('plugin');
+    expect(lines).toContain('Installed the Claude Code plugin.');
+    const failing = await runSetup(options({ plugin: true, log: (l) => lines.push(l), installPlugin: async () => { throw new Error('network unreachable'); } }));
+    expect(failing.settings).toBeDefined();
+    expect(lines.at(-1)).toMatch(/plugin wasn't installed: network unreachable/);
+  });
+
   it('creates the config, README and projects folder, and turns on the login item', async () => {
     const r = await runSetup(options());
     expect(r.created).toContain('settings.json');

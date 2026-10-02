@@ -10,7 +10,7 @@ export default function globalSetup() {
   const env = e2eEnv(tmp);
   const cli = (...args: string[]) => execFileSync(process.execPath, [cliPath, ...args], { env, stdio: 'inherit' });
   try {
-    cli('setup', '--yes', '--no-login-item', '--no-start', '--projects-folder', path.join(tmp, 'projects'), '--port', String(E2E_PORT));
+    cli('setup', '--yes', '--no-login-item', '--no-start', '--no-plugin', '--projects-folder', path.join(tmp, 'projects'), '--port', String(E2E_PORT));
     const settingsFile = path.join(tmp, '.dev-plumbing', 'settings.json');
     const settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
     fs.writeFileSync(settingsFile, JSON.stringify({ ...settings, homePageSize: 2, theme: 'light' }, null, 2));

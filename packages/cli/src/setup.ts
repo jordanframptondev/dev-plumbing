@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import { expandHome, FULL_PATH_MESSAGE, installDefaults, isFullPath, loadConfig, updateSettingsFile, writeReadme, type Settings } from '@dev-plumbing/core';
+import { expandHome, FULL_PATH_MESSAGE, installDefaults, isFullPath, loadConfig, updateSettingsFile, writeInstallInfo, writeReadme, type InstallInfo, type Settings } from '@dev-plumbing/core';
 
 export type SetupOptions = {
   configDir: string;
@@ -13,6 +13,9 @@ export type SetupOptions = {
   enableLogin: () => Promise<void>;
   disableLogin: () => Promise<void>;
   log: (line: string) => void;
+  plugin: boolean;
+  install: Omit<InstallInfo, 'installedAt'>;
+  installPlugin: () => Promise<string>;
 };
 
 const MAX_ASKS = 3;
@@ -44,9 +47,17 @@ export async function runSetup(o: SetupOptions): Promise<{ settings: Settings; c
   await fs.mkdir(expandHome(projectsFolder, o.home), { recursive: true });
   await writeReadme(o.configDir);
   if (o.loginItem) await (settings.startAtLogin ? o.enableLogin() : o.disableLogin());
-
+  await writeInstallInfo(o.configDir, { ...o.install, installedAt: new Date().toISOString() });
   o.log(`Config folder: ${o.configDir}${created.length ? ` (added ${created.length} files)` : ''}`);
   o.log(`Plumbing projects: ${projectsFolder}`);
   o.log(`Start at login: ${settings.startAtLogin ? 'on' : 'off'}`);
+  if (o.plugin) {
+    try {
+      o.log(await o.installPlugin());
+    } catch (e) {
+      o.log(`The Claude Code plugin wasn't installed: ${(e as Error).message}`);
+    }
+  }
+
   return { settings, created };
 }
