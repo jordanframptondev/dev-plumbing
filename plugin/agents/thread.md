@@ -26,6 +26,6 @@ For each thread, in the order given:
    - **`newItems`:** a new question, concern or idea this raised, with its own opening `message`.
    - **`impacts`:** other items this might affect, each `{ "itemId", "reason" }`, from `linked` or the decisions.
    - **`filesRead`:** the repo files you read.
-4. Call `dp_reply` with `repo`, `project`, `threadId` and the reply. If it returns errors, nothing was saved: fix every problem listed and call it again, at most three times.
+4. Call `dp_reply` with `repo`, `project`, `threadId` and the reply. If it returns errors, nothing was saved: fix every problem listed and call it again, at most three times. If it still fails, stop and reply with one line per thread: `Failed: <title>: <the last error, shortened>`.
 
 Then reply with exactly one line per thread: "<item title>: <what you did, e.g. 'offered 3 options, recommended per-send' or 'resolved: both channels'>".

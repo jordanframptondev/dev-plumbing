@@ -17,5 +17,5 @@ You set up dev-plumbing's repo profile for the repo in your working directory. L
    - `apps`: each app or package with a UI, as `{ "name", "path", "kitFiles" }`. `kitFiles` are its theme or global CSS files, such as a Tailwind `@theme` file. Leave the list empty if there are none.
    - `sensitiveData`: tags such as "PII" or "payments", only if the code clearly handles that kind of data.
    - Leave out `projectsFolder` and `linkIntoClones`. The user decides those in Settings.
-3. Call `dp_repo_profile` with `profile`. If it returns an error, fix what it says and try again, at most three times.
+3. Call `dp_repo_profile` with `profile`. If it returns an error, fix what it says and try again, at most three times. If it still fails, reply with one line: `Failed: repo profile: <the last error, shortened>`.
 4. Reply with one line: "Saved repo profile <name>: <n> plan folders, schema <type or none>, <n> conventions, <n> apps."

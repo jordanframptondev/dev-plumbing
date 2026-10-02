@@ -30,7 +30,7 @@ You import one plumbing type from a plan into dev-plumbing. Your prompt names th
      - `recommended`: an option id, when you have a view.
 
      A `change` that edits the plan is `{ "md": [{ "find": "exact text from the draft", "replace": "new text" }] }`. `find` must be copied exactly from the draft, and appear there exactly once.
-5. Call `dp_write_items` once, with `repo`, `project`, `type`, and either `items` or `noChanges`. If it returns errors, nothing was saved: fix every problem listed and send the whole batch again, at most three times.
+5. Call `dp_write_items` once, with `repo`, `project`, `type`, and either `items` or `noChanges`. If it returns errors, nothing was saved: fix every problem listed and send the whole batch again, at most three times. If it still fails, stop and reply with one line per type: `Failed: <title>: <the last error, shortened>`.
 6. Reply with exactly one line: "<Type title>: <n> items" (for questions, add how many are blocking), or "<Type title>: no changes (<reason>)".
 
 ## Data shapes

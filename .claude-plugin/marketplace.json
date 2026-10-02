@@ -1,5 +1,6 @@
 {
   "name": "dev-plumbing",
+  "description": "Plumb a feature plan before you build it.",
   "owner": { "name": "dev-plumbing" },
   "plugins": [
     {

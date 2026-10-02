@@ -1,5 +1,6 @@
 {
   "name": "dev-plumbing",
+  "author": { "name": "dev-plumbing" },
   "version": "0.1.0",
   "description": "Plumb a feature plan before you build it: every question, concern and change gets its own thread in a local app."
 }

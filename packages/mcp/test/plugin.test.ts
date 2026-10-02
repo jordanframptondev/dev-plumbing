@@ -36,7 +36,7 @@ describe('the plugin', () => {
   it('has the /dev-plumbing skill, which uses the tools and subagents by their real names', () => {
     const skill = parseFrontMatter(read('plugin/skills/dev-plumbing/SKILL.md'));
     expect(skill.data.name).toBe('dev-plumbing');
-    for (const s of ['dp_open', 'dp_wait', 'dev-plumbing:repo-setup', 'dev-plumbing:importer', 'dev-plumbing:thread', '$ARGUMENTS', 'finished']) {
+    for (const s of ['dp_open', 'dp_wait', 'dev-plumbing:repo-setup', 'dev-plumbing:importer', 'dev-plumbing:thread', '$ARGUMENTS', 'finished', 'threads:', 'text:']) {
       expect(skill.content).toContain(s);
     }
   });
