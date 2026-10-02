@@ -3,6 +3,7 @@ import { Link, useParams } from '@tanstack/react-router';
 import { api } from '../api/client';
 import { Group, Row } from '../components/GroupedList';
 import { StatusMark } from '../components/StatusMark';
+import { ListScreen } from './ListScreen';
 
 export function TypeView() {
   const { repo, project, type } = useParams({ from: '/p/$repo/$project/t/$type' });
@@ -18,6 +19,7 @@ export function TypeView() {
       </div>
     );
   }
+  if (data.type.screen === 'list') return <ListScreen key={type} repo={repo} project={project} data={data} />;
   return (
     <div>
       <h2 className="text-[20px] font-semibold">{data.type.title}</h2>

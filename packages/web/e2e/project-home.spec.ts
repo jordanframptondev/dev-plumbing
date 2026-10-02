@@ -34,7 +34,7 @@ test('a plumbing type with nothing in the plan says so', async ({ page }) => {
 test('a plumbing type with items lists them', async ({ page }) => {
   await page.goto(`${PROJECT}/t/questions`);
   await expect(page.getByText('Who gets reminders at launch?')).toBeVisible();
-  await expect(page.getByText('BLOCKING')).toBeVisible();
+  await expect(page.getByTestId('list-row').getByText('BLOCKING')).toBeVisible();
 });
 
 test('the inbox groups threads by whose turn it is', async ({ page }) => {
