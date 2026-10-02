@@ -102,6 +102,19 @@ test("an option answer Claude didn't get to comes back picked, and sends again",
   expect((await api(thread)).thread.messages.at(-1)).toMatchObject({ author: 'you', optionId: 'per-sub', note: 'Keep it simple.' });
 });
 
+test('Submit all saves what you just typed before it submits', async ({ page }) => {
+  const p = await importProject('loop-flush', 'Loop flush', { questions: [channels] });
+  const thread = `/api/projects/${p.repo}/${p.project}/threads/t-questions-channels`;
+  await api(`${thread}/draft`, 'PUT', { text: 'Both' });
+  await page.goto(`${p.url}/th/t-questions-channels`);
+  const box = page.getByRole('textbox', { name: 'Your answer' });
+  await expect(box).toHaveValue('Both');
+  await box.fill('Both, with SMS first.');
+  await page.getByRole('button', { name: 'Submit all · 1 draft' }).first().click();
+  await expect(page.getByTestId('thread-status')).toHaveText('With Claude');
+  expect((await api(thread)).thread.messages.at(-1)).toMatchObject({ author: 'you', text: 'Both, with SMS first.' });
+});
+
 test('only one primary button on the desktop thread view', async ({ page }) => {
   const p = await importProject('loop-primary', 'Loop primary', { questions: [rows] });
   await page.goto(`${p.url}/th/t-questions-rows`);

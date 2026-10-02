@@ -2,6 +2,7 @@ import type { ChangePreview, OpenOptions, SubmitResponse, ThreadDraft } from '@d
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { api, type DraftInput } from '../api/client';
+import { clearPendingDraft, setPendingDraft } from '../lib/pendingDrafts';
 import { Button } from './Button';
 import { DiffView } from './DiffView';
 import { inputClass } from './inputClass';
@@ -36,6 +37,8 @@ export function AnswerForm(p: Props) {
   const closed = useRef(false);
   const latest = useRef<() => DraftInput | null>(() => null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const saving = useRef<Promise<void> | null>(null);
+  const owner = useRef({}).current;
   const refresh = () => void qc.invalidateQueries({ predicate: (q) => q.queryKey[1] === p.repo && q.queryKey[2] === p.project });
 
   // A new message from Claude means new options: start again from whatever the server has.
@@ -46,6 +49,7 @@ export function AnswerForm(p: Props) {
     setText(p.draft?.text ?? '');
     dirty.current = false;
     closed.current = false;
+    if (!saving.current) clearPendingDraft(owner);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetKey]);
 
@@ -61,10 +65,41 @@ export function AnswerForm(p: Props) {
   };
   latest.current = current;
 
+  /** Saves what's on screen, after any save already on its way. Submit all waits for it until it lands. */
+  const saveNow = (): Promise<void> => {
+    clearTimeout(timer.current);
+    dirty.current = false;
+    const run: Promise<void> = (saving.current ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(() => api.saveDraft(p.repo, p.project, p.threadId, latest.current()))
+      .then(
+        () => {
+          setSaved('saved');
+          refresh();
+        },
+        (e: unknown) => {
+          dirty.current = true;
+          setSaved('error');
+          throw e;
+        },
+      )
+      .finally(() => {
+        if (saving.current === run) saving.current = null;
+        clearPendingDraft(owner, waitForIt);
+      });
+    const waitForIt = () => run;
+    saving.current = run;
+    setPendingDraft(owner, waitForIt);
+    return run;
+  };
+  /** What Submit all calls: save an unsaved edit now, or wait for the save on its way. */
+  const flush = (): Promise<void> => (dirty.current && !closed.current ? saveNow() : (saving.current ?? Promise.resolve()));
+
   // Leaving with unsaved typing: save it, without waiting for the autosave timer.
   useEffect(
     () => () => {
-      if (dirty.current && !closed.current) void api.saveDraft(p.repo, p.project, p.threadId, latest.current()).catch(() => undefined);
+      if (dirty.current && !closed.current) void saveNow().catch(() => undefined);
+      else if (!saving.current) clearPendingDraft(owner);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
@@ -75,18 +110,7 @@ export function AnswerForm(p: Props) {
     if (!dirty.current) return;
     setSaved('saving');
     timer.current = setTimeout(() => {
-      if (closed.current) return;
-      dirty.current = false;
-      api.saveDraft(p.repo, p.project, p.threadId, current()).then(
-        () => {
-          setSaved('saved');
-          refresh();
-        },
-        () => {
-          dirty.current = true;
-          setSaved('error');
-        },
-      );
+      if (!closed.current) void saveNow().catch(() => undefined);
     }, 500);
     return () => clearTimeout(timer.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -94,6 +118,7 @@ export function AnswerForm(p: Props) {
 
   const edit = (fn: () => void) => {
     dirty.current = true;
+    setPendingDraft(owner, flush);
     fn();
   };
 
@@ -101,6 +126,7 @@ export function AnswerForm(p: Props) {
   const reopen = () => {
     closed.current = false;
     dirty.current = true;
+    setPendingDraft(owner, flush);
   };
 
   const send = useMutation({
