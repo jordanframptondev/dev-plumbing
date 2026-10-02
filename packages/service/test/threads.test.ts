@@ -64,6 +64,17 @@ describe('thread routes', () => {
     expect((await t.send('POST', `${P}/threads/t-questions-rows/park`, null)).status).toBe(400);
   });
 
+  it('refuses a draft with no fields or a misspelt one, and keeps the draft', async () => {
+    const t = await setup();
+    await t.send('PUT', `${P}/threads/t-questions-channels/draft`, { text: 'Long answer I typed.' });
+    for (const body of [{ txet: 'typo' }, {}]) {
+      const r = await t.send('PUT', `${P}/threads/t-questions-channels/draft`, body);
+      expect(r.status).toBe(400);
+      expect(r.body.error).toEqual(expect.any(String));
+    }
+    expect((await readThread(t.dir, 't-questions-channels')).draft).toMatchObject({ text: 'Long answer I typed.' });
+  });
+
   it('applies a plain accept straight away, and says when no window is listening', async () => {
     const t = await setup();
     await t.send('PUT', `${P}/threads/t-questions-rows/draft`, { optionId: 'per-send' });

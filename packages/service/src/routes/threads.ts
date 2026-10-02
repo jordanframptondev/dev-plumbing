@@ -21,9 +21,13 @@ import { EXPECTED_OBJECT, readJsonObject } from '../json';
 import { locateProject } from '../locate';
 import { projectKey, type Runtime } from '../runtime';
 
+// `{ clear: true }` clears a draft. Anything else must name at least one known field, so a typo can't erase one.
 const draftBody = z.union([
   z.object({ clear: z.literal(true) }),
-  z.object({ optionId: z.string().max(100).optional(), note: z.string().max(20_000).optional(), text: z.string().max(20_000).optional() }),
+  z
+    .object({ optionId: z.string().max(100).optional(), note: z.string().max(20_000).optional(), text: z.string().max(20_000).optional() })
+    .strict()
+    .refine((d) => d.optionId !== undefined || d.note !== undefined || d.text !== undefined, 'Send optionId, note or text, or clear: true.'),
 ]);
 const parkBody = z.object({ parked: z.boolean() });
 const submitBody = z.union([z.object({ scope: z.literal('all') }), z.object({ scope: z.literal('thread'), threadId: z.string().min(1) })]);
