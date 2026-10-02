@@ -37,8 +37,10 @@ export async function saveDraft(
 export async function setParked(dir: string, threadId: string, parked: boolean, now: Date = new Date()): Promise<Thread> {
   const thread = await readThread(dir, threadId);
   if (thread.status === 'with_claude') throw new InputError("Claude is working on this thread, so it can't be parked yet.");
+  if (parked && thread.status === 'resolved') throw new InputError('This thread is resolved, so there is nothing to park.');
   if (parked === (thread.status === 'parked')) return thread;
-  const status: Thread['status'] = parked ? 'parked' : latestOpen(thread) || [...thread.messages].reverse().find((m) => m.author !== 'system')?.author === 'claude' ? 'your_turn' : 'idle';
+  const lastSpoken = [...thread.messages].reverse().find((m) => m.author !== 'system');
+  const status: Thread['status'] = parked ? 'parked' : lastSpoken?.author === 'claude' ? 'your_turn' : 'idle';
   const next: Thread = { ...thread, status, messages: [...thread.messages, system(now, parked ? 'Parked.' : 'Unparked.')] };
   await writeThread(dir, next);
   return next;

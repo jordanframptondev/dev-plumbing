@@ -35,6 +35,11 @@ describe('drafts and parking', () => {
     expect((await readThread(dir, 't-q1')).messages.map((m) => m.text)).toEqual(['Which one?', 'Parked.', 'Unparked.']);
   });
 
+  it("won't park a resolved thread", async () => {
+    const dir = await seedProject({ pairs: [pair('q1', { status: 'resolved', options })] });
+    await expect(setParked(dir, 't-q1', true)).rejects.toThrow(/nothing to park/);
+  });
+
   it('finds the options you can answer now, skipping system lines', async () => {
     const { thread } = pair('q1', { options });
     thread.messages.push({ id: 's', at: AT, author: 'system', text: 'Might conflict with another answer.' });
@@ -133,5 +138,22 @@ describe('submit', () => {
     await writeItem(dir, { ...(await readItem(dir, 'q1')), flags: [{ reason: 'Retention changed.', fromThreadId: 't-db1', at: AT }] });
     await submit(dir, { scope: 'thread', threadId: 't-q1', types: TYPES });
     expect((await readItem(dir, 'q1')).flags).toBeUndefined();
+  });
+
+  it('records the submission first and carries on when a thread fails to save', async () => {
+    if (process.getuid?.() === 0) return;
+    const dir = await seedProject({ pairs: [pair('q1', { draft: { text: 'Both.', updatedAt: AT } })] });
+    const threadsDir = path.join(dir, 'threads');
+    await fs.chmod(threadsDir, 0o500);
+    try {
+      const r = await submit(dir, { scope: 'all', types: TYPES });
+      expect(r.skipped).toContainEqual({ threadId: 't-q1', reason: expect.stringMatching(/Couldn't send/) });
+      expect(r.sent).toEqual([]);
+      const [saved] = await readSubmissions(dir);
+      expect(saved).toMatchObject({ drafts: { 't-q1': { text: 'Both.' } } });
+      expect(saved?.processedAt).toBeDefined();
+    } finally {
+      await fs.chmod(threadsDir, 0o700);
+    }
   });
 });

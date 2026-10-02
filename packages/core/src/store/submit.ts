@@ -78,14 +78,22 @@ export async function submit(dir: string, o: { scope: 'thread' | 'all'; threadId
   };
   await writeSubmission(dir, submission);
 
+  let done: Submission;
   const result: Omit<SubmitResult, 'submission'> = { resolved: [], sent: [], skipped: [] };
-  for (const thread of candidates) {
-    const outcome = await submitThread(dir, thread, o.scope, o.types, now);
-    if (outcome.kind === 'skipped') result.skipped.push({ threadId: thread.id, reason: outcome.reason });
-    else result[outcome.kind].push(thread.id);
+  try {
+    for (const thread of candidates) {
+      try {
+        const outcome = await submitThread(dir, thread, o.scope, o.types, now);
+        if (outcome.kind === 'skipped') result.skipped.push({ threadId: thread.id, reason: outcome.reason });
+        else result[outcome.kind].push(thread.id);
+      } catch (e) {
+        result.skipped.push({ threadId: thread.id, reason: `Couldn't send: ${e instanceof Error ? e.message : String(e)}` });
+      }
+    }
+  } finally {
+    done = { ...submission, sent: result.sent, resolved: result.resolved, processedAt: now.toISOString() };
+    await writeSubmission(dir, done);
   }
-  const done: Submission = { ...submission, sent: result.sent, resolved: result.resolved, processedAt: new Date().toISOString() };
-  await writeSubmission(dir, done);
   if (result.sent.length || result.resolved.length) await touchProject(dir, now);
   return { submission: done, ...result };
 }
