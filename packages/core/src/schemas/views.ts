@@ -125,3 +125,14 @@ export type ThreadDetail = {
 export type SubmitResponse = { resolved: number; sent: number; skipped: { threadId: string; reason: string }[]; listening: ListeningState; message: string };
 export type ChangeEntry = { id: string; at: string; kind: 'small-edit' | 'accept'; summary: string; state: ChangeState; threadId: string; threadTitle: string };
 export type ChangesResponse = { segments: DiffSegment[]; entries: ChangeEntry[] };
+
+/**
+ * What an item's drawing looks like next to the plan's clone, worked out each time it's shown and never stored.
+ * diagram: node id -> its file reference was found, for nodes with a codeRef, or why it wasn't checked (no clone).
+ * database: warnings against the repo's Prisma schema, or why it wasn't checked.
+ */
+export type DataChecks =
+  | { kind: 'diagram'; checked: true; nodes: Record<string, boolean> }
+  | { kind: 'diagram'; checked: false; reason: string; nodes: Record<string, never> }
+  | { kind: 'database'; checked: true; file: string; warnings: string[] }
+  | { kind: 'database'; checked: false; reason: string; warnings: [] };
