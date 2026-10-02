@@ -84,6 +84,22 @@ test('a failed Send keeps autosave working', async ({ page }) => {
     .toBe('Still saved.');
 });
 
+test("a skipped Send keeps autosave working", async ({ page }) => {
+  const p = await importProject('loop-skipsend', 'Loop skipped send', { questions: [rows] });
+  await page.goto(`${p.url}/th/t-questions-rows`);
+  const skipped = { resolved: 0, sent: 0, skipped: [{ threadId: 't-questions-rows', reason: 'Nothing to send yet.' }], listening: null, message: 'Nothing to send yet.' };
+  await page.route('**/submit', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(skipped) }));
+  await page.getByRole('radio', { name: /One row per send/ }).check();
+  await page.getByRole('button', { name: 'Send this thread' }).click();
+  await expect(page.getByTestId('send-notice')).toHaveText('Nothing to send yet.');
+  await page.unroute('**/submit');
+  await page.getByRole('textbox', { name: 'Note for One row per send' }).fill('Still saved.');
+  await expect(page.getByText('Draft saved · goes with Submit all')).toBeVisible();
+  await expect
+    .poll(async () => (await api(`/api/projects/${p.repo}/${p.project}/threads/t-questions-rows`)).thread.draft?.note)
+    .toBe('Still saved.');
+});
+
 test("an option answer Claude didn't get to comes back picked, and sends again", async ({ page }) => {
   const p = await importProject('loop-returned', 'Loop returned', { questions: [rows] });
   const thread = `/api/projects/${p.repo}/${p.project}/threads/t-questions-rows`;

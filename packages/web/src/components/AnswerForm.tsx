@@ -122,7 +122,7 @@ export function AnswerForm(p: Props) {
     fn();
   };
 
-  // A failed Send or Park leaves the form open: autosave and the unmount flush must work again.
+  // A failed or skipped Send, or a failed Park, leaves the form open: autosave and the unmount flush must work again.
   const reopen = () => {
     closed.current = false;
     dirty.current = true;
@@ -139,6 +139,8 @@ export function AnswerForm(p: Props) {
       return api.submit(p.repo, p.project, { scope: 'thread', threadId: p.threadId });
     },
     onSuccess: (r) => {
+      // The service skipped it (nothing sent or resolved), so the form stays.
+      if (!r.sent && !r.resolved) reopen();
       p.onSent?.(r);
       refresh();
     },
