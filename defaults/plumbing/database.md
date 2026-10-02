@@ -18,6 +18,7 @@ enabled: true
 - Compare every change with the schema file in the repo profile.
 - New names follow the repo profile's conventions.
 - Every backfill, destructive change and data-consent risk goes in the migration panel.
+- Say how to roll back in a rollback entry in the migration panel.
 - One item per table touched.
 
 ## Done when

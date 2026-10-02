@@ -17,7 +17,9 @@ enabled: true
 ## Rules
 - One item per screen or distinct piece of UI.
 - Build mockups with the app's design kit from the repo profile, so they look like the real app.
+- Mockups use the app's Tailwind classes and theme tokens from its kit files.
 - Write only the page's body markup; the app adds the kit.
+- No scripts; images as inline SVG or plain boxes.
 - Write a Before mockup from the current component whenever the screen already exists.
 - Label every mockup with its app, route and files.
 

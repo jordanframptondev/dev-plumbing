@@ -15,6 +15,7 @@ enabled: true
 
 ## Rules
 - Each phase has a goal, the items it includes, and "done when" criteria.
+- Each phase lists its items by id.
 - No task lists. The implementation planner writes tasks.
 - Make each phase shippable on its own when possible.
 

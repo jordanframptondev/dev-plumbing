@@ -46,4 +46,20 @@ describe('the plugin', () => {
     expect(skill).toMatch(/Never call `dp_wait` while one is still running in the background for this project/);
     expect(skill).toContain('**kind: replaced**');
   });
+
+  it('imports flows and phases in a second wave, and passes on only the decisions that matter', () => {
+    const skill = parseFrontMatter(read('plugin/skills/dev-plumbing/SKILL.md')).content;
+    expect(skill).toContain('afterOthers');
+    expect(skill).toContain('decisionCount');
+    expect(skill).toMatch(/When all of those have returned, start the entries with `afterOthers: true`/);
+  });
+
+  it('has importers and thread agents write drawings to the documented shapes', () => {
+    const importer = parseFrontMatter(read('plugin/agents/importer.md')).content;
+    for (const s of ['type.dataShape', 'kitFiles', 'mockupId', 'itemIds', 'existingItems']) expect(importer).toContain(s);
+    expect(importer).not.toContain('Mockup HTML comes in a later version');
+    const thread = parseFrontMatter(read('plugin/agents/thread.md')).content;
+    for (const s of ['patch: { data }', 'type.dataShape', 'anchor.itemId', 'anchor.label', 'anchor.ref', 'the whole item is in `anchored`']) expect(thread).toContain(s);
+    expect(thread).not.toContain('t-<anchor.itemId>');
+  });
 });

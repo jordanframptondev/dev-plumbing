@@ -67,4 +67,12 @@ describe('shipped defaults', () => {
     expect(read('outputs/finalize.md')).toMatch(/Notes for the implementer/);
     expect(read('outputs/whiteboard-defense.md')).toMatch(/If you ship it, you should be able to explain it/);
   });
+
+  it('tells importers how the visual types draw', () => {
+    expect(read('plumbing/ui.md')).toContain("Mockups use the app's Tailwind classes and theme tokens from its kit files.");
+    expect(read('plumbing/ui.md')).toContain('No scripts; images as inline SVG or plain boxes.');
+    expect(read('plumbing/database.md')).toContain('Say how to roll back in a rollback entry in the migration panel.');
+    expect(read('plumbing/phases.md')).toContain('Each phase lists its items by id.');
+    expect(read('plumbing/flows.md')).toContain('Point user-flow steps at their UI mockups.');
+  });
 });

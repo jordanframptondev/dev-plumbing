@@ -17,6 +17,7 @@ enabled: true
 ## Rules
 - Tag each flow user, system or both.
 - User flows are steps with the screen shown at each step. Reuse the UI mockups.
+- Point user-flow steps at their UI mockups.
 - System flows are steps between lanes that map to real code parts.
 - Number the steps so both views of a flow line up.
 - Include the failure path when a step can fail.

@@ -25,11 +25,16 @@ If `dp_open` returns an error, tell the user the error and stop.
 
 ## 2. Import
 
-Start one `dev-plumbing:importer` subagent per entry in `importTypes`, with `models.importer` as the model. Start up to `maxParallel` at once, as parallel Agent calls in one message, wait for them, then start the next batch. Give each this prompt, filled in:
+Each entry in `importTypes` needs one `dev-plumbing:importer` subagent, with `models.importer` as the model. Entries with `afterOthers: true` (Flows and Phases, by default) point at items the other importers write, such as a flow step's mockup or a phase's items, so they go in a second wave:
+
+1. Start the entries without `afterOthers`. Start up to `maxParallel` at once, as parallel Agent calls in one message, wait for them, then start the next batch.
+2. When all of those have returned, start the entries with `afterOthers: true` the same way. If every entry has `afterOthers`, start them straight away.
+
+Give each this prompt, filled in:
 
 > Import plumbing type `<type id>` ("<type title>") for repo `<repo>`, plumbing project `<project>`.
 
-Each returns one line. A line starting with `Failed:` means that plumbing type wasn't imported; include it in what you tell the user. When all have returned, tell the user the project's `url` and the importers' lines as a short list. Then go to 3.
+Each returns one line. A line starting with `Failed:` means that plumbing type wasn't imported; include it in what you tell the user. When both waves have returned, tell the user the project's `url` and the importers' lines as a short list. Then go to 3.
 
 ## 3. Listen
 
@@ -42,7 +47,7 @@ Call `dp_wait` with `repo` and `project`. It waits until the user presses **Send
 
 ## 4. Answer a submission
 
-The result has `submission`, `groups` (each with `threads`, `titles` and `model`), `maxParallel` and `decisions`.
+The result has `submission`, `groups` (each with `threads`, `titles` and `model`), `maxParallel`, `decisions` and `decisionCount`. `decisions` are the decisions that touch these threads: the ones made in them, and the ones about their items or the items those link to. `decisionCount` says how many decisions the project has in total. The others don't touch these threads, so you don't need them.
 
 1. Start one `dev-plumbing:thread` subagent per group, with that group's `model`. Start up to `maxParallel` at once, as parallel Agent calls in one message, wait for them, then start the next batch. Prompt, filled in:
    > Answer threads `<thread ids, comma separated>` in repo `<repo>`, plumbing project `<project>`.
