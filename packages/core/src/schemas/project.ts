@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { anchorSchema } from './data';
 import { codeRefSchema, itemFlagSchema, mdAnchorSchema, messageSchema } from './loop';
 
 export const threadStatusValues = ['idle', 'your_turn', 'with_claude', 'resolved', 'parked'] as const;
@@ -38,6 +39,11 @@ export const itemSchema = z
     codeRefs: z.array(codeRefSchema).optional(),
     links: z.array(z.string()).optional(),
     data: z.unknown().optional(),
+    /**
+     * Set on an item started from one part of another item: a box, a mockup element or a flow step.
+     * A malformed anchor reads as none, so it can never hide the item (reading never refuses).
+     */
+    anchor: anchorSchema.optional().catch(undefined),
     threadId: z.string(),
     createdBy: z.enum(['import', 'claude', 'you', 'whiteboard']),
     /** "May need another look": set when another thread's reply says it might affect this item. */
