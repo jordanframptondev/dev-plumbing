@@ -5,7 +5,8 @@ import { api } from '../api/client';
 import { Button } from '../components/Button';
 import { PageMessage } from '../components/PageMessage';
 import { Segmented } from '../components/Segmented';
-import { NOT_YET, ProjectHeader } from './ProjectHeader';
+import { draftsLabel, useSubmit } from '../lib/useSubmit';
+import { ProjectHeader } from './ProjectHeader';
 import { ProjectNav } from './ProjectNav';
 
 type Mode = 'view' | 'list' | 'defense';
@@ -14,6 +15,7 @@ type Tab = 'inbox' | 'plumbing' | 'defense';
 export function ProjectLayout() {
   const { repo, project } = useParams({ from: '/p/$repo/$project' });
   const home = useQuery({ queryKey: ['projectHome', repo, project], queryFn: () => api.projectHome(repo, project) });
+  const submitAll = useSubmit(repo, project);
   const navigate = useNavigate();
   const onInbox = Boolean(useMatch({ from: '/p/$repo/$project/', shouldThrow: false }));
   const [mode, setMode] = useState<Mode>('view');
@@ -42,7 +44,7 @@ export function ProjectLayout() {
         <Link to="/" className="mb-1 inline-block text-[13px] text-slate md:hidden">
           ‹ Projects
         </Link>
-        <ProjectHeader home={d} repo={repo} project={project} />
+        <ProjectHeader home={d} repo={repo} project={project} submitAll={submitAll} />
         <div className="mt-4 md:hidden">
           <Segmented<Tab>
             label="Project sections"
@@ -66,8 +68,8 @@ export function ProjectLayout() {
         </div>
       </main>
       <div className="fixed inset-x-0 bottom-0 border-t-[0.5px] border-separator bg-sidebar px-4 pb-6 pt-3 backdrop-blur-xl md:hidden">
-        <Button variant="primary" size="lg" className="w-full" disabled title={NOT_YET}>
-          Submit all · {drafts} draft{drafts === 1 ? '' : 's'}
+        <Button variant="primary" size="lg" className="w-full" disabled={!drafts || submitAll.isPending} onClick={() => submitAll.mutate({ scope: 'all' })}>
+          Submit all · {draftsLabel(drafts)}
         </Button>
       </div>
     </div>

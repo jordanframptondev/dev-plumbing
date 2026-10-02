@@ -5,6 +5,7 @@ import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 import { api, type Tab } from '../api/client';
 import { Button } from '../components/Button';
+import { ListeningMark } from '../components/ListeningMark';
 import { ProgressBar } from '../components/ProgressBar';
 import { Segmented } from '../components/Segmented';
 import { StatusMark } from '../components/StatusMark';
@@ -129,6 +130,7 @@ function ProjectRow({ p }: { p: ProjectSummary }) {
             {c.drafts > 0 && <span>{plural(c.drafts, 'draft')}</span>}
             {c.withClaude > 0 && <span>{c.withClaude} with Claude</span>}
             <span className="text-ink-3 md:hidden">{updated}</span>
+            <ListeningMark state={p.listening} />
           </div>
         </div>
         <div className="hidden w-32 shrink-0 text-right md:block">

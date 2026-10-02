@@ -1,5 +1,6 @@
 import type {
   AgentsConfig,
+  ChangesResponse,
   ConfigProblem,
   DiscoveryProblem,
   ProjectHome,
@@ -7,6 +8,8 @@ import type {
   RepoProfile,
   RuleSummary,
   Settings,
+  SubmitResponse,
+  ThreadDetail,
   TypeEntry,
   TypeItemRow,
 } from '@dev-plumbing/core/schemas';
@@ -31,6 +34,10 @@ async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
 const enc = encodeURIComponent;
 const send = (method: string, value: unknown): RequestInit => ({ method, body: JSON.stringify(value) });
 
+const proj = (repo: string, id: string) => `/api/projects/${enc(repo)}/${enc(id)}`;
+export type DraftInput = { optionId?: string; note?: string; text?: string };
+export type SubmitBody = { scope: 'all' } | { scope: 'thread'; threadId: string };
+
 export type Tab = 'active' | 'finalized' | 'all';
 export type ConfigResponse = { dir: string; settings: Settings; agents: AgentsConfig; repos: RepoProfile[]; types: RuleSummary[]; outputs: string[]; problems: ConfigProblem[] };
 export type RulesResponse = { types: RuleSummary[]; broken: { file: string; error: string }[]; outputs: string[] };
@@ -53,5 +60,16 @@ export const api = {
   createRule: (id: string, title: string) => request<{ file: string }>('/api/rules', send('POST', { id, title })),
   output: (name: string) => request<FileResponse>(`/api/outputs/${enc(name)}`),
   saveOutput: (name: string, text: string) => request<{ ok: true }>(`/api/outputs/${enc(name)}`, send('PUT', { text })),
+  thread: (repo: string, id: string, threadId: string) => request<ThreadDetail>(`${proj(repo, id)}/threads/${enc(threadId)}`),
+  saveDraft: (repo: string, id: string, threadId: string, draft: DraftInput | null) =>
+    request<{ ok: true }>(`${proj(repo, id)}/threads/${enc(threadId)}/draft`, send('PUT', draft ?? { clear: true })),
+  park: (repo: string, id: string, threadId: string, parked: boolean) =>
+    request<{ ok: true }>(`${proj(repo, id)}/threads/${enc(threadId)}/park`, send('POST', { parked })),
+  submit: (repo: string, id: string, body: SubmitBody) => request<SubmitResponse>(`${proj(repo, id)}/submit`, send('POST', body)),
+  addItem: (repo: string, id: string, body: { type: string; title: string; text: string; fields?: Record<string, string> }) =>
+    request<SubmitResponse & { threadId: string }>(`${proj(repo, id)}/items`, send('POST', body)),
+  changes: (repo: string, id: string) => request<ChangesResponse>(`${proj(repo, id)}/changes`),
+  changeAction: (repo: string, id: string, changeId: string, action: 'undo' | 'apply') =>
+    request<{ ok: true }>(`${proj(repo, id)}/changes/${enc(changeId)}/${action}`, send('POST', {})),
   reset: (file: string) => request<{ ok: true; loginItemError?: string }>('/api/reset', send('POST', { file })),
 };

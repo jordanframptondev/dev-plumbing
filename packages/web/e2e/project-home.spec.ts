@@ -6,6 +6,8 @@ const TYPE_TITLES = ['Architecture', 'Database', 'UI changes', 'Flows', 'Questio
 
 test('opens from the app home and shows where the plan came from', async ({ page }) => {
   await page.goto('/');
+  // Projects imported by other specs push the example off the first page, so find it by name.
+  await page.getByRole('searchbox', { name: 'Search plumbing projects' }).fill('Restock reminders');
   await page.getByTestId('project-row').filter({ hasText: 'Restock reminders' }).click();
   await expect(page).toHaveURL(/\/p\/acme\/restock-reminders$/);
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Restock reminders');

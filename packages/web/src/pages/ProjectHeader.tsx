@@ -2,11 +2,11 @@ import type { ProjectHome } from '@dev-plumbing/core/schemas';
 import { useMutation } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { Button } from '../components/Button';
+import { ListeningMark } from '../components/ListeningMark';
 import { ProgressBar } from '../components/ProgressBar';
+import { draftsLabel, type useSubmit } from '../lib/useSubmit';
 
-export const NOT_YET = 'Arrives once Claude is connected (next update).';
-
-export function ProjectHeader({ home, repo, project }: { home: ProjectHome; repo: string; project: string }) {
+export function ProjectHeader({ home, repo, project, submitAll }: { home: ProjectHome; repo: string; project: string; submitAll: ReturnType<typeof useSubmit> }) {
   const s = home.summary;
   const src = home.project.source;
   const open = useMutation({ mutationFn: () => api.open({ target: 'source', repo, id: project }) });
@@ -17,8 +17,8 @@ export function ProjectHeader({ home, repo, project }: { home: ProjectHome; repo
         <div className="hidden gap-2 md:flex">
           <Button disabled title="Whiteboard Defense arrives in a later update.">Whiteboard Defense</Button>
           <Button disabled title="Finalize spec arrives in a later update.">Finalize spec</Button>
-          <Button variant="primary" disabled title={NOT_YET}>
-            Submit all · {s.counts.drafts}
+          <Button variant="primary" disabled={!s.counts.drafts || submitAll.isPending} onClick={() => submitAll.mutate({ scope: 'all' })}>
+            Submit all · {draftsLabel(s.counts.drafts)}
           </Button>
         </div>
       </div>
@@ -33,15 +33,23 @@ export function ProjectHeader({ home, repo, project }: { home: ProjectHome; repo
         </button>
         {open.error && <span className="text-seal">{(open.error as Error).message}</span>}
       </div>
-      {s.counts.total > 0 && (
-        <div className="mt-3 flex items-center gap-3 text-[12px] text-ink-2">
-          <span className="shrink-0">
-            {s.counts.resolved} of {s.counts.total} resolved
-          </span>
-          <div className="flex-1">
-            <ProgressBar resolved={s.counts.resolved} total={s.counts.total} withClaude={s.counts.withClaude} />
-          </div>
-        </div>
+      <div className="mt-3 flex flex-wrap items-center gap-3 text-[12px] text-ink-2">
+        {s.counts.total > 0 && (
+          <>
+            <span className="shrink-0">
+              {s.counts.resolved} of {s.counts.total} resolved
+            </span>
+            <div className="min-w-24 flex-1">
+              <ProgressBar resolved={s.counts.resolved} total={s.counts.total} withClaude={s.counts.withClaude} />
+            </div>
+          </>
+        )}
+        <ListeningMark state={home.listening} />
+      </div>
+      {(submitAll.data || submitAll.error) && (
+        <p role="status" data-testid="submit-notice" className={`mt-2 text-[12.5px] ${submitAll.error ? 'text-seal' : 'text-ink-2'}`}>
+          {submitAll.error ? (submitAll.error as Error).message : submitAll.data?.message}
+        </p>
       )}
     </header>
   );
