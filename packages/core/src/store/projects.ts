@@ -6,9 +6,12 @@ import { activeDecisions } from './decisions';
 import { IMPORT_DID_NOT_FINISH } from './importItems';
 import { docPath, readDecisions, readItems, readJsonFile, readThreads } from './io';
 import { openOptions } from './threads';
+import type { DataChecker } from './checks';
 import {
   countThreads,
+  dataKindOf,
   displayStatus,
+  parseData,
   plumbingProjectSchema,
   type DiscoveryProblem,
   type InboxEntry,
@@ -235,37 +238,71 @@ export async function loadProjectHome(ref: ProjectRef, types: PlumbingType[]): P
   return { summary, project, types: typeEntries, inbox, documents };
 }
 
-export async function loadTypeItems(ref: ProjectRef, types: PlumbingType[], typeId: string): Promise<{ type: TypeEntry; items: TypeItemRow[] } | null> {
+const byTitle = (a: TypeItemRow, b: TypeItemRow) => a.title.localeCompare(b.title);
+
+/** Phases in their order. Items without valid phase data come after them, by title. */
+function byPhaseOrder(rows: TypeItemRow[]): TypeItemRow[] {
+  const order = new Map(
+    rows.map((r) => {
+      const p = parseData('timeline', r.data);
+      return [r.id, p.ok ? p.data.order : null] as const;
+    }),
+  );
+  return [...rows].sort((a, b) => {
+    const x = order.get(a.id) ?? null;
+    const y = order.get(b.id) ?? null;
+    if (x !== null && y !== null) return x - y || byTitle(a, b);
+    if (x !== null) return -1;
+    if (y !== null) return 1;
+    return byTitle(a, b);
+  });
+}
+
+/** A plumbing type's rows. With a checker, each row carries its checks against the plan's clone. */
+export async function loadTypeItems(
+  ref: ProjectRef,
+  types: PlumbingType[],
+  typeId: string,
+  opts: { checker?: DataChecker } = {},
+): Promise<{ type: TypeEntry; items: TypeItemRow[] } | null> {
   const home = await loadProjectHome(ref, types);
   const type = home.types.find((t) => t.id === typeId);
   if (!type) return null;
+  const kind = dataKindOf(type);
   const { values: items } = await readItems(ref.dir);
   const { values: threads } = await readThreads(ref.dir);
   const byId = new Map(threads.map((t) => [t.id, t]));
   const decisions = activeDecisions(await readDecisions(ref.dir));
-  const rows = items
-    .filter((i) => i.type === typeId)
-    .map((i): TypeItemRow => {
-      const th = byId.get(i.threadId);
-      const last = th ? [...th.messages].reverse().find((m) => m.text) : undefined;
-      return {
-        id: i.id,
-        threadId: i.threadId,
-        title: i.title,
-        summary: i.summary,
-        status: th ? displayStatus(th) : 'idle',
-        blocking: i.fields?.blocking === 'true',
-        fields: i.fields ?? {},
-        messageCount: th?.messages.length ?? 0,
-        latest: last?.text ? { author: last.author, text: last.text } : null,
-        open: th ? openOptions(th) : null,
-        draft: th?.draft ?? null,
-        decision: [...decisions].reverse().find((d) => d.threadId === i.threadId)?.text ?? null,
-        flagged: Boolean(i.flags?.length),
-      };
-    })
-    .sort((a, b) => a.title.localeCompare(b.title));
-  return { type, items: rows };
+  const ofType = items.filter((i) => i.type === typeId);
+  const checks = await Promise.all(ofType.map((i) => (opts.checker ? opts.checker.check(kind, i.data) : null)));
+  const rows = ofType.map((i, n): TypeItemRow => {
+    const th = byId.get(i.threadId);
+    const last = th ? [...th.messages].reverse().find((m) => m.text) : undefined;
+    return {
+      id: i.id,
+      threadId: i.threadId,
+      title: i.title,
+      summary: i.summary,
+      status: th ? displayStatus(th) : 'idle',
+      blocking: i.fields?.blocking === 'true',
+      fields: i.fields ?? {},
+      messageCount: th?.messages.length ?? 0,
+      latest: last?.text ? { author: last.author, text: last.text } : null,
+      open: th ? openOptions(th) : null,
+      draft: th?.draft ?? null,
+      decision: [...decisions].reverse().find((d) => d.threadId === i.threadId)?.text ?? null,
+      flagged: Boolean(i.flags?.length),
+      data: i.data ?? null,
+      body: i.body ?? null,
+      links: i.links ?? [],
+      anchor: i.anchor ?? null,
+      createdBy: i.createdBy,
+      checks: checks[n] ?? null,
+      // Timeline types fill this in Task 15 (the items each phase lists).
+      itemRefs: {},
+    };
+  });
+  return { type, items: kind === 'timeline' ? byPhaseOrder(rows) : rows.sort(byTitle) };
 }
 
 export async function readProjectDocument(ref: ProjectRef, which: 'original' | 'draft' | 'final'): Promise<string | null> {

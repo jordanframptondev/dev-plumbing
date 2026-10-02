@@ -102,4 +102,19 @@ describe('change previews', () => {
       problem: expect.stringMatching(/isn't in the draft.*no item "ghost"/s),
     });
   });
+
+  it('describes a drawing change in words instead of "data: updated"', () => {
+    const before = { kind: 'system', groups: [], nodes: [{ id: 'job', label: 'Daily job', status: 'new' }], edges: [] };
+    const after = { ...before, nodes: [...before.nodes, { id: 'sms', label: 'SMS sender', status: 'external' }] };
+    const { item } = pair('a1', { type: 'architecture', title: 'System view' });
+    const drawn = { ...item, data: before };
+    const change = { items: [{ itemId: 'a1', patch: { summary: 'With SMS.', data: after } }] };
+    const kindOf = (i: { type: string }) => (i.type === 'architecture' ? ('diagram' as const) : null);
+    expect(previewChange(original, [drawn], change, kindOf).items).toEqual([
+      { itemId: 'a1', title: 'System view', changes: [{ field: 'summary', before: 'A summary.', after: 'With SMS.' }], data: { kind: 'diagram', summary: ['1 box added'], after } },
+    ]);
+    // Without kindOf, or for an item that isn't drawn, it stays a plain field change.
+    expect(previewChange(original, [drawn], change).items[0]?.changes).toContainEqual({ field: 'data', before: '', after: 'updated' });
+    expect(previewChange(original, [drawn], change).items[0]?.data).toBeUndefined();
+  });
 });

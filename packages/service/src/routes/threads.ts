@@ -16,6 +16,7 @@ import {
   type SubmitResponse,
 } from '@dev-plumbing/core';
 import type { AppContext } from '../context';
+import { checkerFor } from '../checker';
 import { handle } from '../errors';
 import { EXPECTED_OBJECT, readJsonObject } from '../json';
 import { locateProject } from '../locate';
@@ -61,7 +62,7 @@ export function threadRoutes(ctx: AppContext, rt: Runtime): Hono {
 
   r.get(`${base}/threads/:threadId`, handle(async (c) => {
     const { cfg, ref } = await find(c);
-    const detail = await loadThreadDetail({ dir: ref.dir, threadId: c.req.param('threadId')!, types: cfg.types });
+    const detail = await loadThreadDetail({ dir: ref.dir, threadId: c.req.param('threadId')!, types: cfg.types, checker: await checkerFor(ctx, cfg, ref) });
     return c.json({ ...detail, listening: rt.listeners.state(projectKey(ref.repo, ref.id)) });
   }));
 

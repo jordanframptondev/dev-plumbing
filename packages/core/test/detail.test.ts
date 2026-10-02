@@ -5,7 +5,9 @@ import { addDecision } from '../src/store/decisions';
 import { loadTypeItems } from '../src/store/projects';
 import { readThread, writeThread } from '../src/store/io';
 import { removeTempDirs } from '../../../testkit/tmp';
-import { pair, seedProject, TYPES } from './fixtures';
+import { listType, pair, seedProject, TYPES } from './fixtures';
+import type { Anchor, Item, Thread } from '../src/schemas';
+import type { DataChecker } from '../src/store/checks';
 
 afterAll(removeTempDirs);
 
@@ -61,5 +63,80 @@ describe('thread detail', () => {
     expect(q1).toMatchObject({ threadId: 't-q1', status: 'draft', blocking: true, fields: { default: 'One row per send' }, messageCount: 1, draft: { optionId: 'per-sub' }, decision: null, flagged: false });
     expect(q1?.open?.options).toHaveLength(2);
     expect(r?.items.find((i) => i.id === 'q2')?.decision).toBe('Both channels');
+  });
+});
+
+describe('drawings on screens and threads', () => {
+  const types = [...TYPES, listType('phases', { title: 'Phases & milestones', order: 8, timeline: true })];
+  const diagram = {
+    kind: 'system',
+    groups: [{ id: 'jobs', label: 'Jobs' }],
+    nodes: [
+      { id: 'job', label: 'Daily job', group: 'jobs', status: 'new', codeRef: { path: 'src/jobs/reminders.ts' } },
+      { id: 'db', label: 'Subscriptions table', status: 'unchanged' },
+    ],
+    edges: [{ id: 'reads', from: 'job', to: 'db', label: 'reads' }],
+  };
+  const withSms = { ...diagram, nodes: [...diagram.nodes, { id: 'sms', label: 'SMS sender', status: 'external' }], edges: [...diagram.edges, { id: 'sends', from: 'job', to: 'sms' }] };
+  const anchor: Anchor = { itemId: 'a1', kind: 'node', ref: 'job', label: 'Daily job' };
+  // A stand-in for Task 3's checker: every diagram's "job" box is found.
+  const checker: DataChecker = { check: async (kind) => (kind === 'diagram' ? { kind: 'diagram', checked: true, nodes: { job: true } } : null) };
+  const drawn = (p: { item: Item; thread: Thread }, extra: Partial<Item>) => ({ ...p, item: { ...p.item, ...extra } });
+
+  it("gives screen rows the item's drawing, body, links, pin and checks", async () => {
+    const dir = await seedProject({
+      pairs: [
+        drawn(pair('a1', { type: 'architecture', title: 'System view' }), { data: diagram, body: 'The daily job and what it reads.' }),
+        drawn(pair('a2', { type: 'architecture', title: 'About the daily job' }), { anchor, links: ['a1'], createdBy: 'you' }),
+      ],
+    });
+    const ref = { repo: 'acme', id: 'restock', dir };
+    const r = await loadTypeItems(ref, types, 'architecture', { checker });
+    expect(r?.items.find((i) => i.id === 'a1')).toMatchObject({
+      data: diagram,
+      body: 'The daily job and what it reads.',
+      links: [],
+      anchor: null,
+      createdBy: 'import',
+      checks: { kind: 'diagram', checked: true, nodes: { job: true } },
+      itemRefs: {},
+    });
+    expect(r?.items.find((i) => i.id === 'a2')).toMatchObject({ data: null, body: null, links: ['a1'], anchor, createdBy: 'you', itemRefs: {} });
+    expect((await loadTypeItems(ref, types, 'architecture'))?.items.map((i) => i.checks)).toEqual([null, null]);
+  });
+
+  it('lists phases in their order, with phases that have no valid data after them', async () => {
+    const phase = (order: number) => ({ order, goal: `Goal ${order}`, doneWhen: ['It ships'], itemIds: [] });
+    const dir = await seedProject({
+      pairs: [
+        drawn(pair('p1', { type: 'phases', title: 'Alpha' }), { data: phase(2) }),
+        drawn(pair('p2', { type: 'phases', title: 'Beta' }), { data: phase(1) }),
+        drawn(pair('p3', { type: 'phases', title: 'Zed' }), { data: { order: 'soon' } }),
+        pair('p4', { type: 'phases', title: 'Aardvark' }),
+      ],
+    });
+    const r = await loadTypeItems({ repo: 'acme', id: 'restock', dir }, types, 'phases');
+    expect(r?.type.timeline).toBe(true);
+    expect(r?.items.map((i) => i.title)).toEqual(['Beta', 'Alpha', 'Aardvark', 'Zed']);
+  });
+
+  it("gives the thread view its checks, the item a pin is on, and previews of drawing changes", async () => {
+    const addSms = { id: 'add-sms', label: 'Add the SMS sender', change: { items: [{ itemId: 'a1', patch: { data: withSms } }] } };
+    const dir = await seedProject({
+      pairs: [
+        drawn(pair('a1', { type: 'architecture', title: 'System view', options: [addSms] }), { data: diagram }),
+        drawn(pair('a2', { type: 'architecture', title: 'About the daily job' }), { anchor, links: ['a1'], createdBy: 'you' }),
+      ],
+    });
+    const d = await loadThreadDetail({ dir, threadId: 't-a1', types, checker });
+    expect(d.checks).toEqual({ kind: 'diagram', checked: true, nodes: { job: true } });
+    expect(d.anchorParent).toBeNull();
+    expect(d.type).toMatchObject({ id: 'architecture', screen: 'diagram', timeline: false });
+    expect(d.previews['add-sms']?.items).toEqual([
+      { itemId: 'a1', title: 'System view', changes: [], data: { kind: 'diagram', summary: ['1 box added', '1 line added'], after: withSms } },
+    ]);
+    const pin = await loadThreadDetail({ dir, threadId: 't-a2', types });
+    expect(pin.anchorParent).toEqual({ itemId: 'a1', threadId: 't-a1', title: 'System view', typeId: 'architecture' });
+    expect(pin.checks).toBeNull();
   });
 });

@@ -1,5 +1,6 @@
 import { diffDocuments, previewChange } from '../docDiff';
-import { changeState, displayStatus, type ChangePreview, type ChangesResponse, type ListeningState, type PlumbingType, type ThreadDetail } from '../schemas';
+import { changeState, dataKindOf, displayStatus, type ChangePreview, type ChangesResponse, type Item, type ListeningState, type PlumbingType, type ThreadDetail } from '../schemas';
+import type { DataChecker } from './checks';
 import { activeDecisions } from './decisions';
 import { readDecisions, readDocText, readHistory, readItem, readItems, readProjectFile, readThread, readThreads } from './io';
 import { openOptions } from './threads';
@@ -23,7 +24,7 @@ export function submitMessage(r: { resolved: number; sent: number; skipped: { re
   return r.skipped[0]?.reason ?? 'Nothing to send yet.';
 }
 
-export async function loadThreadDetail(o: { dir: string; threadId: string; types: PlumbingType[] }): Promise<Omit<ThreadDetail, 'listening'>> {
+export async function loadThreadDetail(o: { dir: string; threadId: string; types: PlumbingType[]; checker?: DataChecker }): Promise<Omit<ThreadDetail, 'listening'>> {
   const thread = await readThread(o.dir, o.threadId);
   const item = await readItem(o.dir, thread.itemId);
   const project = await readProjectFile(o.dir);
@@ -31,6 +32,10 @@ export async function loadThreadDetail(o: { dir: string; threadId: string; types
   const { values: items } = await readItems(o.dir);
   const typeOf = (typeId: string) => o.types.find((t) => t.id === typeId);
   const type = typeOf(item.type);
+  const kindOf = (i: Item) => {
+    const t = typeOf(i.type);
+    return t ? dataKindOf(t) : null;
+  };
   const refFor = (id: string) => {
     const i = items.find((x) => x.id === id);
     return i ? { title: i.title, threadId: i.threadId, typeTitle: typeOf(i.type)?.title ?? i.type } : null;
@@ -38,7 +43,7 @@ export async function loadThreadDetail(o: { dir: string; threadId: string; types
 
   const open = openOptions(thread);
   const previews: Record<string, ChangePreview> = {};
-  for (const option of open?.options ?? []) if (option.change) previews[option.id] = previewChange(draft, items, option.change);
+  for (const option of open?.options ?? []) if (option.change) previews[option.id] = previewChange(draft, items, option.change, kindOf);
 
   const linkedIds = new Set([...(item.links ?? []), ...items.filter((i) => i.links?.includes(item.id)).map((i) => i.id)]);
   const linked = [...linkedIds].flatMap((id) => {
@@ -58,17 +63,27 @@ export async function loadThreadDetail(o: { dir: string; threadId: string; types
   }
   const edits: ThreadDetail['edits'] = {};
   for (const h of await readHistory(o.dir)) if (editIds.has(h.id)) edits[h.id] = { state: changeState(h), summary: h.summary };
+  const parent = item.anchor ? items.find((i) => i.id === item.anchor?.itemId) : undefined;
 
   return {
     thread: { ...thread, display: displayStatus(thread) },
     item,
-    type: { id: item.type, title: type?.title ?? item.type, screen: type?.screen ?? 'list', fields: type?.fields ?? [], answerPresets: type?.answerPresets ?? [] },
+    type: {
+      id: item.type,
+      title: type?.title ?? item.type,
+      screen: type?.screen ?? 'list',
+      timeline: type?.timeline ?? false,
+      fields: type?.fields ?? [],
+      answerPresets: type?.answerPresets ?? [],
+    },
     open,
     previews,
     linked,
     refs,
     edits,
     decisions: activeDecisions(await readDecisions(o.dir)).filter((d) => d.itemIds.includes(item.id) || d.threadId === thread.id),
+    checks: o.checker ? await o.checker.check(kindOf(item), item.data) : null,
+    anchorParent: parent ? { itemId: parent.id, threadId: parent.threadId, title: parent.title, typeId: parent.type } : null,
   };
 }
 

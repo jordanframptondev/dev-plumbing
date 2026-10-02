@@ -11,6 +11,7 @@ import {
   readProjectDocument,
 } from '@dev-plumbing/core';
 import type { AppContext } from '../context';
+import { checkerFor } from '../checker';
 import { handle } from '../errors';
 import { EXPECTED_OBJECT, readJsonObject } from '../json';
 import { locateProject } from '../locate';
@@ -55,7 +56,7 @@ export function projectRoutes(ctx: AppContext, rt: Runtime): Hono {
 
   r.get('/projects/:repo/:id/types/:type', handle(async (c) => {
     const { cfg, ref } = await locateProject(ctx, c.req.param('repo')!, c.req.param('id')!);
-    const result = await loadTypeItems(ref, cfg.types, c.req.param('type')!);
+    const result = await loadTypeItems(ref, cfg.types, c.req.param('type')!, { checker: await checkerFor(ctx, cfg, ref) });
     return result ? c.json(result) : c.json({ error: "That plumbing type doesn't exist or is turned off." }, 404);
   }));
 

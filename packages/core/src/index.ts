@@ -23,5 +23,6 @@ export * from './store/queue';
 export * from './store/context';
 export * from './store/detail';
 export * from './docDiff';
+export * from './dataDiff';
 export * from './prisma';
 export * from './store/checks';

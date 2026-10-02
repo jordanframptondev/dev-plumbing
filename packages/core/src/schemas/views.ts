@@ -1,6 +1,7 @@
 import type { ChangeState, Decision, Option, ThreadDraft } from './loop';
 import type { Item, PlumbingProject, Thread } from './project';
 import type { Screen } from './plumbingType';
+import type { Anchor, DataKind } from './data';
 
 export type ConfigProblem = { file: string; key?: string; message: string };
 export type RuleSummary = { file: string; id: string; title: string; order: number; screen: Screen; enabled: boolean };
@@ -101,6 +102,13 @@ export type TypeItemRow = {
   id: string; threadId: string; title: string; summary: string; status: DisplayStatus; blocking: boolean;
   fields: Record<string, string>; messageCount: number; latest: { author: 'you' | 'claude' | 'system'; text: string } | null;
   open: OpenOptions | null; draft: ThreadDraft | null; decision: string | null; flagged: boolean;
+  /** The item's drawing as stored (raw: screens parse it with parseData), or null when it has none. */
+  data: unknown; body: string | null; links: string[]; anchor: Anchor | null;
+  createdBy: 'import' | 'claude' | 'you' | 'whiteboard';
+  /** Checks against the plan's clone, made when the screen loads. Never stored. */
+  checks: DataChecks | null;
+  /** Timeline types: each item in data.itemIds that exists, for the phase's links. {} for other types. */
+  itemRefs: Record<string, { title: string; threadId: string; typeTitle: string }>;
 };
 
 /** A projects folder that couldn't be read while listing plumbing projects. */
@@ -112,12 +120,17 @@ export type DiffSegment = {
   changedBy?: { changeId: string; threadId: string; summary: string; threadTitle: string }[];
 };
 export type FieldChange = { field: string; before: string; after: string };
-export type ChangePreview = { md: DiffSegment[] | null; items: { itemId: string; title: string; changes: FieldChange[] }[]; problem?: string };
+export type ChangePreview = {
+  md: DiffSegment[] | null;
+  /** `data` is set when a patch changes a drawn item's data: what it does, in words, and the proposed data. */
+  items: { itemId: string; title: string; changes: FieldChange[]; data?: { kind: DataKind; summary: string[]; after: unknown } }[];
+  problem?: string;
+};
 
 export type ThreadDetail = {
   thread: Thread & { display: DisplayStatus };
   item: Item;
-  type: { id: string; title: string; screen: Screen; fields: string[]; answerPresets: string[] };
+  type: { id: string; title: string; screen: Screen; timeline: boolean; fields: string[]; answerPresets: string[] };
   open: OpenOptions | null;
   previews: Record<string, ChangePreview>;
   linked: { itemId: string; threadId: string; title: string; typeTitle: string }[];
@@ -125,6 +138,10 @@ export type ThreadDetail = {
   edits: Record<string, { state: ChangeState; summary: string }>;
   decisions: Decision[];
   listening: ListeningState;
+  /** The item's checks against the plan's clone, made when the thread loads. Never stored. */
+  checks: DataChecks | null;
+  /** For a pin ("Ask about this box", + Pin): the item it's on. */
+  anchorParent: { itemId: string; threadId: string; title: string; typeId: string } | null;
 };
 export type SubmitResponse = { resolved: number; sent: number; skipped: { threadId: string; reason: string }[]; listening: ListeningState; message: string };
 export type ChangeEntry = { id: string; at: string; kind: 'small-edit' | 'accept'; summary: string; state: ChangeState; threadId: string; threadTitle: string };

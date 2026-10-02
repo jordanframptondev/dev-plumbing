@@ -1,5 +1,6 @@
 import { diffLines } from 'diff';
-import { applyMdPatches, type Change, type ChangePreview, type DiffSegment, type FieldChange, type HistoryEntry, type Item, type ItemPatch } from './schemas';
+import { dataChangeSummary } from './dataDiff';
+import { applyMdPatches, type Change, type ChangePreview, type DataKind, type DiffSegment, type FieldChange, type HistoryEntry, type Item, type ItemPatch } from './schemas';
 
 export function diffText(before: string, after: string): DiffSegment[] {
   return diffLines(before, after).map((c) => ({ kind: c.added ? 'added' : c.removed ? 'removed' : 'same', text: c.value }));
@@ -29,7 +30,8 @@ export function diffDocuments(original: string, draft: string, history: HistoryE
   });
 }
 
-function fieldChanges(item: Item, patch: ItemPatch): FieldChange[] {
+/** The patch's field changes. `dataDescribed` leaves out "data: updated", because the preview describes it instead. */
+function fieldChanges(item: Item, patch: ItemPatch, dataDescribed: boolean): FieldChange[] {
   const out: FieldChange[] = [];
   for (const key of ['title', 'summary', 'body'] as const) {
     const after = patch[key];
@@ -38,12 +40,17 @@ function fieldChanges(item: Item, patch: ItemPatch): FieldChange[] {
   for (const [field, after] of Object.entries(patch.fields ?? {})) {
     if (item.fields?.[field] !== after) out.push({ field, before: item.fields?.[field] ?? '', after });
   }
-  for (const key of ['links', 'codeRefs', 'mdAnchor', 'data'] as const) if (patch[key] !== undefined) out.push({ field: key, before: '', after: 'updated' });
+  for (const key of ['links', 'codeRefs', 'mdAnchor', 'data'] as const) {
+    if (patch[key] !== undefined && !(key === 'data' && dataDescribed)) out.push({ field: key, before: '', after: 'updated' });
+  }
   return out;
 }
 
-/** What accepting a change would do: the draft diff, and each item's changed fields. */
-export function previewChange(draft: string, items: Item[], change: Change): ChangePreview {
+/**
+ * What accepting a change would do: the draft diff, and each item's changed fields. With `kindOf`, a patch to a
+ * drawn item's data also says what it does to the drawing, in words, and carries the proposed data.
+ */
+export function previewChange(draft: string, items: Item[], change: Change, kindOf?: (item: Item) => DataKind | null): ChangePreview {
   const problems: string[] = [];
   let md: DiffSegment[] | null = null;
   if (change.md?.length) {
@@ -55,8 +62,17 @@ export function previewChange(draft: string, items: Item[], change: Change): Cha
   const itemChanges: ChangePreview['items'] = [];
   for (const c of change.items ?? []) {
     const item = byId.get(c.itemId);
-    if (!item) problems.push(`There's no item "${c.itemId}".`);
-    else itemChanges.push({ itemId: item.id, title: item.title, changes: fieldChanges(item, c.patch) });
+    if (!item) {
+      problems.push(`There's no item "${c.itemId}".`);
+      continue;
+    }
+    const kind = c.patch.data !== undefined ? (kindOf?.(item) ?? null) : null;
+    itemChanges.push({
+      itemId: item.id,
+      title: item.title,
+      changes: fieldChanges(item, c.patch, kind !== null),
+      ...(kind ? { data: { kind, summary: dataChangeSummary(kind, item.data, c.patch.data), after: c.patch.data } } : {}),
+    });
   }
   return { md, items: itemChanges, ...(problems.length ? { problem: problems.join(' ') } : {}) };
 }
