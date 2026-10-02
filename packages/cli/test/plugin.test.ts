@@ -36,6 +36,15 @@ describe('installing the plugin', () => {
     expect(ran).toContain('claude plugin marketplace update dev-plumbing');
   });
 
+  it('reports a real failure even when the repo path says "already"', async () => {
+    const root = '/src/already-cloned/dev-plumbing';
+    // Like execFile's errors: the message names the command, and so the path, before stderr.
+    const failure = Object.assign(new Error(`Command failed: claude plugin marketplace add ${root}\nError: permission denied`), { stderr: 'Error: permission denied', stdout: '' });
+    const { run, ran } = fakeRunner({ 'claude plugin marketplace add': failure });
+    await expect(installPlugin(root, run)).rejects.toThrow(/claude plugin marketplace add failed: Error: permission denied/);
+    expect(ran).not.toContain('claude plugin marketplace update dev-plumbing');
+  });
+
   it("explains when Claude Code isn't installed, and when a command fails", async () => {
     const missing = fakeRunner({ 'claude --version': Object.assign(new Error('spawn claude ENOENT'), { code: 'ENOENT' }) });
     expect(await installPlugin('/src/dev-plumbing', missing.run)).toMatch(/isn't on your PATH/);

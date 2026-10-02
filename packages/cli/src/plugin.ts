@@ -14,7 +14,8 @@ export const PLUGIN_ID = `dev-plumbing@${MARKETPLACE}`;
 
 type Failure = Error & { stdout?: string; stderr?: string; code?: string };
 const output = (e: unknown) => `${(e as Failure).stderr ?? ''} ${(e as Failure).stdout ?? ''}`.trim();
-const already = (e: unknown) => /already/i.test(`${output(e)} ${(e as Error).message}`);
+// Only the command's own output: execFile's message names the command, and so the repo path, which may say "already".
+const already = (e: unknown) => /already/i.test(output(e));
 const detail = (e: unknown) => (output(e) || (e as Error).message).split('\n')[0];
 
 /**
