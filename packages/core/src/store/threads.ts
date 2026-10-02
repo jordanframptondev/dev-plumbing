@@ -1,4 +1,4 @@
-import type { ClaudeMessage, Item, Message, OpenOptions, Option, PlumbingType, Thread } from '../schemas';
+import { anchorKindFor, dataKindOf, parseData, type Anchor, type ClaudeMessage, type Item, type Message, type OpenOptions, type Option, type PlumbingType, type Thread } from '../schemas';
 import { uniqueId } from './importItems';
 import { InputError, newId, readItems, readThread, writeItem, writeThread } from './io';
 import { slugify } from './open';
@@ -57,10 +57,36 @@ export async function setParked(dir: string, threadId: string, parked: boolean, 
   return next;
 }
 
-/** + Question / + Concern / + Idea: a new item whose thread starts with your message as a draft, ready to send. */
+/**
+ * Why a pin can't go on this item, or null when it can. The item must exist and be of the pin's own type, the
+ * type must take this kind of pin, and a box or step must be in the drawing. Element selectors aren't checked,
+ * so a pin outlives a redrawn mockup (the screen marks it "Not in this version").
+ */
+function anchorProblem(anchor: Anchor, type: PlumbingType, items: Item[]): string | null {
+  const parent = items.find((i) => i.id === anchor.itemId);
+  if (!parent) return `There's no item ${anchor.itemId} to ask about.`;
+  if (parent.type !== type.id) return 'Pins start an item of the same plumbing type.';
+  if (anchor.kind !== anchorKindFor(dataKindOf(type))) return `${type.title} items can't take a ${anchor.kind} pin.`;
+  if (anchor.kind === 'node') {
+    const d = parseData('diagram', parent.data);
+    if (!d.ok) return `"${parent.title}" has no diagram to ask about.`;
+    if (!d.data.nodes.some((n) => n.id === anchor.ref)) return `There's no box "${anchor.ref}" in "${parent.title}".`;
+  }
+  if (anchor.kind === 'step') {
+    const f = parseData('flows', parent.data);
+    if (!f.ok) return `"${parent.title}" has no flow to ask about.`;
+    if (!f.data.steps.some((s) => String(s.n) === anchor.ref)) return `There's no step ${anchor.ref} in "${parent.title}".`;
+  }
+  return null;
+}
+
+/**
+ * + Question / + Concern / + Idea, and pins ("Ask about this box", + Pin, "Ask about this step"): a new item whose
+ * thread starts with your message as a draft, ready to send. A pin links to the item it's about, which is left as it is.
+ */
 export async function addOwnItem(
   dir: string,
-  o: { type: PlumbingType; title: string; text: string; fields?: Record<string, string>; now?: Date },
+  o: { type: PlumbingType; title: string; text: string; fields?: Record<string, string>; anchor?: Anchor; now?: Date },
 ): Promise<{ item: Item; thread: Thread }> {
   const now = o.now ?? new Date();
   const title = o.title.trim();
@@ -70,8 +96,19 @@ export async function addOwnItem(
   const problems = fieldProblems(o.fields, o.type);
   if (problems.length) throw new InputError(problems.join(' '));
   const { values } = await readItems(dir);
+  const pin = o.anchor ? anchorProblem(o.anchor, o.type, values) : null;
+  if (pin) throw new InputError(pin);
   const id = uniqueId(`${o.type.id}-${slugify(title)}`, new Set(values.map((i) => i.id)));
-  const item: Item = { id, type: o.type.id, title, summary: title, ...(o.fields ? { fields: o.fields } : {}), threadId: `t-${id}`, createdBy: 'you' };
+  const item: Item = {
+    id,
+    type: o.type.id,
+    title,
+    summary: title,
+    ...(o.fields ? { fields: o.fields } : {}),
+    ...(o.anchor ? { anchor: o.anchor, links: [o.anchor.itemId] } : {}),
+    threadId: `t-${id}`,
+    createdBy: 'you',
+  };
   const thread: Thread = { id: `t-${id}`, itemId: id, status: 'idle', draft: { text, updatedAt: now.toISOString() }, messages: [] };
   await writeItem(dir, item);
   await writeThread(dir, thread);

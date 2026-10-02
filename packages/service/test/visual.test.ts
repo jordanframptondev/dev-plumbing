@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { writeJsonAtomic } from '@dev-plumbing/core';
+import { readItem, readThread, writeJsonAtomic } from '@dev-plumbing/core';
 import { createApp } from '../src/app';
 import { createRuntime } from '../src/runtime';
 import { makeRepo } from '../../core/test/fixtures';
@@ -115,5 +115,49 @@ describe('checks against the code', () => {
     expect(table.checks).toEqual({ kind: 'database', checked: false, reason: "The plan's clone isn't on this Mac any more.", warnings: [] });
     const diagram = (await t.send('GET', `${P}/types/architecture`)).body.items[0];
     expect(diagram.checks).toEqual({ kind: 'diagram', checked: false, reason: "The plan's clone isn't on this Mac any more.", nodes: {} });
+  });
+});
+
+describe('asking about one part of a drawing', () => {
+  const box = { itemId: 'architecture-system', kind: 'node', ref: 'job', label: 'Daily reminder job' };
+
+  it('starts a thread about one box, linked to its diagram, and sends it', async () => {
+    const t = await setup();
+    const r = await t.send('POST', `${P}/items`, { type: 'architecture', title: 'About the daily job', text: 'What time does it run?', anchor: box });
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ threadId: 't-architecture-about-the-daily-job', sent: 1 });
+    expect(await readItem(t.dir, 'architecture-about-the-daily-job')).toMatchObject({ anchor: box, links: ['architecture-system'], createdBy: 'you' });
+    const thread = await readThread(t.dir, 't-architecture-about-the-daily-job');
+    expect(thread.status).toBe('with_claude');
+    expect(thread.messages[0]).toMatchObject({ author: 'you', text: 'What time does it run?' });
+    const d = (await t.send('GET', `${P}/threads/t-architecture-about-the-daily-job`)).body;
+    expect(d.anchorParent).toEqual({ itemId: 'architecture-system', threadId: 't-architecture-system', title: 'System view', typeId: 'architecture' });
+    const rows = (await t.send('GET', `${P}/types/architecture`)).body.items;
+    expect(rows.find((x: Json) => x.id === 'architecture-about-the-daily-job').anchor).toEqual(box);
+  });
+
+  it('starts a thread about a flow step', async () => {
+    const t = await setup();
+    const step = { itemId: 'flows-turn-on', kind: 'step', ref: '2', label: 'Step 2: Turn reminders on' };
+    const r = await t.send('POST', `${P}/items`, { type: 'flows', title: 'Where is the toggle?', text: 'Is it on the account page?', anchor: step });
+    expect(r.body.threadId).toBe('t-flows-where-is-the-toggle');
+    expect(await readItem(t.dir, 'flows-where-is-the-toggle')).toMatchObject({ anchor: step, links: ['flows-turn-on'] });
+  });
+
+  it('refuses a pin of another type, an unknown box, a missing item or a misspelt key, and writes nothing', async () => {
+    const t = await setup();
+    const wrongType = await t.send('POST', `${P}/items`, { type: 'questions', title: 'Why a job?', text: 'Why not a queue?', anchor: box });
+    expect(wrongType.status).toBe(400);
+    expect(wrongType.body.error).toBe('Pins start an item of the same plumbing type.');
+    const ghost = await t.send('POST', `${P}/items`, { type: 'architecture', title: 'Ghost', text: 'What is this?', anchor: { ...box, ref: 'ghost' } });
+    expect(ghost.status).toBe(400);
+    expect(ghost.body.error).toBe('There\'s no box "ghost" in "System view".');
+    const missing = await t.send('POST', `${P}/items`, { type: 'architecture', title: 'Gone', text: 'Where did it go?', anchor: { ...box, itemId: 'architecture-gone' } });
+    expect(missing.status).toBe(400);
+    expect(missing.body.error).toBe("There's no item architecture-gone to ask about.");
+    const typo = await t.send('POST', `${P}/items`, { type: 'architecture', title: 'Typo', text: 'Oops.', anchr: box });
+    expect(typo.status).toBe(400);
+    expect((await t.send('GET', `${P}/types/architecture`)).body.items).toHaveLength(1);
+    expect((await t.send('GET', `${P}/types/questions`)).body.items).toHaveLength(0);
   });
 });

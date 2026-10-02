@@ -1,5 +1,6 @@
 import type {
   AgentsConfig,
+  Anchor,
   ChangesResponse,
   ConfigProblem,
   DiscoveryProblem,
@@ -66,7 +67,7 @@ export const api = {
   park: (repo: string, id: string, threadId: string, parked: boolean) =>
     request<{ ok: true }>(`${proj(repo, id)}/threads/${enc(threadId)}/park`, send('POST', { parked })),
   submit: (repo: string, id: string, body: SubmitBody) => request<SubmitResponse>(`${proj(repo, id)}/submit`, send('POST', body)),
-  addItem: (repo: string, id: string, body: { type: string; title: string; text: string; fields?: Record<string, string> }) =>
+  addItem: (repo: string, id: string, body: { type: string; title: string; text: string; fields?: Record<string, string>; anchor?: Anchor }) =>
     request<SubmitResponse & { threadId: string }>(`${proj(repo, id)}/items`, send('POST', body)),
   changes: (repo: string, id: string) => request<ChangesResponse>(`${proj(repo, id)}/changes`),
   changeAction: (repo: string, id: string, changeId: string, action: 'undo' | 'apply') =>

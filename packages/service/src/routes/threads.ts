@@ -2,11 +2,13 @@ import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import {
   addOwnItem,
+  anchorSchema,
   applyPendingChange,
   formatZodError,
   InputError,
   loadChanges,
   loadThreadDetail,
+  readItems,
   saveDraft,
   setParked,
   submit,
@@ -32,7 +34,16 @@ const draftBody = z.union([
 ]);
 const parkBody = z.object({ parked: z.boolean() });
 const submitBody = z.union([z.object({ scope: z.literal('all') }), z.object({ scope: z.literal('thread'), threadId: z.string().min(1) })]);
-const itemBody = z.object({ type: z.string().min(1), title: z.string().min(1).max(200), text: z.string().min(1).max(20_000), fields: z.record(z.string().max(500)).optional() });
+// Strict, so a misspelt key can't turn a pin into a plain item.
+const itemBody = z
+  .object({
+    type: z.string().min(1),
+    title: z.string().min(1).max(200),
+    text: z.string().min(1).max(20_000),
+    fields: z.record(z.string().max(500)).optional(),
+    anchor: anchorSchema.optional(),
+  })
+  .strict();
 
 async function parse<S extends z.ZodTypeAny>(c: Context, schema: S): Promise<z.infer<S>> {
   const body = await readJsonObject(c);
@@ -90,10 +101,16 @@ export function threadRoutes(ctx: AppContext, rt: Runtime): Hono {
   r.post(`${base}/items`, handle(async (c) => {
     const body = await parse(c, itemBody);
     const { cfg, ref } = await find(c);
-    const type = cfg.types.find((t) => t.id === body.type && t.enabled);
-    if (!type) throw new InputError(`"${body.type}" isn't an enabled plumbing type.`);
     const { threadId, result } = await write(ref, async () => {
-      const { thread } = await addOwnItem(ref.dir, { type, title: body.title, text: body.text, fields: body.fields });
+      // A pin starts an item of the anchored item's own type.
+      if (body.anchor) {
+        const anchored = (await readItems(ref.dir)).values.find((i) => i.id === body.anchor?.itemId);
+        if (!anchored) throw new InputError(`There's no item ${body.anchor.itemId} to ask about.`);
+        if (anchored.type !== body.type) throw new InputError('Pins start an item of the same plumbing type.');
+      }
+      const type = cfg.types.find((t) => t.id === body.type && t.enabled);
+      if (!type) throw new InputError(`"${body.type}" isn't an enabled plumbing type.`);
+      const { thread } = await addOwnItem(ref.dir, { type, title: body.title, text: body.text, fields: body.fields, anchor: body.anchor });
       return { threadId: thread.id, result: await submit(ref.dir, { scope: 'thread', threadId: thread.id, types: cfg.types }) };
     });
     return c.json({ ...respond(ref, result), threadId });
