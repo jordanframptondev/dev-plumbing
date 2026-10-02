@@ -247,8 +247,11 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
       const body = await parse(c, waitBody);
       const { cfg, ref } = await locateProject(ctx, body.repo, body.project);
       const key = projectKey(ref.repo, ref.id);
+      // Another wait from this window is still open here (an older dp_wait call), so this call isn't the window
+      // coming back from its last submission: leave what it picked up, and its busy mark, alone.
+      const alreadyWaiting = rt.listeners.inWait(body.windowId, key);
       rt.listeners.seen(body.windowId, key);
-      rt.listeners.setBusy(body.windowId, false);
+      if (!alreadyWaiting) rt.listeners.setBusy(body.windowId, false);
       const importDone = await rt.withLock(key, async () => {
         if (body.finished) {
           const owned = await readSubmission(ref.dir, body.finished.submission).then(
@@ -260,8 +263,8 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
           );
           if (owned) await finishSubmission(ref.dir, body.finished.submission, body.finished.conflicts);
         }
-        await finishWindowSubmissions(ref.dir, body.windowId);
-        await requeueUnfinished(ref.dir, (w) => w !== body.windowId && rt.listeners.isAlive(w));
+        if (!alreadyWaiting) await finishWindowSubmissions(ref.dir, body.windowId);
+        await requeueUnfinished(ref.dir, (w) => (w === body.windowId ? alreadyWaiting : rt.listeners.isAlive(w)));
         return finishImport(ref.dir);
       });
       changed(ref);

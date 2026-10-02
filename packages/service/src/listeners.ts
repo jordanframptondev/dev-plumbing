@@ -45,6 +45,12 @@ export class Listeners {
     this.check(nextKey, ...(previousKey && previousKey !== nextKey ? [previousKey] : []));
   }
 
+  /** Whether the window is inside a wait on this project right now. */
+  inWait(windowId: string, key: string): boolean {
+    const w = this.windows.get(windowId);
+    return Boolean(w && w.key === key && w.waits > 0);
+  }
+
   isAlive(windowId: string): boolean {
     const w = this.windows.get(windowId);
     return Boolean(w && (w.waits > 0 || this.now() - w.lastSeen < (this.o.aliveMs ?? 90_000)));

@@ -1,7 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ServiceError, type ServiceClient } from '../src/client';
 import { createDpServer, TOOL_NAMES } from '../src/tools';
 
@@ -75,6 +75,44 @@ describe('the dp tools', () => {
     expect(progress[0]).toMatch(/Listening for your answers/);
     expect(calls.map((c) => c.body.finished ?? null)).toEqual([{ submission: 's-0' }, null, null]);
     expect(calls.every((c) => c.body.windowId === 'w-1')).toBe(true);
+  });
+
+  it('a second dp_wait for the same project takes over from the first, which stops', async () => {
+    const polls: { project: unknown; signal?: AbortSignal }[] = [];
+    let deliver = false;
+    // Long-polls for 20 ms, unless the call is aborted. Once `deliver` is set, every poll gets a submission.
+    const client: ServiceClient = {
+      call: <T>(_path: string, body: Record<string, unknown>, signal?: AbortSignal) =>
+        new Promise<T>((resolve, reject) => {
+          polls.push({ project: body.project, signal });
+          if (deliver) return resolve({ kind: 'submission', submission: `s-${String(body.project)}` } as T);
+          const timer = setTimeout(() => resolve({ kind: 'timeout' } as T), 20);
+          signal?.addEventListener('abort', () => {
+            clearTimeout(timer);
+            reject(new Error('aborted'));
+          });
+        }),
+    };
+    const mcp = await connect(createDpServer({ client, cwd: '/repo', windowId: 'w-1', retryMs: 1 }));
+    const wait = (project: string) => mcp.callTool({ name: 'dp_wait', arguments: { repo: 'acme', project } });
+    const first = wait('p');
+    const other = wait('q');
+    await vi.waitFor(() => expect(polls.filter((x) => x.project === 'p').length).toBeGreaterThan(1));
+    const firstSignal = polls.find((x) => x.project === 'p')?.signal;
+    const second = wait('p');
+
+    const replaced = await Promise.race([first, new Promise((r) => setTimeout(() => r('still listening'), 1000))]);
+    expect(replaced).not.toBe('still listening');
+    expect(JSON.parse(textOf(replaced))).toEqual({ kind: 'replaced', next: 'Another dp_wait for this project took over. Stop here.' });
+    // Its poll in flight was cancelled, and it doesn't poll again.
+    expect(firstSignal?.aborted).toBe(true);
+    const pollsAfter = polls.length;
+    await new Promise((r) => setTimeout(r, 60));
+    expect(polls.slice(pollsAfter).filter((x) => x.signal === firstSignal)).toEqual([]);
+
+    deliver = true;
+    expect(JSON.parse(textOf(await second))).toMatchObject({ kind: 'submission', submission: 's-p' });
+    expect(JSON.parse(textOf(await other))).toMatchObject({ kind: 'submission', submission: 's-q' });
   });
 
   it('rides out the service restarting, and gives up only after its limit', async () => {

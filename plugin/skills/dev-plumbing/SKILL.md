@@ -33,11 +33,12 @@ Each returns one line. A line starting with `Failed:` means that plumbing type w
 
 ## 3. Listen
 
-Call `dp_wait` with `repo` and `project`. It waits until the user presses **Send this thread** or **Submit all** in the app.
+Call `dp_wait` with `repo` and `project`. It waits until the user presses **Send this thread** or **Submit all** in the app. Never call `dp_wait` while one is still running in the background for this project: that one is already listening.
 
 - If the call moves to the background (Claude Code does this after two minutes), that's expected. Tell the user once: "Listening for your answers in the app. You can keep chatting here." Then end your turn. When the result arrives, carry on below.
 - **kind: submission**: answer it (4).
 - **kind: still-waiting**: call `dp_wait` again, without `finished`.
+- **kind: replaced**: a newer `dp_wait` for this project took over. Stop here: that one is listening.
 
 ## 4. Answer a submission
 

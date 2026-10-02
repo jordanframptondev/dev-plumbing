@@ -40,4 +40,10 @@ describe('the plugin', () => {
       expect(skill.content).toContain(s);
     }
   });
+
+  it('keeps one dp_wait per project, and stops when a newer one took over', () => {
+    const skill = parseFrontMatter(read('plugin/skills/dev-plumbing/SKILL.md')).content;
+    expect(skill).toMatch(/Never call `dp_wait` while one is still running in the background for this project/);
+    expect(skill).toContain('**kind: replaced**');
+  });
 });

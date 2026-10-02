@@ -228,6 +228,29 @@ describe('listening', () => {
     expect((await readThread(p.dir, 't-questions-when')).status).toBe('with_claude');
   });
 
+  it("a window's second wait doesn't undo what that window picked up while its first wait is still open", async () => {
+    let now = Date.parse('2026-10-01T10:00:00Z');
+    const t = await setup({ now: () => now });
+    const p = await imported(t);
+    const base = { repo: p.repo, project: p.project };
+    await answer(t, p.dir, ['t-questions-when']);
+    expect((await t.claude('/wait', { ...base, windowId: 'w-gone', timeoutSeconds: 0 })).body.kind).toBe('submission');
+    // w-a's first dp_wait is still open (say, a backgrounded one). Then w-gone goes away, so its work goes back in the queue.
+    const first = t.claude('/wait', { ...base, windowId: 'w-a', timeoutSeconds: 1 });
+    await new Promise((r) => setTimeout(r, 50));
+    now += 5 * 60_000;
+    // A second call from w-a picks that work up without the first one being woken...
+    const second = await t.claude('/wait', { ...base, windowId: 'w-a', timeoutSeconds: 0 });
+    expect(second.body.groups.flatMap((g: Json) => g.threads)).toEqual(['t-questions-when']);
+    // ...and another poll from w-a while the first is still open neither finishes it nor clears busy.
+    expect((await t.claude('/wait', { ...base, windowId: 'w-a', timeoutSeconds: 0 })).body).toEqual({ kind: 'timeout' });
+    expect((await readThread(p.dir, 't-questions-when')).status).toBe('with_claude');
+    expect(t.rt.listeners.state('acme-app/restock-reminders')).toBe('busy');
+    const reply = await t.claude('/reply', { ...base, threadId: 't-questions-when', text: 'Three days.' });
+    expect(reply.body).toMatchObject({ ok: true });
+    expect((await first).body).toEqual({ kind: 'timeout' });
+  });
+
   it('keeps a window alive with pings', async () => {
     let now = Date.parse('2026-10-01T10:00:00Z');
     const t = await setup({ now: () => now });

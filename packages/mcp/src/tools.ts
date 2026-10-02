@@ -10,12 +10,21 @@ export const TOOL_NAMES = ['dp_open', 'dp_repo_profile', 'dp_write_items', 'dp_w
 type Result = { content: { type: 'text'; text: string }[]; isError?: boolean };
 const ok = (value: unknown): Result => ({ content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] });
 const failed = (e: unknown): Result => ({ isError: true, content: [{ type: 'text', text: e instanceof Error ? e.message : String(e) }] });
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+/** Resolves after `ms`, or as soon as `signal` aborts. */
+const sleep = (ms: number, signal: AbortSignal) =>
+  new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener('abort', () => (clearTimeout(timer), resolve()), { once: true });
+  });
+
+export const REPLACED = { kind: 'replaced', next: 'Another dp_wait for this project took over. Stop here.' } as const;
 
 const project = { repo: z.string().min(1).describe('The repo, from dp_open'), project: z.string().min(1).describe('The plumbing project id, from dp_open') };
 
 export function createDpServer(o: { client: ServiceClient; cwd: string; windowId: string; maxWaitMs?: number; retryMs?: number; onActive?: () => void }): McpServer {
   const server = new McpServer({ name: 'dp', version: VERSION });
+  // One dp_wait per project in this window: a new call takes over, and the older one stops with `replaced`.
+  const listening = new Map<string, AbortController>();
   let active = false;
   const markActive = () => {
     if (active) return;
@@ -87,7 +96,7 @@ export function createDpServer(o: { client: ServiceClient; cwd: string; windowId
     'dp_wait',
     {
       description:
-        "Listen for the user's answers. Waits until they press Send this thread or Submit all, sending progress while it waits, then returns the threads to answer in groups (one thread subagent per group) with the model to use. When you call it again, pass finished with the previous submission id and any conflicts you found. If it returns still-waiting, call it again.",
+        "Listen for the user's answers. Waits until they press Send this thread or Submit all, sending progress while it waits, then returns the threads to answer in groups (one thread subagent per group) with the model to use. When you call it again, pass finished with the previous submission id and any conflicts you found. If it returns still-waiting, call it again. If it returns replaced, a newer dp_wait for this project took over: stop.",
       inputSchema: {
         ...project,
         finished: z
@@ -100,36 +109,48 @@ export function createDpServer(o: { client: ServiceClient; cwd: string; windowId
     },
     async (args, extra) => {
       markActive();
+      const key = `${args.repo}/${args.project}`;
+      listening.get(key)?.abort();
+      const mine = new AbortController();
+      listening.set(key, mine);
+      const signal = AbortSignal.any([extra.signal, mine.signal]);
+      const stopped = () => (mine.signal.aborted ? ok(REPLACED) : extra.signal.aborted ? failed(new Error('Stopped listening.')) : null);
       const started = Date.now();
       const token = extra._meta?.progressToken;
       let finished = args.finished;
       let beat = 0;
       let failures = 0;
-      while (true) {
-        const t0 = Date.now();
-        try {
-          const r = await o.client.call<{ kind: string }>('/wait', { repo: args.repo, project: args.project, windowId: o.windowId, ...(finished ? { finished } : {}) }, extra.signal);
-          finished = undefined;
-          failures = 0;
-          if (r.kind === 'submission') return ok(r);
-        } catch (e) {
-          if (extra.signal.aborted) return failed(new Error('Stopped listening.'));
-          // Only a service that is restarting or briefly unreachable is worth waiting out. A broken install or a real error is not.
-          if (!(e instanceof ServiceError) || !e.retryable || ++failures >= 5) return failed(e);
+      try {
+        while (true) {
+          const stop = stopped();
+          if (stop) return stop;
+          const t0 = Date.now();
+          try {
+            const r = await o.client.call<{ kind: string }>('/wait', { repo: args.repo, project: args.project, windowId: o.windowId, ...(finished ? { finished } : {}) }, signal);
+            finished = undefined;
+            failures = 0;
+            if (r.kind === 'submission') return ok(r);
+          } catch (e) {
+            const stop = stopped();
+            if (stop) return stop;
+            // Only a service that is restarting or briefly unreachable is worth waiting out. A broken install or a real error is not.
+            if (!(e instanceof ServiceError) || !e.retryable || ++failures >= 5) return failed(e);
+          }
+          const minutes = Math.floor((Date.now() - started) / 60_000);
+          if (token !== undefined) {
+            await extra.sendNotification({
+              method: 'notifications/progress',
+              params: { progressToken: token, progress: ++beat, message: `Listening for your answers (${minutes} min)` },
+            });
+          }
+          if (Date.now() - started >= (o.maxWaitMs ?? MAX_WAIT_MS)) {
+            return ok({ kind: 'still-waiting', next: 'Nothing was submitted yet. Call dp_wait again to keep listening.' });
+          }
+          // The service long-polls, so a quick return means it's restarting or a test is running: don't spin.
+          if (Date.now() - t0 < 1000) await sleep(o.retryMs ?? 2000, signal);
         }
-        if (extra.signal.aborted) return failed(new Error('Stopped listening.'));
-        const minutes = Math.floor((Date.now() - started) / 60_000);
-        if (token !== undefined) {
-          await extra.sendNotification({
-            method: 'notifications/progress',
-            params: { progressToken: token, progress: ++beat, message: `Listening for your answers (${minutes} min)` },
-          });
-        }
-        if (Date.now() - started >= (o.maxWaitMs ?? MAX_WAIT_MS)) {
-          return ok({ kind: 'still-waiting', next: 'Nothing was submitted yet. Call dp_wait again to keep listening.' });
-        }
-        // The service long-polls, so a quick return means it's restarting or a test is running: don't spin.
-        if (Date.now() - t0 < 1000) await sleep(o.retryMs ?? 2000);
+      } finally {
+        if (listening.get(key) === mine) listening.delete(key);
       }
     },
   );
