@@ -9,3 +9,6 @@ export * from './store/projects';
 export * from './demo';
 export * from './loginItem';
 export * from './runFile';
+export * from './git';
+export * from './store/io';
+export * from './store/open';

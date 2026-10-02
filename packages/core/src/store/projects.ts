@@ -2,22 +2,19 @@ import fs from 'node:fs/promises';
 import type { Dirent } from 'node:fs';
 import path from 'node:path';
 import { expandHome } from '../paths';
+import { docPath, readItems, readJsonFile, readThreads } from './io';
 import {
   countThreads,
   displayStatus,
-  itemSchema,
   plumbingProjectSchema,
-  threadSchema,
   type DiscoveryProblem,
   type InboxEntry,
-  type Item,
   type PlumbingProject,
   type PlumbingType,
   type ProjectHome,
   type ProjectSummary,
   type RepoProfile,
   type Settings,
-  type Thread,
   type TypeEntry,
   type TypeItemRow,
 } from '../schemas';
@@ -107,38 +104,8 @@ export async function findProjects(settings: Settings, repos: RepoProfile[], hom
   return (await discoverProjects(settings, repos, home)).refs;
 }
 
-async function readJson(file: string): Promise<{ ok: true; value: unknown } | { ok: false; error: string }> {
-  try {
-    return { ok: true, value: JSON.parse(await fs.readFile(file, 'utf8')) };
-  } catch (e) {
-    return { ok: false, error: (e as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : (e as Error).message };
-  }
-}
-
-async function readFolder<T>(dir: string, schema: { safeParse: (v: unknown) => { success: true; data: T } | { success: false } }): Promise<{ values: T[]; bad: number }> {
-  let files: string[] = [];
-  try {
-    files = (await fs.readdir(dir)).filter((f) => f.endsWith('.json')).sort();
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { values: [], bad: 0 };
-    return { values: [], bad: 1 };
-  }
-  const values: T[] = [];
-  let bad = 0;
-  for (const f of files) {
-    const r = await readJson(path.join(dir, f));
-    const parsed = r.ok ? schema.safeParse(r.value) : null;
-    if (parsed?.success) values.push(parsed.data);
-    else bad++;
-  }
-  return { values, bad };
-}
-
-const readThreads = (dir: string) => readFolder<Thread>(path.join(dir, 'threads'), threadSchema);
-const readItems = (dir: string) => readFolder<Item>(path.join(dir, 'items'), itemSchema);
-
 async function readProject(ref: ProjectRef): Promise<{ project: PlumbingProject | null; error?: string }> {
-  const r = await readJson(path.join(ref.dir, 'project.json'));
+  const r = await readJsonFile(path.join(ref.dir, 'project.json'));
   if (!r.ok) return { project: null, error: r.error === 'missing' ? 'project.json is missing.' : `project.json isn't valid JSON (${r.error}).` };
   const p = plumbingProjectSchema.safeParse(r.value);
   if (p.success) return { project: p.data };
@@ -239,11 +206,11 @@ export async function loadProjectHome(ref: ProjectRef, types: PlumbingType[]): P
     })
     .filter((e) => e.status !== 'idle');
 
-  const docPath = (rel: string | undefined) => (rel ? exists(path.join(ref.dir, rel)) : Promise.resolve(false));
+  const docExists = (rel: string | undefined) => (rel ? exists(path.join(ref.dir, rel)) : Promise.resolve(false));
   const documents = {
-    original: await docPath(project.docs.original),
-    draft: await docPath(project.docs.draft),
-    final: await docPath(project.docs.final),
+    original: await docExists(project.docs.original),
+    draft: await docExists(project.docs.draft),
+    final: await docExists(project.docs.final),
   };
   return { summary, project, types: typeEntries, inbox, documents };
 }
@@ -270,9 +237,7 @@ export async function readProjectDocument(ref: ProjectRef, which: 'original' | '
   if (!project) throw new ProjectUnreadableError(error ?? 'This plumbing project could not be read.');
   const rel = project.docs[which];
   if (!rel) return null;
-  const base = path.resolve(ref.dir);
-  const file = path.resolve(base, rel);
-  if (!file.startsWith(base + path.sep)) throw new Error('That document is outside the project folder.');
+  const file = docPath(ref.dir, rel);
   try {
     return await fs.readFile(file, 'utf8');
   } catch {
