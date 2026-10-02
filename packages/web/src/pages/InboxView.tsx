@@ -13,7 +13,7 @@ function InboxGroup({ title, entries, repo, project }: { title?: string; entries
   return (
     <Group title={title ? `${title} · ${entries.length}` : undefined}>
       {entries.map((e) => (
-        <Link key={e.threadId} to="/p/$repo/$project/t/$type" params={{ repo, project, type: e.type }} className="flex items-center gap-2.5 px-3 py-2.5 hover:bg-selection" data-testid="inbox-row">
+        <Link key={e.threadId} to="/p/$repo/$project/th/$thread" params={{ repo, project, thread: e.threadId }} className="flex items-center gap-2.5 px-3 py-2.5 hover:bg-selection" data-testid="inbox-row">
           <StatusMark status={e.status} />
           <div className="min-w-0 flex-1">
             <div className="text-[13px] font-medium">

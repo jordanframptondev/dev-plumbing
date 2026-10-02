@@ -8,6 +8,7 @@ import { Root } from './pages/Root';
 import { OutputEditorPage, RuleEditorPage } from './pages/RuleEditor';
 import { RulesPage } from './pages/RulesPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { ThreadView } from './pages/ThreadView';
 import { TypeView } from './pages/TypeView';
 
 const rootRoute = createRootRoute({ component: Root, notFoundComponent: () => <PageMessage title="Page not found" /> });
@@ -15,6 +16,7 @@ const indexRoute = createRoute({ getParentRoute: () => rootRoute, path: '/', com
 const projectRoute = createRoute({ getParentRoute: () => rootRoute, path: '/p/$repo/$project', component: ProjectLayout });
 const inboxRoute = createRoute({ getParentRoute: () => projectRoute, path: '/', component: InboxView });
 const typeRoute = createRoute({ getParentRoute: () => projectRoute, path: 't/$type', component: TypeView });
+const threadRoute = createRoute({ getParentRoute: () => projectRoute, path: 'th/$thread', component: ThreadView });
 const docRoute = createRoute({ getParentRoute: () => projectRoute, path: 'd/$doc', component: DocumentView });
 const settingsRoute = createRoute({ getParentRoute: () => rootRoute, path: '/settings', component: SettingsPage });
 const rulesRoute = createRoute({ getParentRoute: () => rootRoute, path: '/rules', component: RulesPage });
@@ -23,7 +25,7 @@ const outputRoute = createRoute({ getParentRoute: () => rootRoute, path: '/rules
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
-  projectRoute.addChildren([inboxRoute, typeRoute, docRoute]),
+  projectRoute.addChildren([inboxRoute, typeRoute, threadRoute, docRoute]),
   settingsRoute,
   rulesRoute,
   ruleRoute,

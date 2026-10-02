@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useParams } from '@tanstack/react-router';
+import { Link, useParams } from '@tanstack/react-router';
 import { api } from '../api/client';
 import { Group, Row } from '../components/GroupedList';
 import { StatusMark } from '../components/StatusMark';
@@ -23,17 +23,18 @@ export function TypeView() {
       <h2 className="text-[20px] font-semibold">{data.type.title}</h2>
       <Group title={`${data.items.length} item${data.items.length === 1 ? '' : 's'}`}>
         {data.items.map((i) => (
-          <Row
-            key={i.id}
-            leading={<StatusMark status={i.status} />}
-            title={
-              <>
-                {i.blocking && <span className="mr-1.5 text-[10.5px] font-semibold text-seal">BLOCKING</span>}
-                {i.title}
-              </>
-            }
-            meta={i.summary}
-          />
+          <Link key={i.id} to="/p/$repo/$project/th/$thread" params={{ repo, project, thread: i.threadId }} className="block hover:bg-selection" data-testid="type-row">
+            <Row
+              leading={<StatusMark status={i.status} />}
+              title={
+                <>
+                  {i.blocking && <span className="mr-1.5 text-[10.5px] font-semibold text-seal">BLOCKING</span>}
+                  {i.title}
+                </>
+              }
+              meta={i.summary}
+            />
+          </Link>
         ))}
       </Group>
     </div>
