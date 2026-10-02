@@ -9,7 +9,7 @@ Date: 2026-10-01 · Claude Code version: 2.1.287 (Claude Code)
 | Main window called dp_open and dp_wait | yes | main-window tool counts: `dp_open` 2 (needs-profile, then created), `dp_wait` 1 |
 | Subagents called dp_context, dp_write_items and dp_reply | yes | subagent tool counts: `dp_context` 3, `dp_write_items` 2, `dp_reply` 1, plus `dp_repo_profile` 2 |
 | A thread subagent replied after Send this thread | yes | "Claude replied in 12 s" on "Daily job double-sends reminders" (it resolved the thread) |
-| A 35-minute wait survived (progress kept it alive) | pending | controller runs DP_SMOKE_LONG=1 after this commit |
+| A 35-minute wait survived (progress kept it alive) | yes | `DP_SMOKE_LONG=1` run: the main window's only `dp_wait` call returned the submission made 35 minutes after it was called. The thread subagent's `dp_reply` returned `ok` 7 s later, and the user log says "Claude replied in 9 s" |
 | Agent tool names in `tools:` worked unchanged | yes | nothing changed: `mcp__plugin_dev-plumbing_dp__<tool>` is the name Claude Code uses |
 
 Notes:
@@ -18,6 +18,7 @@ Notes:
 - `claude -p` started from inside another Claude Code session worked without unsetting any variables.
 - The "user" answered before the main window called `dp_wait`. The submission was saved first and picked up 3 s later, when `dp_wait` started.
 - All subagents ran on sonnet, the model in `agents.json`.
+- The long run used `smoke-user.mjs` from before the final-review fixes. That version's reply check could pass on Claude's opening message if the answer failed to send, so the long-run result was checked against the transcript as well. It shows one `dp_wait` result of kind `submission`, then a subagent `dp_reply` that returned `ok`. The same counts appear as in the short runs, and the import took 30 s.
 
 User log from the second run (`$TMPDIR` shortened):
 
