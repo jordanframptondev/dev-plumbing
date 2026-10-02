@@ -2,7 +2,7 @@
 
 Plumb a feature plan before you build it. dev-plumbing turns a plan (for example a Superpowers spec) into a local web app where every question, concern, diagram and schema change has its own thread with Claude.
 
-**Status:** foundations. Config, the local service, the CLI and the app shell work today. The Claude loop comes next. The design is in [SPEC.md](SPEC.md) and the plans are in [docs/superpowers/plans](docs/superpowers/plans).
+**Status:** the Claude loop works. Import a plan, answer threads in the app, and Claude replies through subagents. Visual screens, Finalize spec and Whiteboard Defense come next. The design is in [SPEC.md](SPEC.md), and the plans are in [docs/superpowers/plans](docs/superpowers/plans).
 
 ## Requirements
 
@@ -25,6 +25,21 @@ To get a `dev-plumbing` command on your PATH:
 ```bash
 cd packages/cli && pnpm link --global
 ```
+
+## Use it
+
+Setup installs the Claude Code plugin for your user (skip it with `--no-plugin`). In any clone of a repo, in Claude Code:
+
+```
+/dev-plumbing docs/specs/my-feature.md
+```
+
+- **First time in a repo:** Claude detects a repo profile. You can check it in **Settings → Repos**.
+- **Import:** one subagent per plumbing type reads the plan, and the app opens on the plumbing project.
+- **Answer:** in the app, answer threads, then press **Send this thread** or **Submit all**. Claude answers each thread with a subagent and listens for more.
+- **Keep chatting:** after two minutes the listening call moves to the background, so you can keep using the Claude window.
+- **No arguments:** `/dev-plumbing` lists this repo's plumbing projects to reopen.
+- **Keep this checkout:** the plugin runs from its build here, so after you pull, run `pnpm build` again.
 
 ## Commands
 
@@ -50,4 +65,6 @@ pnpm test             # unit tests
 pnpm test:integration # builds, then starts and stops the real service
 pnpm test:e2e         # builds, then runs Playwright against a temporary setup
 pnpm check            # all of the above plus typecheck
+pnpm smoke            # real Claude Code end to end, with a scratch repo (makes model calls)
+claude --plugin-dir plugin   # try the plugin from this checkout without installing it
 ```

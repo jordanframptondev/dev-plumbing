@@ -13,7 +13,8 @@
     "test": "vitest run",
     "test:integration": "pnpm build && vitest run --config vitest.integration.config.ts",
     "test:e2e": "pnpm build && pnpm --filter @dev-plumbing/web exec playwright test",
-    "check": "pnpm typecheck && pnpm test && pnpm test:integration && pnpm test:e2e"
+    "check": "pnpm typecheck && pnpm test && pnpm test:integration && pnpm test:e2e",
+    "smoke": "bash scripts/smoke-claude.sh"
   },
   "devDependencies": {
     "@types/node": "^22.20.4",
