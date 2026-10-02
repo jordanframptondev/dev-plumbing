@@ -8,6 +8,11 @@ export function diffText(before: string, after: string): DiffSegment[] {
 /**
  * The draft against the original. Each added part names the applied (not undone) changes whose
  * replacement text it contains, or that contain it.
+ *
+ * Matching rules:
+ * - Link a change to an added segment when the segment's trimmed text contains the change's trimmed replacement.
+ * - Also link when the replacement contains the segment's trimmed text, but only if that text is at least 12 characters long.
+ * - Known limit: a line rewritten by a later change links only to that later change.
  */
 export function diffDocuments(original: string, draft: string, history: HistoryEntry[], threadTitle: (threadId: string) => string = (id) => id): DiffSegment[] {
   const live = history.filter((h) => h.appliedAt && !h.undoneAt);
@@ -17,7 +22,7 @@ export function diffDocuments(original: string, draft: string, history: HistoryE
     const by = live.filter((h) =>
       h.change.md?.some((p) => {
         const replaced = p.replace.trim();
-        return replaced.length > 0 && (text.includes(replaced) || replaced.includes(text));
+        return replaced.length > 0 && (text.includes(replaced) || (text.length >= 12 && replaced.includes(text)));
       }),
     );
     return by.length ? { ...segment, changedBy: by.map((h) => ({ changeId: h.id, threadId: h.threadId, summary: h.summary, threadTitle: threadTitle(h.threadId) })) } : segment;

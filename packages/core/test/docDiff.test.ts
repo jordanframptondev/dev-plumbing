@@ -36,6 +36,46 @@ describe('document diffs', () => {
     expect(added.find((s) => s.text.includes('one row per send'))?.changedBy).toEqual([{ changeId: 'c1', threadId: 't-c1', summary: 'summary c1', threadTitle: 'Title of t-c1' }]);
     expect(added.find((s) => s.text.includes('and email'))?.changedBy?.map((c) => c.changeId)).toEqual(['c3']);
   });
+
+  it('does not link short added lines to unrelated changes', () => {
+    const originalText = '# T\n\nIntro.\n';
+    const draftText = '# T\n\nIntro.\nDone.\n';
+    const segments = diffDocuments(originalText, draftText, [
+      entry('c1', 'All of this is Done. Really.'),
+    ]);
+    const addedShort = segments.find((s) => s.text === 'Done.\n');
+    expect(addedShort?.changedBy).toBeUndefined();
+  });
+
+  it('does not link entries without appliedAt', () => {
+    const segments = diffDocuments(original, draft, [
+      entry('c1', 'Log one row per send.', { appliedAt: undefined as any }),
+    ]);
+    const added = segments.filter((s) => s.kind === 'added');
+    expect(added.some((s) => s.changedBy)).toBe(false);
+  });
+
+  it('falls back threadTitle to threadId when not provided', () => {
+    const segments = diffDocuments(original, draft, [
+      entry('c1', 'Log one row per send.'),
+    ]);
+    const added = segments.filter((s) => s.kind === 'added');
+    const withChangedBy = added.find((s) => s.changedBy?.length);
+    expect(withChangedBy?.changedBy?.[0]?.threadTitle).toBe('t-c1');
+  });
+
+  it('links block replacement segments when each is at least 12 characters', () => {
+    const originalText = 'A\nkeep this line\nB\n';
+    const draftText = 'Alpha line one changed\nkeep this line\nBeta line two changed\n';
+    const segments = diffDocuments(originalText, draftText, [
+      entry('c1', 'Alpha line one changed\nkeep this line\nBeta line two changed'),
+    ]);
+    const added = segments.filter((s) => s.kind === 'added');
+    const alpha = added.find((s) => s.text.includes('Alpha'));
+    const beta = added.find((s) => s.text.includes('Beta'));
+    expect(alpha?.changedBy?.map((c) => c.changeId)).toEqual(['c1']);
+    expect(beta?.changedBy?.map((c) => c.changeId)).toEqual(['c1']);
+  });
 });
 
 describe('change previews', () => {
