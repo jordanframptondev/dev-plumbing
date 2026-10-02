@@ -1,15 +1,17 @@
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { Hono } from 'hono';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app';
 import { staticHandler } from '../src/static';
-import { call, makeContext } from './helpers';
+import { call, makeContext, removeTempDirs } from './helpers';
+import { tempDir } from '../../../testkit/tmp';
+
+afterAll(removeTempDirs);
 
 let root: string;
 beforeAll(async () => {
-  root = await fs.mkdtemp(path.join(os.tmpdir(), 'dp-web-'));
+  root = tempDir('dp-web-');
   await fs.mkdir(path.join(root, 'assets'));
   await fs.writeFile(path.join(root, 'index.html'), '<html>app</html>');
   await fs.writeFile(path.join(root, 'assets', 'app.js'), 'console.log(1)');

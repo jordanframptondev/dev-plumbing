@@ -1,8 +1,10 @@
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { buildPlist, disableLoginItem, enableLoginItem, isLoginItemEnabled, loginItemPath } from '../src/loginItem';
+import { removeTempDirs, tempDir } from '../../../testkit/tmp';
+
+afterAll(removeTempDirs);
 
 describe('login item', () => {
   it('builds a LaunchAgent that runs `dev-plumbing start` at login', () => {
@@ -15,7 +17,7 @@ describe('login item', () => {
   });
 
   it('writes and removes the plist in the given home', async () => {
-    const home = await fs.mkdtemp(path.join(os.tmpdir(), 'dp-login-'));
+    const home = tempDir('dp-login-');
     const file = await enableLoginItem({ nodePath: '/n', cliPath: '/c', configDir: path.join(home, 'config'), home });
     expect(file).toBe(loginItemPath(home));
     expect(await isLoginItemEnabled(home)).toBe(true);
@@ -25,7 +27,7 @@ describe('login item', () => {
   });
 
   it('creates the run folder the plist logs to, so launchd can start the job', async () => {
-    const home = await fs.mkdtemp(path.join(os.tmpdir(), 'dp-login-'));
+    const home = tempDir('dp-login-');
     const configDir = path.join(home, 'fresh-config');
     await enableLoginItem({ nodePath: '/n', cliPath: '/c', configDir, home });
     expect((await fs.stat(path.join(configDir, 'run'))).isDirectory()).toBe(true);

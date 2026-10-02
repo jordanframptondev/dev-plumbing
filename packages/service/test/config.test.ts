@@ -1,9 +1,11 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { disableLoginItem, enableLoginItem, isLoginItemEnabled, loginItemPath } from '@dev-plumbing/core';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app';
-import { call, makeContext } from './helpers';
+import { call, makeContext, removeTempDirs } from './helpers';
+
+afterAll(removeTempDirs);
 
 const put = (body: unknown) => ({ method: 'PUT', body: JSON.stringify(body) });
 const post = (body: unknown) => ({ method: 'POST', body: JSON.stringify(body) });

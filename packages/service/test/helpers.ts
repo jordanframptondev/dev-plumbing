@@ -1,15 +1,15 @@
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import type { Hono } from 'hono';
 import { installDefaults, updateSettingsFile, writeDemoProjects } from '@dev-plumbing/core';
 import type { AppContext } from '../src/context';
+import { tempDir } from '../../../testkit/tmp';
 
 export const TOKEN = 'test-token';
 export const DEFAULTS_DIR = path.resolve(import.meta.dirname, '../../../defaults');
 
 export async function makeContext(overrides: Partial<AppContext> = {}) {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'dp-svc-'));
+  const tmp = tempDir('dp-svc-');
   const configDir = path.join(tmp, 'config');
   const root = path.join(tmp, 'projects');
   await installDefaults({ configDir, defaultsDir: DEFAULTS_DIR });
@@ -52,3 +52,5 @@ export function call(app: Hono, pathname: string, init: RequestInit = {}) {
     headers: { 'x-dev-plumbing-token': TOKEN, 'content-type': 'application/json', ...(init.headers as Record<string, string> | undefined) },
   });
 }
+
+export { removeTempDirs } from '../../../testkit/tmp';

@@ -1,7 +1,6 @@
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { installDefaults, loadConfig } from '../src/config';
 import { writeDemoProjects } from '../src/demo';
 import { defaultSettings, repoProfileSchema } from '../src/schemas';
@@ -14,6 +13,9 @@ import {
   summarizeProject,
   type ProjectRef,
 } from '../src/store/projects';
+import { removeTempDirs, tempDir } from '../../../testkit/tmp';
+
+afterAll(removeTempDirs);
 
 const NOW = new Date('2026-09-30T12:00:00Z');
 const defaultsDir = path.resolve(import.meta.dirname, '../../../defaults');
@@ -22,13 +24,13 @@ const settings = () => ({ ...defaultSettings, projectsFolder: root });
 const ref = (repo: string, id: string): ProjectRef => ({ repo, id, dir: path.join(root, repo, id) });
 
 async function defaultTypes() {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dp-types-'));
+  const dir = tempDir('dp-types-');
   await installDefaults({ configDir: dir, defaultsDir });
   return (await loadConfig(dir)).types;
 }
 
 beforeEach(async () => {
-  root = await fs.mkdtemp(path.join(os.tmpdir(), 'dp-projects-'));
+  root = tempDir('dp-projects-');
   await writeDemoProjects(root, NOW);
 });
 
@@ -91,7 +93,7 @@ describe('project store', () => {
   });
 
   it('handles ~ and spaces in the projects folder', async () => {
-    const home = await fs.mkdtemp(path.join(os.tmpdir(), 'dp-home-'));
+    const home = tempDir('dp-home-');
     await writeDemoProjects(path.join(home, 'my projects'), NOW);
     const refs = await findProjects({ ...defaultSettings, projectsFolder: '~/my projects' }, [], home);
     expect(refs).toHaveLength(3);

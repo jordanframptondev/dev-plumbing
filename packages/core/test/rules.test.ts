@@ -1,9 +1,11 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { parseRulesFile, resolveTypes, splitSections } from '../src/rules';
 import { newRulesFileTemplate } from '../src/schemas';
+import { removeTempDirs, tempDir } from '../../../testkit/tmp';
+
+afterAll(removeTempDirs);
 
 const good = `---
 id: database
@@ -47,7 +49,7 @@ describe('rules files', () => {
   });
 
   it('refuses JavaScript front matter without running it', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dp-js-'));
+    const dir = tempDir('dp-js-');
     const marker = path.join(dir, 'ran');
     for (const lang of ['js', 'javascript', 'JS']) {
       const text = `---${lang}\n{ id: (require('fs').writeFileSync(${JSON.stringify(marker)}, 'ran'), 'database'), title: 'x', order: 1, screen: 'list' }\n---\nbody`;

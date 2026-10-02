@@ -1,9 +1,11 @@
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { loadConfig } from '@dev-plumbing/core';
 import { runSetup, type SetupOptions } from '../src/setup';
+import { removeTempDirs, tempDir } from '../../../testkit/tmp';
+
+afterAll(removeTempDirs);
 
 const DEFAULTS_DIR = path.resolve(import.meta.dirname, '../../../defaults');
 let home: string;
@@ -33,7 +35,7 @@ function options(over: Partial<SetupOptions> = {}): SetupOptions {
 }
 
 beforeEach(async () => {
-  home = await fs.mkdtemp(path.join(os.tmpdir(), 'dp-setup-'));
+  home = tempDir('dp-setup-');
   dir = path.join(home, '.dev-plumbing');
   calls = [];
 });

@@ -1,9 +1,11 @@
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { installDefaults, loadConfig, resetToDefault, updateSettingsFile } from '../src/config';
 import { defaultSettings } from '../src/schemas';
+import { removeTempDirs, tempDir } from '../../../testkit/tmp';
+
+afterAll(removeTempDirs);
 
 const defaultsDir = path.resolve(import.meta.dirname, '../../../defaults');
 let dir: string;
@@ -11,7 +13,7 @@ const write = (rel: string, text: string) => fs.mkdir(path.dirname(path.join(dir
 const read = (rel: string) => fs.readFile(path.join(dir, rel), 'utf8');
 
 beforeEach(async () => {
-  dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dp-config-'));
+  dir = tempDir('dp-config-');
 });
 
 describe('config folder', () => {

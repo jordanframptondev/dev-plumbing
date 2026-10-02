@@ -1,11 +1,13 @@
 import { once } from 'node:events';
 import fs from 'node:fs/promises';
 import net from 'node:net';
-import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { installDefaults, readRunFile, updateSettingsFile, writeRunFile } from '@dev-plumbing/core';
 import { serviceStatus, startService, stopService } from '../src/control';
+import { removeTempDirs, tempDir } from '../../../testkit/tmp';
+
+afterAll(removeTempDirs);
 
 const repo = path.resolve(import.meta.dirname, '../../..');
 const SERVICE = path.join(repo, 'packages/service/dist/index.js');
@@ -24,7 +26,7 @@ async function freePort(): Promise<number> {
 const start = () => startService({ configDir: dir, serviceEntry: SERVICE, env: { HOME: tmp } });
 
 beforeEach(async () => {
-  tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'dp-int-'));
+  tmp = tempDir('dp-int-');
   dir = path.join(tmp, '.dev-plumbing');
   port = await freePort();
   await installDefaults({ configDir: dir, defaultsDir: path.join(repo, 'defaults') });

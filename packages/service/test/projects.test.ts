@@ -1,8 +1,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app';
-import { call, makeContext } from './helpers';
+import { call, makeContext, removeTempDirs } from './helpers';
+
+afterAll(removeTempDirs);
 
 describe('projects API', () => {
   it('lists active projects, needs-you first', async () => {
