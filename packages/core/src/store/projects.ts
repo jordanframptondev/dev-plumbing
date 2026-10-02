@@ -3,6 +3,7 @@ import type { Dirent } from 'node:fs';
 import path from 'node:path';
 import { expandHome } from '../paths';
 import { activeDecisions } from './decisions';
+import { IMPORT_DID_NOT_FINISH } from './importItems';
 import { docPath, readDecisions, readItems, readJsonFile, readThreads } from './io';
 import { openOptions } from './threads';
 import {
@@ -188,7 +189,24 @@ export async function loadProjectHome(ref: ProjectRef, types: PlumbingType[]): P
         : ofType.length === 0 && project.status !== 'importing'
           ? { reason: 'No items were found for this plumbing type.' }
           : null;
-      return { id: t.id, title: t.title, order: t.order, screen: t.screen, emptyMessage: t.emptyMessage, itemCount: ofType.length, yourTurn: c.yourTurn, drafts: c.drafts, withClaude: c.withClaude, resolved: c.resolved, noChanges, fields: t.fields, answerPresets: t.answerPresets, ...(t.addLabel ? { addLabel: t.addLabel } : {}) };
+      return {
+        id: t.id,
+        title: t.title,
+        order: t.order,
+        screen: t.screen,
+        timeline: t.timeline,
+        emptyMessage: t.emptyMessage,
+        itemCount: ofType.length,
+        yourTurn: c.yourTurn,
+        drafts: c.drafts,
+        withClaude: c.withClaude,
+        resolved: c.resolved,
+        noChanges,
+        importFailed: noChanges?.reason === IMPORT_DID_NOT_FINISH,
+        fields: t.fields,
+        answerPresets: t.answerPresets,
+        ...(t.addLabel ? { addLabel: t.addLabel } : {}),
+      };
     });
 
   const inbox: InboxEntry[] = threads

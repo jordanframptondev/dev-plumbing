@@ -14,6 +14,8 @@ import {
   summarizeProject,
   type ProjectRef,
 } from '../src/store/projects';
+import { IMPORT_DID_NOT_FINISH } from '../src/store/importItems';
+import { listType, seedProject, TYPES } from './fixtures';
 import { removeTempDirs, tempDir } from '../../../testkit/tmp';
 
 afterAll(removeTempDirs);
@@ -175,6 +177,17 @@ describe('project store', () => {
     const s = await summarizeProject(ref('beta', 'file-threads'));
     expect(s.error).toMatch(/thread file couldn't be read/);
     expect(s.status).toBe('active');
+  });
+
+  it("marks types whose importer didn't finish, and timeline types", async () => {
+    const dir = await seedProject({ project: { emptyTypes: [{ type: 'questions', reason: IMPORT_DID_NOT_FINISH }, { type: 'concerns', reason: 'No concerns in this plan.' }] } });
+    const types = [...TYPES, listType('phases', { title: 'Phases & milestones', order: 8, timeline: true })];
+    const home = await loadProjectHome({ repo: 'acme', id: 'restock', dir }, types);
+    const entry = (id: string) => home.types.find((t) => t.id === id);
+    expect(entry('questions')).toMatchObject({ importFailed: true, timeline: false, noChanges: { reason: IMPORT_DID_NOT_FINISH } });
+    expect(entry('concerns')).toMatchObject({ importFailed: false, noChanges: { reason: 'No concerns in this plan.' } });
+    expect(entry('architecture')).toMatchObject({ importFailed: false, noChanges: { reason: 'No items were found for this plumbing type.' } });
+    expect(entry('phases')).toMatchObject({ timeline: true, importFailed: false });
   });
 });
 

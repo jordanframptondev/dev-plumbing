@@ -3,7 +3,6 @@ import path from 'node:path';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import {
-  activeDecisions,
   expandHome,
   findProjects,
   finishImport,
@@ -23,11 +22,11 @@ import {
   pendingSubmissions,
   pickUp,
   postReply,
-  readDecisions,
   readItem,
   readProjectFile,
   readSubmission,
   readThread,
+  relevantDecisions,
   replySchema,
   repoProfileSchema,
   repoProjectsFolder,
@@ -40,6 +39,7 @@ import {
   writeImportBatch,
   writeJsonAtomic,
   type LoadedConfig,
+  type PlumbingType,
   type ProjectRef,
   type Submission,
 } from '@dev-plumbing/core';
@@ -150,7 +150,13 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
       if (body.windowId) rt.listeners.seen(body.windowId, key);
       await rt.withLock(key, () => requeueUnfinished(ref.dir, (w) => rt.listeners.isAlive(w)));
       const project = await readProjectFile(ref.dir);
-      const importTypes = cfg.types.filter((t) => project.importPending.includes(t.id)).map((t) => ({ id: t.id, title: t.title }));
+      // Flows and phases point at items the other importers write (a step's mockupId, a phase's itemIds), so they go last.
+      const later = (t: PlumbingType) => t.screen === 'flows' || t.timeline;
+      const pending = cfg.types.filter((t) => project.importPending.includes(t.id));
+      const importTypes = [
+        ...pending.filter((t) => !later(t)).map((t) => ({ id: t.id, title: t.title })),
+        ...pending.filter(later).map((t) => ({ id: t.id, title: t.title, afterOthers: true as const })),
+      ];
       rt.events.emit({ type: 'projects' });
       return c.json({
         kind: created ? 'created' : 'reopened',
@@ -163,7 +169,7 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
         maxParallel: cfg.agents.maxParallel,
         waitingSubmissions: (await pendingSubmissions(ref.dir)).length,
         next: importTypes.length
-          ? `Start one dev-plumbing:importer subagent per import type (model ${models.importer}, at most ${cfg.agents.maxParallel} at a time). When they have all returned, call dp_wait.`
+          ? `Start one dev-plumbing:importer subagent per import type (model ${models.importer}, at most ${cfg.agents.maxParallel} at a time). Start the ones marked afterOthers only after all the others have returned. When they have all returned, call dp_wait.`
           : "Call dp_wait to listen for the user's answers.",
       });
     }),
@@ -232,12 +238,14 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
       return item?.title ?? threadId;
     };
     const groups = await groupThreads(ref.dir, s.sent, cfg.agents.groupLinkedThreads);
+    const { decisions, total } = await relevantDecisions(ref.dir, s.sent);
     return {
       kind: 'submission' as const,
       submission: s.id,
       groups: await Promise.all(groups.map(async (threads) => ({ threads, titles: await Promise.all(threads.map(titleOf)), model: cfg.agents.models.thread }))),
       maxParallel: cfg.agents.maxParallel,
-      decisions: activeDecisions(await readDecisions(ref.dir)).map((d) => d.text),
+      decisions,
+      decisionCount: total,
     };
   }
 

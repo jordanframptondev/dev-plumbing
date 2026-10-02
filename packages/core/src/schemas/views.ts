@@ -59,6 +59,8 @@ export type TypeEntry = {
   title: string;
   order: number;
   screen: Screen;
+  /** A list with a timeline strip (Phases). Its items carry phase data. */
+  timeline: boolean;
   emptyMessage: string;
   itemCount: number;
   yourTurn: number;
@@ -66,6 +68,8 @@ export type TypeEntry = {
   withClaude: number;
   resolved: number;
   noChanges: { reason: string } | null;
+  /** The importer never wrote this type, so the app says "Didn't finish" instead of "No changes". */
+  importFailed: boolean;
   fields: string[];
   answerPresets: string[];
   addLabel?: string;

@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { loadConfig, readProjectFile, readThread, saveDraft, submit, writeJsonAtomic } from '@dev-plumbing/core';
+import { addDecision, loadConfig, readProjectFile, readThread, saveDraft, submit, writeJsonAtomic } from '@dev-plumbing/core';
 import { createApp } from '../src/app';
 import { createRuntime } from '../src/runtime';
 import { makeRepo } from '../../core/test/fixtures';
@@ -120,6 +120,16 @@ describe('opening a plan', () => {
     expect((await t.claude('/open', { cwd: makeRepo({ remote: null }), plan: PLAN })).body.error).toMatch(/no git remote/);
     expect((await t.claude('/open', { cwd: t.root, plan: PLAN })).status).toBe(400);
     expect((await t.claude('/open', { cwd: t.repo, project: 'nope' })).body.error).toMatch(/no plumbing project "nope"/);
+  });
+
+  it('lists flows and phases last, to import after the others', async () => {
+    const t = await setup();
+    const open = await t.claude('/open', { cwd: t.repo, plan: PLAN });
+    const types = open.body.importTypes as { id: string; title: string; afterOthers?: true }[];
+    expect(types.map((x) => x.id)).toEqual(['architecture', 'database', 'ui', 'questions', 'concerns', 'ideas', 'testing', 'security', 'flows', 'phases']);
+    expect(types.filter((x) => x.afterOthers).map((x) => x.id)).toEqual(['flows', 'phases']);
+    expect(types[0]).toEqual({ id: 'architecture', title: 'Architecture' });
+    expect(open.body.next).toMatch(/afterOthers only after all the others have returned/);
   });
 });
 
@@ -269,6 +279,19 @@ describe('listening', () => {
     expect((await t.claude('/alive', { windowId: 'w-a' })).body).toEqual({ ok: true });
     now += 60_000;
     expect(t.rt.listeners.isAlive('w-a')).toBe(true);
+  });
+
+  it('sends only the decisions that touch the submitted threads, and how many there are', async () => {
+    const t = await setup();
+    const p = await imported(t);
+    // "who" links to "when", so a decision about "when" matters to "who". "sender" stands alone.
+    await addDecision(p.dir, { text: 'Remind three days before', threadId: 't-questions-when', itemIds: ['questions-when'] });
+    await addDecision(p.dir, { text: 'Send from the main number', threadId: 't-questions-sender', itemIds: ['questions-sender'] });
+    await answer(t, p.dir, ['t-questions-who']);
+    const r = await t.claude('/wait', { repo: p.repo, project: p.project, windowId: 'w-a', timeoutSeconds: 0 });
+    expect(r.body.groups.map((g: Json) => g.threads)).toEqual([['t-questions-who']]);
+    expect(r.body.decisions).toEqual(['Remind three days before']);
+    expect(r.body.decisionCount).toBe(2);
   });
 });
 
