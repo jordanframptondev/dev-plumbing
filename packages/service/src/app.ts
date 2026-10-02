@@ -1,17 +1,20 @@
 import { Hono } from 'hono';
 import type { AppContext } from './context';
+import { configRoutes } from './routes/config';
+import { eventRoutes } from './routes/events';
+import { projectRoutes } from './routes/projects';
+import { createRuntime, type Runtime } from './runtime';
 import { frameHeaders, guard } from './security';
 import { staticHandler } from './static';
-import { projectRoutes } from './routes/projects';
-import { configRoutes } from './routes/config';
 
-export function createApp(ctx: AppContext): Hono {
+export function createApp(ctx: AppContext, rt: Runtime = createRuntime()): Hono {
   const app = new Hono();
   app.use('*', frameHeaders());
   app.use('*', guard({ port: ctx.port, token: ctx.token, extraOrigins: ctx.extraOrigins }));
   app.get('/api/health', (c) => c.json({ ok: true, version: ctx.version, pid: process.pid }));
-  app.route('/api', projectRoutes(ctx));
-  app.route('/api', configRoutes(ctx));
+  app.route('/api', eventRoutes(rt));
+  app.route('/api', projectRoutes(ctx, rt));
+  app.route('/api', configRoutes(ctx, rt));
   app.all('/api/*', (c) => c.json({ error: 'Not found.' }, 404));
   app.get('*', staticHandler(ctx.webDist));
   return app;

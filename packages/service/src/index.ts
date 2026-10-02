@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { configDir, disableLoginItem, enableLoginItem, isLoginItemEnabled, loadConfig, removeRunFile, VERSION, writeRunFile } from '@dev-plumbing/core';
 import { createApp } from './app';
 import { listen, PortInUseError } from './listen';
+import { createRuntime } from './runtime';
 
 const here = (rel: string) => fileURLToPath(new URL(rel, import.meta.url));
 
@@ -12,6 +13,7 @@ async function main() {
   const { settings } = await loadConfig(dir);
   const token = randomBytes(24).toString('hex');
   const cliPath = here('../../cli/dist/index.js');
+  const rt = createRuntime();
   const app = createApp({
     configDir: dir,
     defaultsDir: process.env.DEV_PLUMBING_DEFAULTS ?? here('../../../defaults'),
@@ -30,7 +32,7 @@ async function main() {
       },
       isEnabled: () => isLoginItemEnabled(),
     },
-  });
+  }, rt);
 
   let server: Awaited<ReturnType<typeof listen>>;
   try {
@@ -40,6 +42,8 @@ async function main() {
     process.exit(1);
   }
   await writeRunFile(dir, { pid: process.pid, port: settings.port, token, startedAt: new Date().toISOString(), version: VERSION });
+  // Quiet windows stop showing as "Claude listening" even when nothing else happens.
+  setInterval(() => rt.listeners.sweep(), 15_000).unref();
   console.log(`dev-plumbing is running at http://localhost:${settings.port}`);
 
   const stop = async () => {

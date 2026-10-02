@@ -3,6 +3,7 @@ import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { writeJsonAtomic } from '@dev-plumbing/core';
 import { createApp } from '../src/app';
+import { createRuntime } from '../src/runtime';
 import { call, makeContext, removeTempDirs } from './helpers';
 
 afterAll(removeTempDirs);
@@ -159,5 +160,17 @@ describe('opening the plan file', () => {
     const res = await openSource(app);
     expect(res.status).toBe(500);
     expect(((await res.json()) as { error: string }).error).toMatch(/couldn't be opened.*no app for this file/);
+  });
+
+  it('says when a Claude window is listening', async () => {
+    const { ctx } = await makeContext();
+    const rt = createRuntime();
+    const app = createApp(ctx, rt);
+    rt.listeners.seen('w-1', 'acme/restock-reminders');
+    const list = (await (await call(app, '/api/projects?tab=all')).json()) as { items: { id: string; listening: string | null }[] };
+    expect(list.items.find((p) => p.id === 'restock-reminders')?.listening).toBe('waiting');
+    expect(list.items.find((p) => p.id === 'onboarding-emails')?.listening).toBeNull();
+    const home = (await (await call(app, '/api/projects/acme/restock-reminders')).json()) as { listening: string | null };
+    expect(home.listening).toBe('waiting');
   });
 });

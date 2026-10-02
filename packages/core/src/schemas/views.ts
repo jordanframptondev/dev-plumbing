@@ -35,6 +35,10 @@ export function summaryStatus(c: ThreadCounts): DisplayStatus {
   return 'idle';
 }
 
+/** A Claude window for this project: waiting for a submission, busy answering one, or none. */
+export type ListeningState = 'waiting' | 'busy' | null;
+export type LiveEvent = { type: 'project'; repo: string; id: string } | { type: 'projects' } | { type: 'config' };
+
 export type ProjectSummary = {
   repo: string;
   id: string;
@@ -46,6 +50,7 @@ export type ProjectSummary = {
   updatedAt: string;
   counts: ThreadCounts;
   error?: string;
+  listening?: ListeningState;
 };
 
 export type TypeEntry = {
@@ -79,6 +84,7 @@ export type ProjectHome = {
   types: TypeEntry[];
   inbox: InboxEntry[];
   documents: { original: boolean; draft: boolean; final: boolean };
+  listening?: ListeningState;
 };
 
 export type TypeItemRow = { id: string; title: string; summary: string; status: DisplayStatus; blocking: boolean };

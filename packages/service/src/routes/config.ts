@@ -24,6 +24,7 @@ import {
 } from '@dev-plumbing/core';
 import type { AppContext } from '../context';
 import { EXPECTED_OBJECT, readJsonObject } from '../json';
+import type { Runtime } from '../runtime';
 
 const FILE = /^[a-z][a-z0-9-]*\.md$/;
 const NAME = /^[a-z0-9][a-z0-9._-]*$/i;
@@ -61,8 +62,9 @@ async function mergeIntoFile(file: string, fields: readonly FieldSpec[], body: R
   return { ok: true, before, after };
 }
 
-export function configRoutes(ctx: AppContext): Hono {
+export function configRoutes(ctx: AppContext, rt: Runtime): Hono {
   const r = new Hono();
+  const changed = () => rt.events.emit({ type: 'config' });
 
   r.get('/config', async (c) => {
     const cfg = await loadConfig(ctx.configDir);
@@ -89,6 +91,7 @@ export function configRoutes(ctx: AppContext): Hono {
     const before = parseSettings(merged.before).value;
     const value = parseSettings(merged.after).value;
     const loginItemError = await reconcileLoginItem(value.startAtLogin);
+    changed();
     return c.json({ value, restartRequired: before.port !== value.port, ...(loginItemError ? { loginItemError } : {}) });
   });
 
@@ -97,6 +100,7 @@ export function configRoutes(ctx: AppContext): Hono {
     if (!body) return c.json(EXPECTED_OBJECT, 400);
     const merged = await mergeIntoFile(path.join(ctx.configDir, 'agents.json'), agentsFields, body);
     if (!merged.ok) return c.json({ error: 'Some agent settings are not valid.', errors: merged.errors }, 400);
+    changed();
     return c.json({ value: parseAgents(merged.after).value });
   });
 
@@ -109,6 +113,7 @@ export function configRoutes(ctx: AppContext): Hono {
     if (!parsed.success) return c.json({ error: formatZodError(parsed.error) }, 400);
     if (parsed.data.name !== name) return c.json({ error: `The profile's name must stay "${name}".` }, 400);
     await writeJsonAtomic(path.join(ctx.configDir, 'repos', `${name}.json`), parsed.data);
+    changed();
     return c.json({ value: parsed.data });
   });
 
@@ -133,6 +138,7 @@ export function configRoutes(ctx: AppContext): Hono {
     const cfg = await loadConfig(ctx.configDir);
     const order = Math.max(0, ...cfg.types.map((t) => t.order)) + 1;
     await writeFileAtomic(target, newRulesFileTemplate(id, title, order));
+    changed();
     return c.json({ file }, 201);
   });
 
@@ -158,6 +164,7 @@ export function configRoutes(ctx: AppContext): Hono {
         if (!parsed.ok) return c.json({ error: parsed.error }, 400);
       }
       await writeFileAtomic(target, body.text);
+      changed();
       return c.json({ ok: true });
     });
   }
@@ -173,8 +180,12 @@ export function configRoutes(ctx: AppContext): Hono {
     }
     if (path.normalize(body.file) === 'settings.json') {
       const loginItemError = await reconcileLoginItem((await loadConfig(ctx.configDir)).settings.startAtLogin);
-      if (loginItemError) return c.json({ ok: true, loginItemError });
+      if (loginItemError) {
+        changed();
+        return c.json({ ok: true, loginItemError });
+      }
     }
+    changed();
     return c.json({ ok: true });
   });
 
