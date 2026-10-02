@@ -8,6 +8,7 @@ fields: [severity, likelihood]
 answerPresets: ["Accept Claude's fix", "Accept the risk"]
 timeline: false
 enabled: true
+addLabel: Concern
 ---
 
 ## What to look for

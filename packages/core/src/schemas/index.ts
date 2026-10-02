@@ -6,3 +6,6 @@ export * from './repoProfile';
 export * from './plumbingType';
 export * from './project';
 export * from './views';
+export * from './loop';
+export * from './patch';
+export * from './markdown';

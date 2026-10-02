@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { codeRefSchema, itemFlagSchema, mdAnchorSchema, messageSchema } from './loop';
 
 export const threadStatusValues = ['idle', 'your_turn', 'with_claude', 'resolved', 'parked'] as const;
 export type ThreadStatus = (typeof threadStatusValues)[number];
@@ -16,6 +17,8 @@ export const plumbingProjectSchema = z.object({
   }),
   status: z.enum(['importing', 'active', 'finalized']),
   emptyTypes: z.array(z.object({ type: z.string(), reason: z.string() })).default([]),
+  /** Plumbing types whose importer hasn't written yet. */
+  importPending: z.array(z.string()).default([]),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -24,24 +27,24 @@ export type PlumbingProject = z.infer<typeof plumbingProjectSchema>;
 export const itemSchema = z
   .object({
     id: z.string(),
+    /** The importer's key, kept so a later re-import can match the item. */
+    key: z.string().optional(),
     type: z.string(),
     title: z.string(),
     summary: z.string(),
     body: z.string().optional(),
     fields: z.record(z.string()).optional(),
-    mdAnchor: z.object({ heading: z.string(), lines: z.tuple([z.number(), z.number()]).optional() }).optional(),
-    codeRefs: z.array(z.object({ path: z.string(), symbol: z.string().optional(), verified: z.boolean().optional() })).optional(),
+    mdAnchor: mdAnchorSchema.optional(),
+    codeRefs: z.array(codeRefSchema).optional(),
     links: z.array(z.string()).optional(),
     data: z.unknown().optional(),
     threadId: z.string(),
     createdBy: z.enum(['import', 'claude', 'you', 'whiteboard']),
+    /** "May need another look": set when another thread's reply says it might affect this item. */
+    flags: z.array(itemFlagSchema).optional(),
   })
   .passthrough();
 export type Item = z.infer<typeof itemSchema>;
-
-export const messageSchema = z
-  .object({ id: z.string(), at: z.string(), author: z.enum(['you', 'claude', 'system']), text: z.string().optional() })
-  .passthrough();
 
 export const threadSchema = z.object({
   id: z.string(),

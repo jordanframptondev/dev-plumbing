@@ -8,6 +8,7 @@ fields: [effort]
 answerPresets: ["Add to scope", "Park for later", "Drop"]
 timeline: false
 enabled: true
+addLabel: Idea
 ---
 
 ## What to look for

@@ -53,6 +53,16 @@ describe('shipped defaults', () => {
     expect(type('ideas').answerPresets).toEqual(['Add to scope', 'Park for later', 'Drop']);
   });
 
+  it('labels the add button on Questions, Concerns and Ideas', () => {
+    const type = (id: string) => {
+      const r = parseRulesFile(`${id}.md`, read(`plumbing/${id}.md`));
+      if (!r.ok) throw new Error(r.error);
+      return r.type;
+    };
+    expect([type('questions').addLabel, type('concerns').addLabel, type('ideas').addLabel]).toEqual(['Question', 'Concern', 'Idea']);
+    expect(type('phases').addLabel).toBeUndefined();
+  });
+
   it('ships both output rules files', () => {
     expect(read('outputs/finalize.md')).toMatch(/Notes for the implementer/);
     expect(read('outputs/whiteboard-defense.md')).toMatch(/If you ship it, you should be able to explain it/);

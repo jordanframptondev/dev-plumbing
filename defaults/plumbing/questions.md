@@ -8,6 +8,7 @@ fields: [blocking, default]
 answerPresets: []
 timeline: false
 enabled: true
+addLabel: Question
 ---
 
 ## What to look for

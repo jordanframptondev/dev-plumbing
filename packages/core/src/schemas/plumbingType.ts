@@ -13,6 +13,7 @@ export const plumbingTypeHeaderSchema = z.object({
   answerPresets: z.array(z.string()).default([]),
   timeline: z.boolean().default(false),
   enabled: z.boolean().default(true),
+  addLabel: z.string().min(1).max(40).optional(),
 });
 
 export type PlumbingTypeHeader = z.infer<typeof plumbingTypeHeaderSchema>;
@@ -28,6 +29,7 @@ export const plumbingTypeHeaderDocs: { key: string; description: string }[] = [
   { key: 'answerPresets', description: "Standard answer choices, e.g. [\"Accept Claude's fix\", \"Accept the risk\"]." },
   { key: 'timeline', description: 'List screens only: show a timeline strip (used by Phases).' },
   { key: 'enabled', description: 'Set to false to hide this type without deleting it.' },
+  { key: 'addLabel', description: 'List screens only: the name on the add button, e.g. Question for "+ Question". Leave it out for no button.' },
 ];
 
 export function newRulesFileTemplate(id: string, title: string, order: number): string {
