@@ -6,7 +6,7 @@ export const repoProfileSchema = z.object({
   match: z.array(z.string().min(1)).min(1, 'Add at least one git remote'),
   projectsFolder: fullPathSchema.optional(),
   linkIntoClones: z
-    .object({ enabled: z.boolean(), linkName: z.string().min(1) })
+    .object({ enabled: z.boolean(), linkName: z.string().regex(/^(?!\.{1,2}$)[A-Za-z0-9._-]+$/, 'use a single folder name') })
     .default({ enabled: false, linkName: 'dev-plumbing' }),
   planFolders: z.array(z.string()).default([]),
   schema: z.object({ type: z.enum(['prisma', 'sql', 'other']), path: z.string().min(1) }).optional(),

@@ -26,6 +26,7 @@ import {
   readDecisions,
   readItem,
   readProjectFile,
+  readSubmission,
   readThread,
   replySchema,
   repoProfileSchema,
@@ -50,6 +51,8 @@ import { projectKey, type Runtime } from '../runtime';
 
 /** Below Node fetch's 300 s headers timeout, so the MCP server's long-poll never trips it. */
 export const MAX_POLL_SECONDS = 240;
+
+const NO_REMOTE = "This repo has no git remote, so dev-plumbing can't recognise its other clones. Add one (git remote add origin <url>), then run /dev-plumbing again.";
 
 const projectBody = z.object({ repo: z.string().min(1), project: z.string().min(1) });
 const openBody = z.object({ cwd: z.string().min(1), plan: z.string().min(1).optional(), project: z.string().min(1).optional(), windowId: z.string().optional() });
@@ -94,7 +97,7 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
       const cfg = await loadConfig(ctx.configDir);
       const git = await gitInfo(body.cwd);
       if (!git.remote) {
-        throw new InputError("This repo has no git remote, so dev-plumbing can't recognise its other clones. Add one (git remote add origin <url>), then run /dev-plumbing again.");
+        throw new InputError(NO_REMOTE);
       }
       const models = cfg.agents.models;
       const profile = matchProfile(git.remote, cfg.repos);
@@ -170,25 +173,36 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
     '/repo-profile',
     handle(async (c) => {
       const body = await parse(c, profileBody);
-      const cfg = await loadConfig(ctx.configDir);
       const git = await gitInfo(body.cwd);
-      const existing = matchProfile(git.remote, cfg.repos);
       if (body.profile === undefined) {
+        const cfg = await loadConfig(ctx.configDir);
+        const existing = matchProfile(git.remote, cfg.repos);
         return c.json(
           existing
             ? { kind: 'existing', profile: existing }
             : { kind: 'missing', remote: git.remote ? normalizeRemote(git.remote) : null, clone: git.root, suggestedName: suggestRepoName(git.remote, git.root) },
         );
       }
-      if (existing) throw new InputError(`This repo already has a repo profile (${existing.name}). Change it in Settings → Repos.`);
+      // The repo-setup agent reads untrusted repo files, so it may not choose where the service writes.
+      const raw = body.profile as Record<string, unknown> | null;
+      const link = raw && typeof raw === 'object' ? (raw.linkIntoClones as Record<string, unknown> | undefined) : undefined;
+      if (raw && typeof raw === 'object' && (raw.projectsFolder !== undefined || (link && typeof link === 'object' && link.enabled === true))) {
+        throw new InputError('Leave out projectsFolder and linkIntoClones. The user sets those in Settings → Repos.');
+      }
+      if (!git.remote) throw new InputError(NO_REMOTE);
       const parsed = repoProfileSchema.safeParse(body.profile);
       if (!parsed.success) throw new InputError(`The profile isn't valid: ${formatZodError(parsed.error)}`);
       const profile = parsed.data;
-      const remote = git.remote ? normalizeRemote(git.remote) : '(none)';
+      const remote = normalizeRemote(git.remote);
       if (!profile.match.some((m) => normalizeRemote(m) === remote)) throw new InputError(`match must include ${remote}, this clone's remote.`);
       const file = path.join(ctx.configDir, 'repos', `${profile.name}.json`);
-      if (await fs.access(file).then(() => true, () => false)) throw new InputError(`A repo profile named ${profile.name} already exists. Pick another name.`);
-      await writeJsonAtomic(file, profile);
+      await rt.withLock('config:repos', async () => {
+        const cfg = await loadConfig(ctx.configDir);
+        const existing = matchProfile(git.remote, cfg.repos);
+        if (existing) throw new InputError(`This repo already has a repo profile (${existing.name}). Change it in Settings → Repos.`);
+        if (await fs.access(file).then(() => true, () => false)) throw new InputError(`A repo profile named ${profile.name} already exists. Pick another name.`);
+        await writeJsonAtomic(file, profile);
+      });
       rt.events.emit({ type: 'config' });
       return c.json({ saved: `repos/${profile.name}.json`, profile });
     }),
@@ -236,9 +250,16 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
       rt.listeners.seen(body.windowId, key);
       rt.listeners.setBusy(body.windowId, false);
       const importDone = await rt.withLock(key, async () => {
-        if (body.finished) await finishSubmission(ref.dir, body.finished.submission, body.finished.conflicts).catch((e) => {
-          if (!(e instanceof StoreError)) throw e;
-        });
+        if (body.finished) {
+          const owned = await readSubmission(ref.dir, body.finished.submission).then(
+            (s) => s.pickedUpBy === body.windowId,
+            (e) => {
+              if (e instanceof StoreError && /doesn't exist/.test(e.message)) return false;
+              throw e;
+            },
+          );
+          if (owned) await finishSubmission(ref.dir, body.finished.submission, body.finished.conflicts);
+        }
         await finishWindowSubmissions(ref.dir, body.windowId);
         await requeueUnfinished(ref.dir, (w) => w !== body.windowId && rt.listeners.isAlive(w));
         return finishImport(ref.dir);
@@ -249,6 +270,7 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
       const timeoutMs = Math.min(body.timeoutSeconds ?? cfg.agents.waitHeartbeatSeconds, MAX_POLL_SECONDS) * 1000;
       for (let round = 0; round < 2; round++) {
         const picked = await rt.withLock(key, async () => {
+          if (c.req.raw.signal.aborted) return null;
           const next = (await pendingSubmissions(ref.dir))[0];
           return next ? pickUp(ref.dir, next.id, body.windowId) : null;
         });

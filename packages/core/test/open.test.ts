@@ -111,4 +111,18 @@ describe('opening a plan', () => {
     const info = await gitInfo(repo);
     expect(await linkIntoClone({ clone: repo, excludeFile: info.excludeFile, folder: tempDir('dp-shared-'), linkName: 'dev-plumbing' })).toBe('blocked');
   });
+
+  it('refuses a link name that is not a single folder name, and creates nothing outside the clone', async () => {
+    const parent = tempDir('dp-parent-');
+    const repo = makeRepo();
+    const info = await gitInfo(repo);
+    const folder = tempDir('dp-shared-');
+    for (const linkName of ['../x', 'a/b', '..', '/abs']) {
+      expect(repoProfileSchema.safeParse({ name: 'acme', match: ['github.com/acme/acme'], linkIntoClones: { enabled: true, linkName } }).success).toBe(false);
+      expect(await linkIntoClone({ clone: repo, excludeFile: info.excludeFile, folder, linkName })).toBe('blocked');
+    }
+    expect(await fs.readdir(parent)).toEqual([]);
+    expect(await fs.lstat(path.join(path.dirname(repo), 'x')).catch(() => null)).toBeNull();
+    expect(repoProfileSchema.safeParse({ name: 'acme', match: ['github.com/acme/acme'], linkIntoClones: { enabled: true, linkName: 'dev-plumbing' } }).success).toBe(true);
+  });
 });

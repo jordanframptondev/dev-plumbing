@@ -126,7 +126,8 @@ export async function openPlan(o: {
  * .git/info/exclude. Never replaces a real file or folder with that name.
  */
 export async function linkIntoClone(o: { clone: string; excludeFile: string; folder: string; linkName: string }): Promise<'created' | 'exists' | 'blocked'> {
-  const link = path.join(o.clone, o.linkName);
+  const link = path.resolve(o.clone, o.linkName);
+  if (path.dirname(link) !== path.resolve(o.clone)) return 'blocked';
   const stat = await fs.lstat(link).catch(() => null);
   let result: 'created' | 'exists';
   if (!stat) {

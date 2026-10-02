@@ -75,6 +75,27 @@ describe('opening a plan', () => {
     expect(wrong.body.error).toMatch(/match must include github.com\/acme\/third/);
   });
 
+  it('refuses a profile that chooses where the service writes', async () => {
+    const t = await setup();
+    const other = makeRepo({ remote: 'https://github.com/acme/new-thing.git' });
+    const base = { name: 'new-thing', match: ['github.com/acme/new-thing'] };
+    const msg = /Leave out projectsFolder and linkIntoClones\. The user sets those in Settings/;
+    const a = await t.claude('/repo-profile', { cwd: other, profile: { ...base, projectsFolder: path.join(other, 'inside') } });
+    expect(a.status).toBe(400);
+    expect(a.body.error).toMatch(msg);
+    const b = await t.claude('/repo-profile', { cwd: other, profile: { ...base, linkIntoClones: { enabled: true, linkName: 'dev-plumbing' } } });
+    expect(b.status).toBe(400);
+    expect(b.body.error).toMatch(msg);
+    expect((await t.claude('/repo-profile', { cwd: other })).body.kind).toBe('missing');
+  });
+
+  it('refuses to save a profile for a clone with no git remote', async () => {
+    const t = await setup();
+    const r = await t.claude('/repo-profile', { cwd: makeRepo({ remote: null }), profile: { name: 'lonely', match: ['github.com/acme/lonely'] } });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toMatch(/no git remote/);
+  });
+
   it('creates a plumbing project, then reopens it from the plan or by id, and lists them', async () => {
     const t = await setup();
     const open = await t.claude('/open', { cwd: t.repo, plan: PLAN });
@@ -175,6 +196,36 @@ describe('listening', () => {
     now += 5 * 60_000;
     const b = await t.claude('/wait', { ...base, windowId: 'w-b' });
     expect(b.body.groups.flatMap((g: Json) => g.threads)).toEqual(['t-questions-sender']);
+  });
+
+  it("doesn't pick up a submission once the request was aborted", async () => {
+    const t = await setup();
+    const p = await imported(t);
+    await answer(t, p.dir, ['t-questions-when']);
+    const body = JSON.stringify({ repo: p.repo, project: p.project, windowId: 'w-a', timeoutSeconds: 0 });
+    const ac = new AbortController();
+    ac.abort();
+    const res = await call(t.app, '/api/claude/wait', { method: 'POST', body, signal: ac.signal });
+    expect((await res.json()) as Json).toEqual({ kind: 'timeout' });
+    expect((await readThread(p.dir, 't-questions-when')).status).toBe('with_claude');
+    const again = await t.claude('/wait', { repo: p.repo, project: p.project, windowId: 'w-a', timeoutSeconds: 0 });
+    expect(again.body.kind).toBe('submission');
+  });
+
+  it("a window can't finish a submission another window now owns", async () => {
+    let now = Date.parse('2026-10-01T10:00:00Z');
+    const t = await setup({ now: () => now });
+    const p = await imported(t);
+    await answer(t, p.dir, ['t-questions-when']);
+    const base = { repo: p.repo, project: p.project, timeoutSeconds: 0 };
+    const a = await t.claude('/wait', { ...base, windowId: 'w-a' });
+    expect(a.body.kind).toBe('submission');
+    now += 5 * 60_000;
+    const b = await t.claude('/wait', { ...base, windowId: 'w-b' });
+    expect(b.body.submission).toBe(a.body.submission);
+    const late = await t.claude('/wait', { ...base, windowId: 'w-a', finished: { submission: a.body.submission } });
+    expect(late.body).toEqual({ kind: 'timeout' });
+    expect((await readThread(p.dir, 't-questions-when')).status).toBe('with_claude');
   });
 
   it('keeps a window alive with pings', async () => {
