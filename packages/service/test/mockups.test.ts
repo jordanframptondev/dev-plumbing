@@ -304,6 +304,26 @@ describe('the pin script against hostile markup', () => {
     expect(posted).toEqual([{ source: 'dp-mockup', type: 'leaving' }]);
   });
 
+  it("says nothing when the page is only put in the back/forward cache, and says it's leaving when it really goes", async () => {
+    const { win, posted } = await loadFrame(HOSTILE);
+    posted.length = 0;
+    win.dispatchEvent(new win.PageTransitionEvent('pagehide', { persisted: true }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(posted).toEqual([]);
+    win.dispatchEvent(new win.PageTransitionEvent('pagehide', { persisted: false }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(posted).toEqual([{ source: 'dp-mockup', type: 'leaving' }]);
+  });
+
+  it('stops a middle-click on a link, as it stops a click', async () => {
+    const { win } = await loadFrame(HOSTILE);
+    for (const id of ['a', 'area', 'svga', 'svgt']) {
+      const ev = new win.MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 });
+      win.document.getElementById(id)!.dispatchEvent(ev);
+      expect(ev.defaultPrevented, id).toBe(true);
+    }
+  });
+
   it('stops a link inside an open shadow root', async () => {
     const { win, posted } = await loadFrame('<div id="host"></div>');
     const root = win.document.getElementById('host').attachShadow({ mode: 'open' });

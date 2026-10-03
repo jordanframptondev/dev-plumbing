@@ -56,20 +56,26 @@ export const PIN_SCRIPT = String.raw`(() => {
     }
     return false;
   };
-  listen('click', (e) => {
+  const stopLinks = (e) => {
     // The path too: a click inside a shadow root reaches this listener retargeted to the host.
     const el = elementOf(e.target);
     if ((el && linkLike(el)) || eventPath(e).some((node) => node instanceof E && linkLike(node))) {
       e.preventDefault();
       e.stopPropagation();
     }
-  }, true);
+  };
+  listen('click', stopLinks, true);
+  // A middle-click opens a link too.
+  listen('auxclick', stopLinks, true);
   listen('submit', (e) => {
     e.preventDefault();
     e.stopPropagation();
   }, true);
-  // However the frame got here, the app hears that this document is going away, so it can put the frame back.
-  winListen('pagehide', () => post({ type: 'leaving' }));
+  // However the frame got here, the app hears that this document is going away, so it can put the frame back. A page
+  // only put in the back/forward cache (persisted) isn't going anywhere, so that costs no reset.
+  winListen('pagehide', (e) => {
+    if (!e.persisted) post({ type: 'leaving' });
+  });
 
   let ready = false;
   const pending = [];
