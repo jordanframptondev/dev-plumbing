@@ -1,7 +1,7 @@
 import type { TableDiff } from '@dev-plumbing/core/schemas';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { migrationHeadline, relationshipStrip, relationTarget, TableCard } from './DatabaseScreen';
+import { DatabaseScreen, migrationHeadline, relationshipStrip, relationTarget, TableCard } from './DatabaseScreen';
 import { row } from './testkit';
 
 const navigate = vi.hoisted(() => vi.fn());
@@ -69,9 +69,31 @@ describe('the migration headline', () => {
   it('says destructive, data risk, backfill or additive only', () => {
     expect(migrationHeadline(['additive', 'destructive', 'rollback']).text).toBe('Destructive');
     expect(migrationHeadline(['additive', 'data-risk']).text).toBe('Data risk');
-    expect(migrationHeadline(['additive', 'backfill']).text).toBe('Additive, with a backfill');
+    expect(migrationHeadline(['additive', 'backfill'])).toEqual({ text: 'Additive, with a backfill', className: 'text-ochre' });
     expect(migrationHeadline(['additive', 'rollback'])).toEqual({ text: 'Additive only', className: 'text-moss' });
     expect(migrationHeadline([]).text).toBe('Additive only');
+  });
+});
+
+describe('the migration headline over removals', () => {
+  it('never reads all clear over a removed table or field', () => {
+    expect(migrationHeadline([], [{ ...reminder, change: 'removed', migration: [] }])).toEqual({ text: 'Destructive', className: 'text-seal' });
+    expect(migrationHeadline([], [{ ...subscription, migration: [] }])).toEqual({ text: 'Destructive', className: 'text-seal' });
+    expect(migrationHeadline([], [{ ...reminder, migration: [] }]).text).toBe('Additive only');
+  });
+});
+
+describe('DatabaseScreen with an undrawable table', () => {
+  it('says so, still draws the valid table, and builds the migration from it alone', () => {
+    const type = { id: 'database', title: 'Database', screen: 'database' } as never;
+    const good = row({ id: 'good', threadId: 't-good', title: 'Reminder table', data: reminder });
+    const bad = row({ id: 'bad', threadId: 't-bad', title: 'Broken table', data: { model: 42 } });
+    render(<DatabaseScreen repo="a" project="p" data={{ type, items: [good, bad] }} />);
+    expect(screen.getByText("This item's drawing couldn't be shown")).toBeTruthy();
+    expect(screen.getAllByTestId('table-card')).toHaveLength(1);
+    const panel = screen.getByTestId('migration-panel');
+    expect(within(panel).getByTestId('migration-additive').textContent).toContain('Create the RestockReminder table.');
+    expect(within(panel).getByTestId('migration-headline').textContent).toBe('Additive only');
   });
 });
 

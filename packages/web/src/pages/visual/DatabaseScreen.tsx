@@ -49,16 +49,18 @@ export function relationshipStrip(tables: TableDiff[]): DiagramData | null {
 }
 
 /** The migration panel's one-word answer: destructive beats data risk beats a backfill; otherwise it's additive only. */
-export function migrationHeadline(kinds: MigrationKind[]): { text: string; className: string } {
-  if (kinds.includes('destructive')) return { text: 'Destructive', className: 'text-seal' };
+export function migrationHeadline(kinds: MigrationKind[], tables: TableDiff[] = []): { text: string; className: string } {
+  // A removed table or field is destructive even when no migration entry says so.
+  const removes = tables.some((t) => t.change === 'removed' || t.fields.some((f) => f.change === 'removed'));
+  if (removes || kinds.includes('destructive')) return { text: 'Destructive', className: 'text-seal' };
   if (kinds.includes('data-risk')) return { text: 'Data risk', className: 'text-amber' };
-  if (kinds.includes('backfill')) return { text: 'Additive, with a backfill', className: 'text-ink' };
+  if (kinds.includes('backfill')) return { text: 'Additive, with a backfill', className: 'text-ochre' };
   return { text: 'Additive only', className: 'text-moss' };
 }
 
 const KIND_LABEL: Record<MigrationKind, { text: string; className: string }> = {
   additive: { text: 'Additive', className: 'text-ink-3' },
-  backfill: { text: 'Backfill', className: 'text-ink-3' },
+  backfill: { text: 'Backfill', className: 'text-ochre' },
   destructive: { text: 'Destructive', className: 'text-seal' },
   'data-risk': { text: 'Data risk', className: 'text-amber' },
   rollback: { text: 'Rollback', className: 'text-ink-3' },
@@ -67,7 +69,7 @@ const KIND_LABEL: Record<MigrationKind, { text: string; className: string }> = {
 function MigrationPanel({ tables }: { tables: TableDiff[] }) {
   const entries = tables.flatMap((t) => (t.migration ?? []).map((m) => ({ ...m, model: t.model })));
   const kinds = entries.map((e) => e.kind);
-  const head = migrationHeadline(kinds);
+  const head = migrationHeadline(kinds, tables);
   return (
     <section data-testid="migration-panel" aria-label="Migration" className="mt-4 rounded-[10px] border-[0.5px] border-separator bg-cell px-4 py-3">
       <div className="flex flex-wrap items-baseline gap-x-3">
