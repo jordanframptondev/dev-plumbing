@@ -1,6 +1,7 @@
 import type { TypeEntry, TypeItemRow } from '@dev-plumbing/core/schemas';
 import { DatabaseScreen } from './DatabaseScreen';
 import { DiagramScreen } from './DiagramScreen';
+import { MockupsScreen } from './MockupsScreen';
 import { OtherItems } from './OtherItems';
 
 /** What every visual screen gets: the plumbing type, its rows, and `?item=`, the item to open. */
@@ -29,6 +30,8 @@ function ScreenBody(p: ScreenProps) {
       return <DiagramScreen {...p} />;
     case 'database':
       return <DatabaseScreen {...p} />;
+    case 'mockups':
+      return <MockupsScreen {...p} />;
     default:
       // Screens that aren't drawn yet list their items as rows.
       return <OtherItems rows={p.data.items} repo={p.repo} project={p.project} />;

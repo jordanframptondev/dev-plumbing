@@ -39,6 +39,9 @@ const send = (method: string, value: unknown): RequestInit => ({ method, body: J
 const proj = (repo: string, id: string) => `/api/projects/${enc(repo)}/${enc(id)}`;
 /** One side of a UI item's mockup document. It's an iframe src, so it's a URL, not a request. */
 export const mockupUrl = (repo: string, id: string, itemId: string, side: 'after' | 'before') => `${proj(repo, id)}/items/${enc(itemId)}/mockup/${side}`;
+/** The mockup an open thread option proposes, before it's accepted. Also an iframe src. */
+export const proposalMockupUrl = (repo: string, id: string, threadId: string, optionId: string, side: 'after' | 'before') =>
+  `${proj(repo, id)}/threads/${enc(threadId)}/options/${enc(optionId)}/mockup/${side}`;
 export type DraftInput = { optionId?: string; note?: string; text?: string };
 export type SubmitBody = { scope: 'all' } | { scope: 'thread'; threadId: string };
 

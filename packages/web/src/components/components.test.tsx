@@ -32,6 +32,15 @@ describe('StatusMark', () => {
 });
 
 describe('Segmented', () => {
+  it("doesn't pick a disabled option", () => {
+    const onChange = vi.fn();
+    render(<Segmented label="Version" value="after" onChange={onChange} options={[{ value: 'before', label: 'Before', disabled: true }, { value: 'after', label: 'After' }]} />);
+    const before = screen.getByRole('tab', { name: 'Before' }) as HTMLButtonElement;
+    expect(before.disabled).toBe(true);
+    fireEvent.click(before);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it('marks the selected option and reports changes', () => {
     const onChange = vi.fn();
     render(<Segmented label="Filter" value="a" onChange={onChange} options={[{ value: 'a', label: 'Active' }, { value: 'b', label: 'All' }]} />);
