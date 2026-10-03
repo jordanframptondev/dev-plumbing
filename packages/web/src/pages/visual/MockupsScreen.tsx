@@ -17,7 +17,7 @@ import type { ScreenProps } from './VisualScreen';
 
 type Side = 'after' | 'before';
 type Device = 'desktop' | 'mobile';
-type Mockup = { after: string | null; before: string | null; route: string | null; files: string[]; kit: string | null };
+export type Mockup = { after: string | null; before: string | null; route: string | null; files: string[]; kit: string | null };
 type UiScreen = { row: TypeItemRow; mockup: Mockup | null; problems: string[] };
 
 const ASK_FOR_MOCKUP = "Please draw the After mockup for this screen with the app's kit, and a Before from the current component if the screen exists today.";
@@ -27,11 +27,11 @@ const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v : null);
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 /**
- * What the screen needs from a UI item's data. Markup is read leniently: it's drawn even when it breaks a write rule
- * (written by hand, or by an older version), because the sandboxed frame, not the write check, is what keeps it
- * harmless. The rule problems are listed beside it.
+ * What UI changes and the thread view need from a UI item's data. Markup is read leniently: it's drawn even when it
+ * breaks a write rule (written by hand, or by an older version), because the sandboxed frame, not the write check, is
+ * what keeps it harmless. The rule problems are listed beside it.
  */
-function readMockup(data: unknown): { mockup: Mockup | null; problems: string[] } {
+export function readMockup(data: unknown): { mockup: Mockup | null; problems: string[] } {
   if (data === null || data === undefined) return { mockup: null, problems: [] };
   const parsed = parseData('mockups', data);
   if (parsed.ok) {

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../../api/client';
 import { AnchorForm } from './AnchorForm';
 import { DataProblem } from './DataProblem';
+import { ItemDataView } from './ItemDataView';
 import { OtherItems } from './OtherItems';
 import { row } from './testkit';
 
@@ -80,5 +81,35 @@ describe('OtherItems', () => {
   it('renders nothing for no rows', () => {
     const { container } = render(<OtherItems rows={[]} repo="acme-app" project="restock" />);
     expect(container.innerHTML).toBe('');
+  });
+});
+
+describe('ItemDataView', () => {
+  const mockup = (after: string) => ({ location: { app: 'web', route: '/account', files: ['apps/web/app/account/page.tsx'] }, kit: 'web', after });
+  const view = (data: unknown) => {
+    vi.spyOn(api, 'projectHome').mockResolvedValue({ types: [] } as unknown as Awaited<ReturnType<typeof api.projectHome>>);
+    return withQueries(<ItemDataView kind="mockups" data={data} checks={null} repo="acme-app" project="restock" itemId="ui-settings" />);
+  };
+
+  it('draws markup that breaks a write rule, as UI changes does, and lists what it breaks', () => {
+    view(mockup('<section class="p-4"><img src="https://x"><h2>Restock settings</h2></section>'));
+    expect(screen.getByTestId('mockup-frame').getAttribute('src')).toBe('/api/projects/acme-app/restock/items/ui-settings/mockup/after');
+    const problems = screen.getByTestId('mockup-problems');
+    expect(problems.textContent).toContain('after: a src or srcset points at another site.');
+    expect(problems.className).toContain('text-ink-3');
+    expect(screen.queryByTestId('data-problem')).toBeNull();
+    expect(screen.getByText('/account · apps/web/app/account/page.tsx')).toBeTruthy();
+  });
+
+  it('lists no problems for markup that keeps the rules', () => {
+    view(mockup('<section class="p-4"><h2>Restock settings</h2></section>'));
+    expect(screen.getByTestId('mockup-frame')).toBeTruthy();
+    expect(screen.queryByTestId('mockup-problems')).toBeNull();
+  });
+
+  it("says why when there's no markup to draw", () => {
+    view({ location: 'nowhere', after: 42 });
+    expect(screen.getByTestId('data-problem')).toBeTruthy();
+    expect(screen.queryByTestId('mockup-frame')).toBeNull();
   });
 });
