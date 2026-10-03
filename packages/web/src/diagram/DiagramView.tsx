@@ -138,7 +138,8 @@ export function DiagramView({
           {drawn.layout.nodes.map((n) => {
             const isSelected = interactive && selected === n.id;
             const check = checks?.[n.id];
-            const bubble = compact ? undefined : bubbles?.[n.id];
+            // Own keys only: a box called "constructor" mustn't pick up Object.prototype's.
+            const bubble = compact || !bubbles || !Object.hasOwn(bubbles, n.id) ? undefined : bubbles[n.id];
             const pathRoom = Math.floor((n.w - 16) / 6.3) - (check === false ? 10 : check === true ? 2 : 0);
             return (
               <g

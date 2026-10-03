@@ -98,6 +98,21 @@ describe('DiagramView', () => {
     expect(svg.classList.contains('mx-auto')).toBe(true);
   }, 15_000);
 
+  it("gives a box a bubble only for its own threads, even when its id is one of Object's names", async () => {
+    const odd: DiagramData = {
+      kind: 'system',
+      groups: [],
+      nodes: [
+        { id: 'constructor', label: 'Constructor', status: 'new' },
+        { id: 'toString', label: 'To string', status: 'new' },
+      ],
+      edges: [],
+    };
+    render(<DiagramView data={odd} bubbles={{}} onSelect={() => {}} />);
+    await screen.findAllByTestId('diagram-node', {}, { timeout: 10_000 });
+    expect(screen.queryByTestId('diagram-bubble')).toBeNull();
+  }, 15_000);
+
   it("says the drawing couldn't be shown, with the reason, when the layout fails", async () => {
     vi.mocked(layout.layoutDiagram).mockRejectedValueOnce(new Error('boom'));
     render(<DiagramView data={data} />);
