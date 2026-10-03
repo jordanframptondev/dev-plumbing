@@ -2,6 +2,13 @@ import type { DiagramData } from '@dev-plumbing/core/schemas';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DiagramView } from './DiagramView';
+import * as layout from './layout';
+
+// Real layout by default; one test makes it reject.
+vi.mock('./layout', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./layout')>();
+  return { ...actual, layoutDiagram: vi.fn(actual.layoutDiagram) };
+});
 
 afterEach(cleanup);
 
@@ -50,6 +57,8 @@ describe('DiagramView', () => {
     fireEvent.keyDown(screen.getByRole('button', { name: 'SMS provider, external' }), { key: 'Enter' });
     expect(onSelect).toHaveBeenLastCalledWith('sms');
     expect(screen.getByRole('button', { name: 'Settings page, changed' }).getAttribute('aria-pressed')).toBe('true');
+    // One finger scrolls the page; two pinch-zoom the drawing.
+    expect((document.querySelector('svg') as SVGElement).style.touchAction).toBe('pan-x pan-y pinch-zoom');
     // No legend unless asked for.
     expect(screen.queryByTestId('diagram-legend')).toBeNull();
   }, 15_000);
@@ -73,4 +82,12 @@ describe('DiagramView', () => {
     expect(swatch('external').strokeDasharray).toBe('3 2');
     for (const s of ['new', 'changed', 'unchanged', 'external']) expect(swatch(s).fill).toBe('none');
   }, 15_000);
+
+  it("says the drawing couldn't be shown, with the reason, when the layout fails", async () => {
+    vi.mocked(layout.layoutDiagram).mockRejectedValueOnce(new Error('boom'));
+    render(<DiagramView data={data} />);
+    expect(await screen.findByText("This item's drawing couldn't be shown")).toBeTruthy();
+    expect(screen.getByText('boom')).toBeTruthy();
+    expect(screen.queryByTestId('diagram-node')).toBeNull();
+  });
 });
