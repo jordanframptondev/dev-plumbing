@@ -1,3 +1,4 @@
+import type { FlowData } from '@dev-plumbing/core/schemas';
 import { expect, test, type Page } from '@playwright/test';
 import { importProject, writeRawData, type TestItem } from './claude';
 import { noSideScroll } from './env';
@@ -146,7 +147,8 @@ test('a thread about a removed step stays listed as not in this version', async 
   await expect(page).toHaveURL(/\/th\/t-flows-about-step-2-skip-paused-customers$/);
 
   // Claude rewrites the flow without step 2.
-  const without = { ...system.data, steps: (system.data.steps as { n: number }[]).filter((s) => s.n !== 2) };
+  const before = system.data as FlowData;
+  const without: FlowData = { ...before, steps: before.steps.filter((s) => s.n !== 2) };
   writeRawData(p, 'flows-daily-job', without);
   await page.goto(`${p.url}/t/flows`);
   const flow = flowFor(page, 'Daily reminder job');
