@@ -1,13 +1,13 @@
 import type { DiagramData, NodeStatus, TypeItemRow } from '@dev-plumbing/core/schemas';
 import { Link } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button } from '../../components/Button';
 import { StatusMark } from '../../components/StatusMark';
 import { DiagramView } from '../../diagram/DiagramView';
 import { AnchorForm } from './AnchorForm';
 import { DataProblem } from './DataProblem';
 import { OtherItems } from './OtherItems';
-import { anchorsOn, bubblesFrom, itemAnchorId, splitRows, useScrollToItem } from './rows';
+import { anchorsOn, bubblesFrom, itemAnchorId, splitRows, useScrollToItem, useShowWhenNarrow } from './rows';
 import type { ScreenProps } from './VisualScreen';
 
 const STATUS_WORD: Record<NodeStatus, { text: string; className: string }> = {
@@ -189,10 +189,13 @@ function NodePanel({
   project: string;
 }) {
   const [asking, setAsking] = useState(false);
+  // Below 1100 px the panel sits under the drawing, which can be taller than the screen.
+  const panel = useRef<HTMLElement>(null);
+  useShowWhenNarrow(panel);
   const linked = node.itemId ? rows.find((r) => r.id === node.itemId) : undefined;
   const word = STATUS_WORD[node.status];
   return (
-    <aside data-testid="node-panel" aria-label={`Box: ${node.label}`} className="min-w-0 self-start rounded-[10px] border-[0.5px] border-separator bg-cell px-3 py-3 text-[12.5px]">
+    <aside ref={panel} data-testid="node-panel" aria-label={`Box: ${node.label}`} className="min-w-0 self-start rounded-[10px] border-[0.5px] border-separator bg-cell px-3 py-3 text-[12.5px]">
       <div className="flex items-start gap-2">
         <h4 className="min-w-0 flex-1 text-[14px] font-semibold">{node.label}</h4>
         <button type="button" onClick={onClose} className="shrink-0 text-[12px] text-slate">

@@ -1,5 +1,5 @@
 import { parseData, type DataKind, type DisplayStatus, type TypeItemRow, type VisualData } from '@dev-plumbing/core/schemas';
-import { useEffect } from 'react';
+import { useEffect, useSyncExternalStore, type RefObject } from 'react';
 import type { Tone } from '../../diagram/DiagramView';
 
 /** A screen's rows, sorted by what it can do with them. */
@@ -51,6 +51,32 @@ export function bubblesFrom(byRef: Map<string, TypeItemRow[]>): Record<string, {
 
 /** The DOM id of an item's section, for `?item=`. */
 export const itemAnchorId = (itemId: string) => `item-${itemId}`;
+
+/** From this width a screen's panel sits beside or after its drawing. Narrower, it opens under what you tapped. */
+const WIDE = '(min-width: 1100px)';
+const wideNow = () => (typeof window.matchMedia === 'function' ? window.matchMedia(WIDE).matches : window.innerWidth >= 1100);
+
+/** Whether the window is 1100 px or wider, kept up to date as it resizes. */
+export function useWide(): boolean {
+  return useSyncExternalStore((onChange) => {
+    if (typeof window.matchMedia !== 'function') return () => {};
+    const mq = window.matchMedia(WIDE);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, wideNow);
+}
+
+/**
+ * Below 1100 px, a box or step panel scrolls itself into view when it opens, so a tap never opens it off screen.
+ * Panels are keyed by what they're about, so each one that opens mounts afresh.
+ */
+export function useShowWhenNarrow(ref: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    if (!wideNow()) ref.current?.scrollIntoView?.({ block: 'nearest' });
+    // On open only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+}
 
 /** Scrolls `?item=`'s section into view once it's on the page. */
 export function useScrollToItem(item: string | undefined) {

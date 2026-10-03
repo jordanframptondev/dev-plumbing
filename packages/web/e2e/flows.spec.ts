@@ -180,6 +180,31 @@ test.describe('on a phone', () => {
     expect(b.y).toBeGreaterThanOrEqual(a.y + a.height);
     expect(await noSideScroll(page)).toEqual([]);
   });
+
+  test("tapping a step's card opens its panel right under it, on screen", async ({ page }) => {
+    const long: TestItem = {
+      key: 'long',
+      title: 'Reorder, screen by screen',
+      summary: 'Four screens, each with a mockup.',
+      data: { kind: 'user', steps: [1, 2, 3, 4].map((n) => ({ n, label: `Screen ${n}`, mockupId: 'ui-settings' })) },
+    };
+    const p = await importProject('flows-phone-panel', 'Flows phone panel', { ui, flows: [long] });
+    await page.goto(`${p.url}/t/flows`);
+    const flow = flowFor(page, 'Reorder, screen by screen');
+    await expect(flow.getByTestId('story-step')).toHaveCount(4);
+    await flow.getByRole('button', { name: 'Step 1: Screen 1' }).click();
+    const panel = flow.getByTestId('step-panel');
+    await expect(panel).toContainText('Screen 1');
+    await expect(panel).toBeInViewport();
+    await expect(panel.getByRole('button', { name: 'Ask about this step' })).toBeInViewport();
+    // Right under step 1, above step 2.
+    const card = (await flow.locator('[data-testid="story-step"][data-step="1"]').boundingBox())!;
+    const next = (await flow.locator('[data-testid="story-step"][data-step="2"]').boundingBox())!;
+    const box = (await panel.boundingBox())!;
+    expect(box.y).toBeGreaterThanOrEqual(card.y);
+    expect(box.y + box.height).toBeLessThanOrEqual(next.y);
+    expect(await noSideScroll(page)).toEqual([]);
+  });
 });
 
 test.describe('on a tablet', () => {

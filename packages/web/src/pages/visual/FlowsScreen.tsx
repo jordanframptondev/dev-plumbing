@@ -1,7 +1,7 @@
 import { parseData, type FlowData, type TypeItemRow } from '@dev-plumbing/core/schemas';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { api } from '../../api/client';
 import { Button } from '../../components/Button';
 import { MockupFrame } from '../../components/MockupFrame';
@@ -12,7 +12,7 @@ import { SequenceView } from '../../diagram/SequenceView';
 import { AnchorForm } from './AnchorForm';
 import { DataProblem } from './DataProblem';
 import { OtherItems } from './OtherItems';
-import { anchorsOn, bubblesFrom } from './rows';
+import { anchorsOn, bubblesFrom, useShowWhenNarrow, useWide } from './rows';
 import type { ScreenProps } from './VisualScreen';
 
 type Step = FlowData['steps'][number];
@@ -26,6 +26,8 @@ type FlowViewProps = {
   selected?: number | null;
   onSelect?: (n: number) => void;
   bubbles?: Bubbles;
+  /** The selected step's panel. Below 1100 px a storyboard opens it inside the tapped card; otherwise it follows the drawing. */
+  panel?: ReactNode;
 };
 
 const KIND_TAG: Record<FlowData['kind'], string> = { user: 'User flow', system: 'System flow', both: 'User and system' };
@@ -58,7 +60,7 @@ export function useMockupItems(repo: string, project: string): Map<string, Mocku
 }
 
 /** User flows: one card per step, with the step's After mockup as a thumbnail when it has one. */
-function Storyboard({ flow, repo, project, selected = null, onSelect, bubbles }: FlowViewProps) {
+function Storyboard({ flow, repo, project, selected = null, onSelect, bubbles, panel }: FlowViewProps) {
   const mockups = useMockupItems(repo, project);
   const steps = [...flow.steps].sort((a, b) => a.n - b.n);
   // One column on a phone, at most two from 768 to 1099 px (§16), then as many cards of 220 px or more as fit.
@@ -114,6 +116,7 @@ function Storyboard({ flow, repo, project, selected = null, onSelect, bubbles }:
               </Link>
             )}
             {s.systemNote && <p className="mt-1.5 text-[12px] text-ink-3">{s.systemNote}</p>}
+            {on && panel}
           </li>
         );
       })}
@@ -125,6 +128,9 @@ function Storyboard({ flow, repo, project, selected = null, onSelect, bubbles }:
 export function FlowView(p: FlowViewProps) {
   const [view, setView] = useState<'storyboard' | 'sequence'>('storyboard');
   const shown = p.flow.kind === 'both' ? view : p.flow.kind === 'system' ? 'sequence' : 'storyboard';
+  // Below 1100 px a storyboard's panel opens right under the tapped card, not after every card. A sequence's follows it.
+  const wide = useWide();
+  const inCard = shown === 'storyboard' && !wide;
   return (
     <div data-testid="flow-view">
       {p.flow.kind === 'both' && (
@@ -140,20 +146,23 @@ export function FlowView(p: FlowViewProps) {
           />
         </div>
       )}
-      {shown === 'sequence' ? <SequenceView flow={p.flow} selected={p.selected} onSelect={p.onSelect} bubbles={p.bubbles} /> : <Storyboard {...p} />}
+      {shown === 'sequence' ? <SequenceView flow={p.flow} selected={p.selected} onSelect={p.onSelect} bubbles={p.bubbles} /> : <Storyboard {...p} panel={inCard ? p.panel : undefined} />}
+      {!inCard && p.panel}
     </div>
   );
 }
 
 function StepPanel({ row, flow, step, pins, typeId, repo, project }: { row: TypeItemRow; flow: FlowData; step: Step; pins: TypeItemRow[]; typeId: string; repo: string; project: string }) {
   const [asking, setAsking] = useState(false);
+  const panel = useRef<HTMLDivElement>(null);
+  useShowWhenNarrow(panel);
   const screen = useMockupItems(repo, project).get(step.mockupId ?? '');
   const lane = (id?: string) => (id === undefined ? undefined : (flow.lanes?.find((l) => l.id === id)?.label ?? id));
   const from = lane(step.from);
   const to = lane(step.to);
   const lanes = from && to && from !== to ? `${from} → ${to}` : (from ?? to);
   return (
-    <div data-testid="step-panel" className="mt-3 border-l-2 border-separator pl-3">
+    <div ref={panel} data-testid="step-panel" className="mt-3 border-l-2 border-separator pl-3">
       <p className="text-[11px] font-semibold text-ink-3">
         Step {step.n}
         {lanes ? ` · ${lanes}` : ''}
@@ -224,11 +233,16 @@ function FlowSection({ row, flow, pins, typeId, repo, project, highlighted }: { 
       </div>
       <p className="mt-0.5 text-[12.5px] text-ink-3">{row.summary}</p>
       <div className="mt-3">
-        <FlowView flow={flow} repo={repo} project={project} selected={picked} onSelect={(n) => setPicked((cur) => (cur === n ? null : n))} bubbles={stepBubbles(row.id, here)} />
+        <FlowView
+          flow={flow}
+          repo={repo}
+          project={project}
+          selected={picked}
+          onSelect={(n) => setPicked((cur) => (cur === n ? null : n))}
+          bubbles={stepBubbles(row.id, here)}
+          panel={step && <StepPanel key={step.n} row={row} flow={flow} step={step} pins={here.filter((p) => stepOf(p) === step.n)} typeId={typeId} repo={repo} project={project} />}
+        />
       </div>
-      {step && (
-        <StepPanel key={step.n} row={row} flow={flow} step={step} pins={here.filter((p) => stepOf(p) === step.n)} typeId={typeId} repo={repo} project={project} />
-      )}
       {gone.length > 0 && (
         <ul className="mt-3 flex flex-col gap-1 text-[12.5px]">
           {gone.map((pin) => (

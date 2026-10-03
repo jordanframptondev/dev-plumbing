@@ -178,7 +178,24 @@ test.describe('on a phone', () => {
     expect(await noSideScroll(page)).toEqual([]);
     await box(page, 'box-0').click();
     await expect(page.getByTestId('node-panel')).toBeVisible();
+    // On screen, not just rendered somewhere below the drawing.
+    await expect(page.getByTestId('node-panel')).toBeInViewport();
     await expect(page.getByTestId('node-panel').getByRole('heading')).toHaveText('Box 0');
+    expect(await noSideScroll(page)).toEqual([]);
+  });
+
+  test("tapping the top box of a long chain opens its panel where you're looking", async ({ page }) => {
+    const nodes = Array.from({ length: 8 }, (_, i) => ({ id: `box-${i}`, label: `Box ${i}`, status: 'new' }));
+    const edges = nodes.slice(1).map((n, i) => ({ id: `line-${i}`, from: `box-${i}`, to: n.id }));
+    const p = await importProject('diagram-phone-chain', 'Diagram phone chain', {
+      architecture: [{ key: 'chain', title: 'Chain', summary: 'Eight boxes in a row.', data: { kind: 'data_flow', groups: [], nodes, edges } }],
+    });
+    await page.goto(`${p.url}/t/architecture`);
+    await expect(page.getByTestId('diagram-node')).toHaveCount(8);
+    await box(page, 'box-0').click();
+    const panel = page.getByTestId('node-panel');
+    await expect(panel.getByRole('heading')).toHaveText('Box 0');
+    await expect(panel).toBeInViewport();
     expect(await noSideScroll(page)).toEqual([]);
   });
 });
