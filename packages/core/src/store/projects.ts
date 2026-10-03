@@ -270,6 +270,20 @@ export async function loadTypeItems(
   if (!type) return null;
   const kind = dataKindOf(type);
   const { values: items } = await readItems(ref.dir);
+  // Timeline types: the items each phase lists, so the list can link to them by title.
+  const itemById = new Map(items.map((x) => [x.id, x]));
+  const typeTitle = new Map(types.map((t) => [t.id, t.title]));
+  const itemRefsOf = (data: unknown): TypeItemRow['itemRefs'] => {
+    if (!type.timeline) return {};
+    const phase = parseData('timeline', data);
+    if (!phase.ok) return {};
+    const refs: TypeItemRow['itemRefs'] = {};
+    for (const id of phase.data.itemIds) {
+      const target = itemById.get(id);
+      if (target) refs[id] = { title: target.title, threadId: target.threadId, typeTitle: typeTitle.get(target.type) ?? target.type };
+    }
+    return refs;
+  };
   const { values: threads } = await readThreads(ref.dir);
   const byId = new Map(threads.map((t) => [t.id, t]));
   const decisions = activeDecisions(await readDecisions(ref.dir));
@@ -298,8 +312,7 @@ export async function loadTypeItems(
       anchor: i.anchor ?? null,
       createdBy: i.createdBy,
       checks: checks[n] ?? null,
-      // Timeline types fill this in Task 15 (the items each phase lists).
-      itemRefs: {},
+      itemRefs: itemRefsOf(i.data),
     };
   });
   return { type, items: kind === 'timeline' ? byPhaseOrder(rows) : rows.sort(byTitle) };

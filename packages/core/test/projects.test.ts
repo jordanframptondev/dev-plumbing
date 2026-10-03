@@ -16,7 +16,7 @@ import {
   type ProjectRef,
 } from '../src/store/projects';
 import { IMPORT_DID_NOT_FINISH } from '../src/store/importItems';
-import { listType, seedProject, TYPES } from './fixtures';
+import { listType, pair, seedProject, TYPES } from './fixtures';
 import { removeTempDirs, tempDir } from '../../../testkit/tmp';
 
 afterAll(removeTempDirs);
@@ -250,5 +250,31 @@ describe('discoverProjects', () => {
     const ids = refs.map((r) => `${r.repo}/${r.id}`);
     expect(ids).toContain('linked/restock-copy');
     expect(ids).toContain('beta-link/checkout-redesign');
+  });
+});
+
+describe('phase rows', () => {
+  const phases = listType('phases', { title: 'Phases & milestones', order: 8, timeline: true });
+  const types = [...TYPES, phases];
+  const at = (dir: string): ProjectRef => ({ repo: 'acme', id: 'restock', dir });
+
+  it('carry the title, thread and type of each item a phase lists', async () => {
+    const build = pair('phases-build', { type: 'phases', title: 'Build the job' });
+    build.item.data = { order: 1, goal: 'Reminders go out daily.', doneWhen: ['A reminder is sent'], itemIds: ['q1', 'architecture-job', 'gone'] };
+    const dir = await seedProject({ pairs: [build, pair('q1', { title: 'Who gets reminders?' }), pair('architecture-job', { type: 'architecture', title: 'Daily job' })] });
+    const r = await loadTypeItems(at(dir), types, 'phases');
+    expect(r?.items[0]?.itemRefs).toEqual({
+      q1: { title: 'Who gets reminders?', threadId: 't-q1', typeTitle: 'Questions' },
+      'architecture-job': { title: 'Daily job', threadId: 't-architecture-job', typeTitle: 'Architecture' },
+    });
+  });
+
+  it('are empty for phases without valid data, and for every other type', async () => {
+    const old = pair('phases-old', { type: 'phases', title: 'Old phase' });
+    const odd = pair('phases-odd', { type: 'phases', title: 'Odd phase' });
+    odd.item.data = { order: 'first', itemIds: ['q1'] };
+    const dir = await seedProject({ pairs: [old, odd, pair('q1', { title: 'Who gets reminders?' })] });
+    expect((await loadTypeItems(at(dir), types, 'phases'))?.items.map((i) => i.itemRefs)).toEqual([{}, {}]);
+    expect((await loadTypeItems(at(dir), types, 'questions'))?.items.map((i) => i.itemRefs)).toEqual([{}]);
   });
 });
