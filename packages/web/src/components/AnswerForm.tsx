@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { api, type DraftInput } from '../api/client';
 import { clearPendingDraft, setPendingDraft } from '../lib/pendingDrafts';
+import { ItemDataView } from '../pages/visual/ItemDataView';
 import { Button } from './Button';
 import { DiffView } from './DiffView';
 import { inputClass } from './inputClass';
@@ -24,6 +25,38 @@ type Props = {
 
 const same = (a?: string, b?: string) => Boolean(a && b && a.trim().toLowerCase() === b.trim().toLowerCase());
 export const HOW_SENDING_WORKS = "Nothing changes until you send. An accept with no note applies the changes and resolves the thread. A note keeps it open for Claude's follow-up.";
+
+/**
+ * A change to an item's drawing: what it changes, in words, and the drawing as it would be after.
+ * `proposal` is this thread and the picked option. A mockup's frame loads the option's markup through it,
+ * because a proposal isn't stored until it's accepted.
+ */
+function DataPreview({ item, repo, project, proposal }: { item: ChangePreview['items'][number]; repo: string; project: string; proposal: { threadId: string; optionId: string } }) {
+  const [shown, setShown] = useState(false);
+  if (!item.data) return null;
+  const d = item.data;
+  return (
+    <div className="mt-1 text-[12px] text-ink-2" data-testid="data-preview">
+      <p>
+        <span className="font-medium">{item.title}</span>
+        {item.changes.length ? `: ${item.changes.map((c) => `${c.field} → ${c.after}`).join(', ')}` : ''}
+      </p>
+      <ul className="ml-4 list-disc">
+        {d.summary.map((s, i) => (
+          <li key={i}>{s}</li>
+        ))}
+      </ul>
+      <button type="button" aria-expanded={shown} onClick={() => setShown((v) => !v)} className="mt-1 text-[12px] text-slate">
+        {shown ? 'Hide proposed' : 'View proposed'}
+      </button>
+      {shown && (
+        <div className="mt-2">
+          <ItemDataView kind={d.kind} data={d.after} checks={null} repo={repo} project={project} itemId={item.itemId} compact proposal={d.kind === 'mockups' ? proposal : undefined} />
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** Radios for Claude's options, presets and Custom answer (or a plain box when there are none), a note, autosave, Park and Send. */
 export function AnswerForm(p: Props) {
@@ -204,11 +237,15 @@ export function AnswerForm(p: Props) {
           <h4 className="text-[11px] font-semibold text-ink-3">What changes if you accept</h4>
           {preview.problem && <p className="mt-1 text-[12px] text-amber">{preview.problem}</p>}
           {preview.md && <DiffView segments={preview.md} />}
-          {preview.items.map((i) => (
-            <p key={i.itemId} className="mt-1 text-[12px] text-ink-2">
-              <span className="font-medium">{i.title}</span>: {i.changes.map((c) => `${c.field} → ${c.after}`).join(', ')}
-            </p>
-          ))}
+          {preview.items.map((i) =>
+            i.data ? (
+              <DataPreview key={i.itemId} item={i} repo={p.repo} project={p.project} proposal={{ threadId: p.threadId, optionId: choice }} />
+            ) : (
+              <p key={i.itemId} className="mt-1 text-[12px] text-ink-2">
+                <span className="font-medium">{i.title}</span>: {i.changes.map((c) => `${c.field} → ${c.after}`).join(', ')}
+              </p>
+            ),
+          )}
           {!(showNote && note.trim()) && <p className="mt-1 text-[11.5px] text-ink-3">Sent with no note, this applies straight away and resolves the thread.</p>}
         </section>
       )}
