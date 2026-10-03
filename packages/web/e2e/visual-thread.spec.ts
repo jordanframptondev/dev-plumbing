@@ -117,6 +117,65 @@ test('View proposed draws the mockup an option proposes, not the saved one', asy
   await expect(page.getByTestId('item-drawing').getByTestId('mockup-frame')).toHaveAttribute('src', /\/items\/ui-settings\/mockup\/after/);
 });
 
+const SETTINGS_CARD = { location: { app: 'web', route: '/account', files: ['apps/web/app/account/page.tsx'] }, kit: 'web', after: '<section class="rounded-card p-4"><h2>Restock settings</h2></section>' };
+const withField = (label: string) => ({ ...SETTINGS_CARD, after: `<section class="rounded-card p-4"><h2>Restock settings</h2><label>${label} <input value="3"></label></section>` });
+
+/** A UI item whose thread is waiting on you, with Claude's options, each redrawing the item's After mockup. */
+async function mockupOptions(name: string, options: { id: string; label: string; field: string }[]) {
+  const card: TestItem = { key: 'settings', title: 'Restock settings card', summary: 'On the account page.', data: SETTINGS_CARD };
+  const p = await importProject(name, `Visual thread ${name}`, { ui: [card] });
+  const P = `/api/projects/${p.repo}/${p.project}`;
+  await api(`${P}/threads/t-ui-settings/draft`, 'PUT', { text: 'Can people choose when they hear?' });
+  await api(`${P}/submit`, 'POST', { scope: 'thread', threadId: 't-ui-settings' });
+  await asClaude('/wait', { repo: p.repo, project: p.project, windowId: `w-e2e-${name}`, timeoutSeconds: 0 });
+  await asClaude('/reply', {
+    repo: p.repo,
+    project: p.project,
+    threadId: 't-ui-settings',
+    text: 'A field fits under the heading.',
+    options: options.map((o) => ({ id: o.id, label: o.label, change: { items: [{ itemId: 'ui-settings', patch: { data: withField(o.field) } }] } })),
+    recommended: options[0]!.id,
+  });
+  return p;
+}
+
+test('accepting a mockup redraw updates the thread view', async ({ page }) => {
+  const p = await mockupOptions('vt-mockup-redraw', [{ id: 'days', label: 'Add a days field', field: 'Days before' }]);
+  await page.goto(`${p.url}/th/t-ui-settings`);
+  const saved = page.getByTestId('item-drawing').frameLocator('[data-testid=mockup-frame]');
+  await expect(saved.getByRole('heading', { name: 'Restock settings' })).toBeVisible();
+  await expect(saved.getByText('Days before')).toHaveCount(0);
+
+  await page.getByRole('radio', { name: /Add a days field/ }).check();
+  await page.getByRole('button', { name: 'Send this thread' }).click();
+  await expect(page.getByTestId('send-notice')).toHaveText('Applied. 1 thread resolved.');
+  // Same item, same URL, new markup: the frame shows it without a reload of the page.
+  await expect(saved.getByText('Days before')).toBeVisible();
+});
+
+test("switching proposed options doesn't trap Back", async ({ page }) => {
+  const p = await mockupOptions('vt-mockup-switch', [
+    { id: 'days', label: 'Add a days field', field: 'Days before' },
+    { id: 'weeks', label: 'Add a weeks field', field: 'Weeks before' },
+  ]);
+  // A page to go back to.
+  await page.goto(p.url);
+  await page.goto(`${p.url}/th/t-ui-settings`);
+  await page.getByRole('radio', { name: /Add a days field/ }).check();
+  const preview = page.getByRole('region', { name: 'What changes if you accept' });
+  await preview.getByRole('button', { name: 'View proposed' }).click();
+  const proposed = preview.frameLocator('[data-testid=mockup-frame]');
+  await expect(proposed.getByText('Days before')).toBeVisible();
+  const entries = await page.evaluate(() => history.length);
+
+  await page.getByRole('radio', { name: /Add a weeks field/ }).check();
+  await expect(proposed.getByText('Weeks before')).toBeVisible();
+  // Switching added no history entry, so one Back leaves the thread view.
+  expect(await page.evaluate(() => history.length)).toBe(entries);
+  await page.goBack({ timeout: 10_000 });
+  await expect(page).toHaveURL(new RegExp(`${p.url}$`));
+});
+
 test("a thread whose drawing can't be shown says why, and keeps the rest of the card", async ({ page }) => {
   const p = await importProject('vt-broken', 'Visual thread broken', { architecture: [system] });
   await writeRawData(p, 'architecture-system', { kind: 'system', nodes: [], edges: [] });

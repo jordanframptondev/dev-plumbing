@@ -4,7 +4,7 @@ import { Link } from '@tanstack/react-router';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { api } from '../../api/client';
 import { Button } from '../../components/Button';
-import { MockupFrame } from '../../components/MockupFrame';
+import { MockupFrame, markupHash } from '../../components/MockupFrame';
 import { Segmented } from '../../components/Segmented';
 import { StatusMark } from '../../components/StatusMark';
 import type { Tone } from '../../diagram/DiagramView';
@@ -17,8 +17,8 @@ import type { ScreenProps } from './VisualScreen';
 
 type Step = FlowData['steps'][number];
 type Bubbles = Record<number, { count: number; tone: Tone }>;
-/** A UI item a flow step can show: its type, title and thread, and whether it has After markup. */
-export type MockupRef = { typeId: string; title: string; threadId: string; hasAfter: boolean };
+/** A UI item a flow step can show: its type, title and thread, whether it has After markup, and that markup's hash. */
+export type MockupRef = { typeId: string; title: string; threadId: string; hasAfter: boolean; afterVersion?: string };
 type FlowViewProps = {
   flow: FlowData;
   repo: string;
@@ -53,7 +53,8 @@ export function useMockupItems(repo: string, project: string): Map<string, Mocku
   lists.forEach((q, i) => {
     for (const row of q.data?.items ?? []) {
       const parsed = parseData('mockups', row.data);
-      refs.set(row.id, { typeId: types[i]!.id, title: row.title, threadId: row.threadId, hasAfter: parsed.ok && Boolean(parsed.data.after?.trim()) });
+      const after = parsed.ok ? parsed.data.after?.trim() : undefined;
+      refs.set(row.id, { typeId: types[i]!.id, title: row.title, threadId: row.threadId, hasAfter: Boolean(after), afterVersion: after ? markupHash(after) : undefined });
     }
   });
   return refs;
@@ -102,7 +103,7 @@ function Storyboard({ flow, repo, project, selected = null, onSelect, bubbles, p
             {s.mockupId && screen?.hasAfter && (
               // The frame is drawn at phone width and scaled down; long screens are cut, not stretched.
               <div className="mt-2 max-h-[260px] overflow-hidden rounded-[8px] border-[0.5px] border-separator">
-                <MockupFrame repo={repo} project={project} itemId={s.mockupId} side="after" device="mobile" thumbnail />
+                <MockupFrame repo={repo} project={project} itemId={s.mockupId} side="after" device="mobile" version={screen.afterVersion} thumbnail />
               </div>
             )}
             {s.mockupId && screen && (

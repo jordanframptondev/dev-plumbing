@@ -6,7 +6,7 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { api } from '../../api/client';
 import { Button } from '../../components/Button';
-import { MockupFrame, type FramePin } from '../../components/MockupFrame';
+import { MockupFrame, markupHash, type FramePin } from '../../components/MockupFrame';
 import { Segmented } from '../../components/Segmented';
 import { StatusMark } from '../../components/StatusMark';
 import { AnchorForm } from './AnchorForm';
@@ -42,13 +42,6 @@ function readMockup(data: unknown): { mockup: Mockup | null; problems: string[] 
   const location = isObject(data.location) ? data.location : {};
   const files = Array.isArray(location.files) ? location.files.filter((f): f is string => typeof f === 'string') : [];
   return { mockup: { after: text(data.after), before: text(data.before), route: text(location.route), files, kit: text(data.kit) }, problems: parsed.problems };
-}
-
-/** A short fingerprint of the markup, so the frame reloads when it's redrawn. */
-function hashOf(markup: string): string {
-  let h = 5381;
-  for (let i = 0; i < markup.length; i++) h = (h * 33 + markup.charCodeAt(i)) | 0;
-  return (h >>> 0).toString(36);
 }
 
 /** "No mockup yet.": the item's own description, and a button that asks Claude to draw one. */
@@ -193,7 +186,8 @@ function ScreenView({ screen, pins, repo, project, typeId }: { screen: UiScreen;
           {markup ? (
             <div className="mt-3">
               <MockupFrame
-                key={`${side}:${hashOf(markup)}`}
+                key={`${side}:${markupHash(markup)}`}
+                version={markupHash(markup)}
                 repo={repo}
                 project={project}
                 itemId={row.id}

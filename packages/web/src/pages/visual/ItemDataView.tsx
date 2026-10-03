@@ -1,6 +1,6 @@
 import { parseData, type DataChecks, type DataKind, type MockupData } from '@dev-plumbing/core/schemas';
 import { Link } from '@tanstack/react-router';
-import { MockupFrame } from '../../components/MockupFrame';
+import { MockupFrame, markupHash } from '../../components/MockupFrame';
 import { DiagramView } from '../../diagram/DiagramView';
 import { TableCard } from './DatabaseScreen';
 import { DataProblem } from './DataProblem';
@@ -18,10 +18,14 @@ type Props = { kind: DataKind; data: unknown; checks: DataChecks | null; repo: s
 function MockupView({ data, repo, project, itemId, compact, proposal }: { data: MockupData; repo: string; project: string; itemId: string; compact?: boolean; proposal?: Proposal }) {
   const typeId = useMockupItems(repo, project).get(itemId)?.typeId;
   const where = [data.location.route, ...data.location.files].filter(Boolean).join(' · ');
+  const after = data.after?.trim();
+  // The URL stays the same when the markup is redrawn (an accepted option, a small edit, an Undo), so the markup's hash
+  // is what reloads the frame. A proposal is also told apart by its thread and option.
+  const version = after && (proposal ? `${proposal.threadId}/${proposal.optionId}/${markupHash(after)}` : markupHash(after));
   return (
     <div data-testid="mockup-view">
-      {data.after?.trim() ? (
-        <MockupFrame repo={repo} project={project} itemId={itemId} side="after" device="desktop" proposal={proposal} />
+      {after ? (
+        <MockupFrame repo={repo} project={project} itemId={itemId} side="after" device="desktop" proposal={proposal} version={version} />
       ) : (
         <p className="text-[13px] text-ink-3">No mockup yet.</p>
       )}

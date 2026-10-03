@@ -103,27 +103,33 @@ describe('MockupFrame', () => {
       const onPicked = vi.fn();
       setup({ pinMode: true, onPicked });
       const setSrc = vi.spyOn(HTMLIFrameElement.prototype, 'src', 'set');
-      fireEvent.load(frameEl());
+      const first = frameEl();
+      fireEvent.load(first);
+      expect(frameEl()).toBe(first);
+      fireEvent.load(first); // a second load: the frame went somewhere
+      // Put back as a new element, never by reassigning src, which would add a history entry that Back then walks.
+      expect(frameEl()).not.toBe(first);
+      expect(frameEl().getAttribute('src')).toBe('/api/projects/acme-app/restock/items/ui-settings/mockup/after');
       expect(setSrc).not.toHaveBeenCalled();
-      fireEvent.load(frameEl()); // a second load: the frame went somewhere
-      expect(setSrc).toHaveBeenCalledTimes(1);
-      expect(setSrc).toHaveBeenCalledWith('/api/projects/acme-app/restock/items/ui-settings/mockup/after');
+      const reset = frameEl();
+      reset.contentWindow!.postMessage = () => {};
       message({ source: 'dp-mockup', type: 'picked', selector: PIN.selector, text: 'x' });
       expect(onPicked).not.toHaveBeenCalled();
-      fireEvent.load(frameEl()); // the reset document
+      fireEvent.load(reset); // the reset document
       message({ source: 'dp-mockup', type: 'picked', selector: PIN.selector, text: 'x' });
       expect(onPicked).toHaveBeenCalledTimes(1);
-      expect(setSrc).toHaveBeenCalledTimes(1);
+      expect(frameEl()).toBe(reset);
+      expect(setSrc).not.toHaveBeenCalled();
       setSrc.mockRestore();
     });
 
     it('resets to the proposal URL in proposal mode', () => {
       render(<MockupFrame {...base} proposal={{ threadId: 't-ui-settings', optionId: 'days' }} />);
-      const setSrc = vi.spyOn(HTMLIFrameElement.prototype, 'src', 'set');
-      fireEvent.load(frameEl());
-      fireEvent.load(frameEl());
-      expect(setSrc).toHaveBeenCalledWith('/api/projects/acme-app/restock/threads/t-ui-settings/options/days/mockup/after');
-      setSrc.mockRestore();
+      const first = frameEl();
+      fireEvent.load(first);
+      fireEvent.load(first);
+      expect(frameEl()).not.toBe(first);
+      expect(frameEl().getAttribute('src')).toBe('/api/projects/acme-app/restock/threads/t-ui-settings/options/days/mockup/after');
     });
 
     it('counts loads afresh when the side or device changes', () => {
@@ -131,12 +137,94 @@ describe('MockupFrame', () => {
       fireEvent.load(frameEl());
       const setSrc = vi.spyOn(HTMLIFrameElement.prototype, 'src', 'set');
       rerender(<MockupFrame {...base} pins={[PIN]} side="before" />);
-      fireEvent.load(frameEl()); // the first load of the new document
+      const before = frameEl();
+      fireEvent.load(before); // the first load of the new document
+      expect(frameEl()).toBe(before);
       expect(setSrc).not.toHaveBeenCalled();
       // A device change keeps the same document (only its width changes), so it doesn't reload and isn't a new count.
       rerender(<MockupFrame {...base} pins={[PIN]} side="before" device="mobile" />);
       expect(frameEl().getAttribute('width')).toBe('390');
+      expect(frameEl()).toBe(before);
       setSrc.mockRestore();
+    });
+
+    it('loads a new element when the markup or the proposal changes, instead of reassigning src', () => {
+      const setSrc = vi.spyOn(HTMLIFrameElement.prototype, 'src', 'set');
+      const { rerender } = render(<MockupFrame {...base} version="a1" />);
+      const first = frameEl();
+      fireEvent.load(first);
+      rerender(<MockupFrame {...base} version="a1" />);
+      expect(frameEl()).toBe(first);
+      // The markup was redrawn: same URL, new document.
+      rerender(<MockupFrame {...base} version="b2" />);
+      const redrawn = frameEl();
+      expect(redrawn).not.toBe(first);
+      expect(redrawn.getAttribute('src')).toBe('/api/projects/acme-app/restock/items/ui-settings/mockup/after');
+      // Its first load is its first, not a navigation.
+      fireEvent.load(redrawn);
+      expect(frameEl()).toBe(redrawn);
+      // Switching proposed options is a new element too, so Back still leaves the page.
+      rerender(<MockupFrame {...base} proposal={{ threadId: 't-ui-settings', optionId: 'days' }} version="t-ui-settings/days" />);
+      const days = frameEl();
+      rerender(<MockupFrame {...base} proposal={{ threadId: 't-ui-settings', optionId: 'weeks' }} version="t-ui-settings/weeks" />);
+      expect(frameEl()).not.toBe(days);
+      expect(frameEl().getAttribute('src')).toBe('/api/projects/acme-app/restock/threads/t-ui-settings/options/weeks/mockup/after');
+      expect(setSrc).not.toHaveBeenCalled();
+      setSrc.mockRestore();
+    });
+
+    it('puts back a frame that leaves before it has loaded', () => {
+      setup();
+      const first = frameEl();
+      message({ source: 'dp-mockup', type: 'leaving' });
+      expect(frameEl()).not.toBe(first);
+    });
+
+    it('forgets earlier resets once the frame has stayed put for 5 s', () => {
+      vi.useFakeTimers();
+      try {
+        setup();
+        const blanked = () => screen.queryByText("This mockup couldn't be shown.") !== null;
+        fireEvent.load(frameEl());
+        message({ source: 'dp-mockup', type: 'leaving' }); // 1
+        fireEvent.load(frameEl());
+        message({ source: 'dp-mockup', type: 'leaving' }); // 2
+        fireEvent.load(frameEl());
+        act(() => {
+          vi.advanceTimersByTime(5_000);
+        });
+        message({ source: 'dp-mockup', type: 'leaving' }); // the third in a row, but after 5 s of calm the count started again
+        expect(blanked()).toBe(false);
+        fireEvent.load(frameEl());
+        message({ source: 'dp-mockup', type: 'leaving' });
+        fireEvent.load(frameEl());
+        message({ source: 'dp-mockup', type: 'leaving' }); // three since the calm, with none between
+        expect(blanked()).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('only counts calm time from a load, and only 5 s of it', () => {
+      vi.useFakeTimers();
+      try {
+        setup();
+        fireEvent.load(frameEl());
+        message({ source: 'dp-mockup', type: 'leaving' }); // 1, and the reset document hasn't loaded
+        act(() => {
+          vi.advanceTimersByTime(10_000); // waiting for a load isn't calm
+        });
+        fireEvent.load(frameEl());
+        act(() => {
+          vi.advanceTimersByTime(4_000);
+        });
+        message({ source: 'dp-mockup', type: 'leaving' }); // 2: four seconds isn't long enough
+        fireEvent.load(frameEl());
+        message({ source: 'dp-mockup', type: 'leaving' }); // 3
+        expect(screen.getByText("This mockup couldn't be shown.")).toBeTruthy();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('only accepts picks while pin mode is on', () => {
@@ -182,15 +270,19 @@ describe('MockupFrame', () => {
       const onPicked = vi.fn();
       setup({ pinMode: true, onPicked });
       const setSrc = vi.spyOn(HTMLIFrameElement.prototype, 'src', 'set');
-      fireEvent.load(frameEl());
+      const first = frameEl();
+      fireEvent.load(first);
       message({ source: 'dp-mockup', type: 'leaving' });
-      expect(setSrc).toHaveBeenCalledTimes(1);
+      const second = frameEl();
+      expect(second).not.toBe(first);
       message({ source: 'dp-mockup', type: 'picked', selector: PIN.selector, text: 'x' });
       expect(onPicked).not.toHaveBeenCalled();
-      fireEvent.load(frameEl());
+      fireEvent.load(second);
       message({ source: 'dp-mockup', type: 'leaving' });
-      expect(setSrc).toHaveBeenCalledTimes(2);
-      fireEvent.load(frameEl());
+      const third = frameEl();
+      expect(third).not.toBe(second);
+      expect(setSrc).not.toHaveBeenCalled();
+      fireEvent.load(third);
       expect(screen.queryByText("This mockup couldn't be shown.")).toBeNull();
       message({ source: 'dp-mockup', type: 'leaving' }); // the third in a row
       expect(screen.queryByTestId('mockup-frame')).toBeNull();

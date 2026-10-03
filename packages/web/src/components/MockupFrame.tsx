@@ -19,6 +19,11 @@ type Props = {
   thumbnail?: boolean;
   /** Show what this open option proposes instead of the saved markup. Pins and pin mode are ignored. */
   proposal?: { threadId: string; optionId: string };
+  /**
+   * A fingerprint of the markup shown (markupHash), or of the proposal. The URL doesn't change when the markup is
+   * redrawn, so a new version is what loads the new markup.
+   */
+  version?: string;
 };
 
 type FrameMessage =
@@ -39,9 +44,18 @@ const MIN_HEIGHT = 240;
 const DEVICE_HEIGHTS = { desktop: 800, mobile: 844 } as const;
 /** A frame that navigates itself is put back this many times per document before it's blanked. */
 const MAX_RESETS = 2;
+/** A frame that has stayed loaded this long without leaving has its resets forgiven. */
+const CALM_MS = 5_000;
 /** What a picked element's label and selector are cut to before the app sees them. */
 const MAX_LABEL = 60;
 const MAX_SELECTOR = 500;
+
+/** A short fingerprint of some markup, for a frame's `version`, so the frame reloads when the markup is redrawn. */
+export function markupHash(markup: string): string {
+  let h = 5381;
+  for (let i = 0; i < markup.length; i++) h = (h * 33 + markup.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
 
 /**
  * One side of a UI item's mockup. The frame is sandboxed with scripts but without same-origin, so its document has an
@@ -60,10 +74,14 @@ export function MockupFrame(p: Props) {
   const loads = useRef(0);
   /** True from a self-navigation until the reset document loads: nothing the frame says counts meanwhile. */
   const navigated = useRef(false);
-  /** The ids the frame was last given pins for. It may open only these. */
-  /** How many times this document has been put back after navigating. */
+  /** How many times this document has been put back after navigating, since it last stayed put for CALM_MS. */
   const resets = useRef(0);
+  /** Forgives the resets once the frame has stayed loaded for CALM_MS. */
+  const calm = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  /** Bumped to put the frame back: the iframe is a new element, never the old one with its src reassigned. */
+  const [generation, setGeneration] = useState(0);
   const [broken, setBroken] = useState(false);
+  /** The ids the frame was last given pins for. It may open only these. */
   const sentPins = useRef<Set<string>>(new Set());
   const [visible, setVisible] = useState(!p.thumbnail || typeof IntersectionObserver === 'undefined');
   const width = p.thumbnail ? WIDTHS.mobile : WIDTHS[p.device];
@@ -75,8 +93,12 @@ export function MockupFrame(p: Props) {
   // Only a saved mockup shown full size takes pins.
   const pinnable = !p.thumbnail && !p.proposal;
 
-  const srcRef = useRef(src);
-  srcRef.current = src;
+  /**
+   * The iframe element's identity. A new src, version or reset mounts a new element, whose first load replaces its
+   * about:blank and adds no history entry; reassigning an existing frame's src would add one, and Back would then walk
+   * the frame instead of leaving the page. A replaced element's window also stops passing the message source check.
+   */
+  const frameKey = `${src}|${p.version ?? ''}|${generation}`;
 
   // A new document starts unmeasured, and isn't ready for messages until it loads.
   useEffect(() => {
@@ -86,13 +108,16 @@ export function MockupFrame(p: Props) {
     navigated.current = false;
     sentPins.current = new Set();
     resets.current = 0;
+    clearTimeout(calm.current);
     setBroken(false);
-  }, [src, visible]);
+  }, [src, visible, p.version]);
+  useEffect(() => () => clearTimeout(calm.current), []);
 
   // A sandbox and a CSP can't stop a frame navigating itself. The document says when it's leaving, and any load after
   // the first means it went somewhere. Either way: put it back, ignore it until the reset document has loaded, and
   // blank a frame that keeps doing it.
   const navigatedAway = () => {
+    clearTimeout(calm.current);
     navigated.current = true;
     loads.current = 0;
     sentPins.current = new Set();
@@ -102,7 +127,7 @@ export function MockupFrame(p: Props) {
       setBroken(true);
       return;
     }
-    if (frame.current) frame.current.src = srcRef.current;
+    setGeneration((g) => g + 1);
   };
   const onFrameLoad = () => {
     if (!visible) return;
@@ -110,6 +135,11 @@ export function MockupFrame(p: Props) {
     if (loads.current === 1) {
       navigated.current = false;
       setLoaded(true);
+      // Resets decay: a frame that then stays put for CALM_MS (a back/forward-cache restore, say) starts its count again.
+      clearTimeout(calm.current);
+      calm.current = setTimeout(() => {
+        resets.current = 0;
+      }, CALM_MS);
       return;
     }
     navigatedAway();
@@ -148,9 +178,10 @@ export function MockupFrame(p: Props) {
         setHeight(Math.max(1, Math.ceil(m.height)));
         return;
       }
-      // Before the first load, a "leaving" is the previous document going away because we changed the src.
+      // A src is never reassigned and a replaced element's window fails the source check above, so every "leaving"
+      // that gets here is this document really navigating, even before its first load.
       if (m.type === 'leaving') {
-        if (loads.current > 0) navigatedAway();
+        navigatedAway();
         return;
       }
       if (now.thumbnail || now.proposal) return;
@@ -191,6 +222,7 @@ export function MockupFrame(p: Props) {
         style={{ width: Math.round(width * scale), maxWidth: '100%', height: Math.round(shown * scale), pointerEvents: p.thumbnail ? 'none' : undefined }}
       >
         <iframe
+          key={frameKey}
           ref={frame}
           data-testid="mockup-frame"
           title={`${p.side === 'after' ? 'After' : 'Before'} mockup`}
