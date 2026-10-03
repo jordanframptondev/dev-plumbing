@@ -1,4 +1,5 @@
 import type { TypeEntry, TypeItemRow } from '@dev-plumbing/core/schemas';
+import { DatabaseScreen } from './DatabaseScreen';
 import { DiagramScreen } from './DiagramScreen';
 import { OtherItems } from './OtherItems';
 
@@ -26,6 +27,8 @@ function ScreenBody(p: ScreenProps) {
     // Each screen adds its case here as it lands.
     case 'diagram':
       return <DiagramScreen {...p} />;
+    case 'database':
+      return <DatabaseScreen {...p} />;
     default:
       // Screens that aren't drawn yet list their items as rows.
       return <OtherItems rows={p.data.items} repo={p.repo} project={p.project} />;
