@@ -1,6 +1,7 @@
 import type { TypeEntry, TypeItemRow } from '@dev-plumbing/core/schemas';
 import { DatabaseScreen } from './DatabaseScreen';
 import { DiagramScreen } from './DiagramScreen';
+import { FlowsScreen } from './FlowsScreen';
 import { MockupsScreen } from './MockupsScreen';
 import { OtherItems } from './OtherItems';
 
@@ -32,6 +33,8 @@ function ScreenBody(p: ScreenProps) {
       return <DatabaseScreen {...p} />;
     case 'mockups':
       return <MockupsScreen {...p} />;
+    case 'flows':
+      return <FlowsScreen {...p} />;
     default:
       // Screens that aren't drawn yet list their items as rows.
       return <OtherItems rows={p.data.items} repo={p.repo} project={p.project} />;
