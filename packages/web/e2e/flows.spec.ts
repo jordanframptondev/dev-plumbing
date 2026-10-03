@@ -136,6 +136,27 @@ test('asking about a step starts a thread, and the step shows a bubble', async (
   await expect(page).toHaveURL(/\/th\/t-flows-about-step-2-skip-paused-customers$/);
 });
 
+test('a thread about a removed step stays listed as not in this version', async ({ page }) => {
+  const p = await importProject('flows-gone', 'Flows gone', { flows: [system] });
+  await page.goto(`${p.url}/t/flows`);
+  await flowFor(page, 'Daily reminder job').getByRole('button', { name: 'Step 2: Skip paused customers' }).click();
+  await flowFor(page, 'Daily reminder job').getByTestId('step-panel').getByRole('button', { name: 'Ask about this step' }).click();
+  await page.getByRole('textbox', { name: 'Your message' }).fill('Should paused customers get a note instead?');
+  await page.getByRole('button', { name: 'Add and send' }).click();
+  await expect(page).toHaveURL(/\/th\/t-flows-about-step-2-skip-paused-customers$/);
+
+  // Claude rewrites the flow without step 2.
+  const without = { ...system.data, steps: (system.data.steps as { n: number }[]).filter((s) => s.n !== 2) };
+  writeRawData(p, 'flows-daily-job', without);
+  await page.goto(`${p.url}/t/flows`);
+  const flow = flowFor(page, 'Daily reminder job');
+  await expect(flow.getByTestId('sequence-step')).toHaveCount(2);
+  const gone = flow.getByRole('listitem').filter({ hasText: 'Not in this version' });
+  await expect(gone).toHaveCount(1);
+  await gone.getByRole('link', { name: 'About Step 2: Skip paused customers' }).click();
+  await expect(page).toHaveURL(/\/th\/t-flows-about-step-2-skip-paused-customers$/);
+});
+
 test("a flow that can't be drawn doesn't hide the others", async ({ page }) => {
   const p = await importProject('flows-broken', 'Flows broken', { ui, flows: [user, system] });
   await writeRawData(p, 'flows-reorder', { kind: 'user', steps: [] });
