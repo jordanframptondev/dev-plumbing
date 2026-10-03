@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { configPath, E2E_PORT, e2eTmp } from './env';
+import { configPath, E2E_PORT, e2eTmp, readJson } from './env';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -30,10 +30,27 @@ export type TestItem = {
   key: string;
   title: string;
   summary: string;
+  body?: string;
   fields?: Record<string, string>;
+  codeRefs?: { path: string; symbol?: string }[];
   links?: string[];
+  data?: unknown;
   message?: { text: string; options?: { id: string; label: string; detail?: string; change?: unknown }[]; recommended?: string };
 };
+
+type ProjectId = { repo: string; project: string };
+/** An item's file in the e2e projects folder. */
+const itemFile = (p: ProjectId, itemId: string) => path.join(readJson('settings.json').projectsFolder, p.repo, p.project, 'items', `${itemId}.json`);
+/** Reads an item file as it is on disk. */
+export const rawItem = (p: ProjectId, itemId: string): Json => JSON.parse(fs.readFileSync(itemFile(p, itemId), 'utf8'));
+/**
+ * Replaces an item's data straight on disk, skipping the write checks, to stand in for a project made before
+ * Plan 3 or data that doesn't fit. Only tests do this: the service is the only writer of the projects folder.
+ * `undefined` removes the data.
+ */
+export function writeRawData(p: ProjectId, itemId: string, data: unknown) {
+  fs.writeFileSync(itemFile(p, itemId), JSON.stringify({ ...rawItem(p, itemId), data }, null, 2));
+}
 
 export const PLAN_TEXT = (title: string) => `# ${title}\n\nRemind customers before an item runs out.\n\n## Data\n\nLog reminders in a table.\n\n## Channels\n\nSend by SMS.\n`;
 

@@ -3,7 +3,8 @@ import path from 'node:path';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { installDefaults, loadConfig } from '../src/config';
 import { writeDemoProjects } from '../src/demo';
-import { defaultSettings, repoProfileSchema } from '../src/schemas';
+import { dataKindOf, dataProblems, defaultSettings, parseData, repoProfileSchema } from '../src/schemas';
+import { readItems } from '../src/store/io';
 import {
   discoverProjects,
   findProjects,
@@ -49,6 +50,30 @@ describe('project store', () => {
 
   it('does not overwrite a demo project that already exists', async () => {
     expect(await writeDemoProjects(root, NOW)).toEqual([]);
+  });
+
+  it('gives the demo drawings data that fits their screens', async () => {
+    const types = await defaultTypes();
+    const drawn: string[] = [];
+    for (const [repo, id] of [['acme', 'restock-reminders'], ['acme', 'onboarding-emails'], ['beta', 'checkout-redesign']] as const) {
+      const { values: items } = await readItems(path.join(root, repo, id));
+      const ctx = { itemIds: new Set(items.map((i) => i.id)), mockupItemIds: new Set(items.filter((i) => i.type === 'ui').map((i) => i.id)) };
+      for (const item of items.filter((i) => i.data !== undefined)) {
+        const kind = dataKindOf(types.find((t) => t.id === item.type)!);
+        expect(kind, item.id).not.toBeNull();
+        expect(parseData(kind!, item.data).ok, item.id).toBe(true);
+        expect(dataProblems(kind, item.data, ctx), item.id).toEqual([]);
+        drawn.push(`${id}/${item.id}`);
+      }
+    }
+    expect(drawn.sort()).toEqual([
+      'checkout-redesign/item-f',
+      'restock-reminders/item-a1',
+      'restock-reminders/item-db1',
+      'restock-reminders/item-p1',
+      'restock-reminders/item-p2',
+      'restock-reminders/item-ui1',
+    ]);
   });
 
   it('counts threads per status', async () => {

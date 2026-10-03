@@ -37,7 +37,7 @@ export function ProjectNav({ home, repo, project, onNavigate }: { home: ProjectH
         >
           <span className="min-w-0 truncate">{t.title}</span>
           <span className="ml-auto inline-flex shrink-0 items-center text-[11px] text-ink-3">
-            {t.noChanges ? 'No changes' : <StatusMark status={typeStatus(t)} />}
+            {t.noChanges ? (t.importFailed ? "Didn't finish" : 'No changes') : <StatusMark status={typeStatus(t)} />}
           </span>
         </Link>
       ))}

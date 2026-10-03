@@ -3,7 +3,7 @@ import path from 'node:path';
 import { writeFileAtomic, writeJsonAtomic } from './atomic';
 import type { ThreadStatus } from './schemas';
 
-type DemoThread = { id: string; type: string; title: string; summary: string; status: ThreadStatus; blocking?: boolean; claude?: string; you?: string; draft?: string };
+type DemoThread = { id: string; type: string; title: string; summary: string; status: ThreadStatus; blocking?: boolean; claude?: string; you?: string; draft?: string; data?: unknown };
 type DemoProject = {
   repo: string;
   id: string;
@@ -20,6 +20,114 @@ type DemoProject = {
 
 const DAY = 24 * 60;
 
+// The demo's drawings, in the shapes of core/src/schemas/data.ts. The demo has no clone, so its table says "Not checked".
+const SYSTEM_VIEW = {
+  kind: 'system',
+  groups: [
+    { id: 'web', label: 'Web app' },
+    { id: 'jobs', label: 'Jobs' },
+    { id: 'data', label: 'Database' },
+  ],
+  nodes: [
+    { id: 'settings', label: 'Reminder settings card', group: 'web', status: 'new' },
+    { id: 'reorder', label: 'Reorder link', group: 'web', status: 'new' },
+    { id: 'job', label: 'Daily reminder job', group: 'jobs', status: 'new' },
+    { id: 'notify', label: 'Notification sender', group: 'jobs', status: 'changed' },
+    { id: 'subscriptions', label: 'Subscription', group: 'data', status: 'changed' },
+    { id: 'reminders', label: 'RestockReminder', group: 'data', status: 'new' },
+    { id: 'orders', label: 'Order', group: 'data', status: 'unchanged' },
+    { id: 'sms', label: 'SMS provider', status: 'external' },
+    { id: 'email', label: 'Email provider', status: 'external' },
+  ],
+  edges: [
+    { id: 'saves', from: 'settings', to: 'subscriptions', label: 'saves lead time' },
+    { id: 'finds', from: 'job', to: 'subscriptions', label: 'finds due' },
+    { id: 'logs', from: 'job', to: 'reminders', label: 'logs' },
+    { id: 'hands-off', from: 'job', to: 'notify' },
+    { id: 'texts', from: 'notify', to: 'sms', style: 'dashed' },
+    { id: 'emails', from: 'notify', to: 'email', style: 'dashed' },
+    { id: 'reorders', from: 'reorder', to: 'orders', label: 'creates' },
+  ],
+};
+
+const REMINDER_TABLE = {
+  model: 'RestockReminder',
+  change: 'new',
+  fields: [
+    { name: 'id', type: 'String', change: 'added', default: 'cuid()' },
+    { name: 'subscriptionId', type: 'String', change: 'added' },
+    { name: 'subscription', type: 'Subscription', change: 'added', note: 'The subscription it reminds about.' },
+    { name: 'channel', type: 'String', change: 'added', note: 'sms or email' },
+    { name: 'sentAt', type: 'DateTime', change: 'added', default: 'now()' },
+  ],
+  schemaDiff: [
+    '+model RestockReminder {',
+    '+  id             String       @id @default(cuid())',
+    '+  subscriptionId String',
+    '+  subscription   Subscription @relation(fields: [subscriptionId], references: [id])',
+    '+  channel        String',
+    '+  sentAt         DateTime     @default(now())',
+    '+',
+    '+  @@index([subscriptionId])',
+    '+}',
+  ].join('\n'),
+  migration: [
+    { kind: 'additive', text: 'Create the RestockReminder table and its index.' },
+    { kind: 'rollback', text: 'Drop the RestockReminder table. Nothing else depends on it.' },
+  ],
+};
+
+const ACCOUNT_TODAY = `<main class="mx-auto max-w-2xl p-6">
+  <h1 class="text-2xl font-semibold">Account</h1>
+  <section class="mt-6 rounded-xl border p-5">
+    <h2 class="font-medium">Delivery address</h2>
+    <p class="mt-1 text-sm opacity-70">12 Harbour Road, Acmeville</p>
+  </section>
+</main>`;
+
+const ACCOUNT_WITH_REMINDERS = `<main class="mx-auto max-w-2xl p-6">
+  <h1 class="text-2xl font-semibold">Account</h1>
+  <section class="mt-6 rounded-xl border p-5">
+    <h2 class="font-medium">Delivery address</h2>
+    <p class="mt-1 text-sm opacity-70">12 Harbour Road, Acmeville</p>
+  </section>
+  <section class="mt-4 rounded-xl border p-5">
+    <div class="flex items-center justify-between">
+      <h2 class="font-medium">Restock reminders</h2>
+      <span class="rounded-full border px-3 py-1 text-xs">On</span>
+    </div>
+    <p class="mt-1 text-sm opacity-70">We'll remind you before an item runs out.</p>
+    <label class="mt-4 flex items-center gap-2 text-sm">Remind me
+      <select class="rounded border px-2 py-1"><option>5 days</option><option>3 days</option></select>
+      before
+    </label>
+  </section>
+</main>`;
+
+const SETTINGS_MOCKUP = {
+  location: { app: 'web', route: '/account', files: ['apps/web/app/account/page.tsx'] },
+  kit: 'web',
+  after: ACCOUNT_WITH_REMINDERS,
+  before: ACCOUNT_TODAY,
+};
+
+const PAYMENT_FLOW = {
+  kind: 'both',
+  lanes: [
+    { id: 'shopper', label: 'Shopper', status: 'unchanged' },
+    { id: 'checkout', label: 'Checkout page', status: 'changed' },
+    { id: 'orders', label: 'Orders API', status: 'unchanged' },
+    { id: 'payments', label: 'Payment provider', status: 'external' },
+  ],
+  steps: [
+    { n: 1, from: 'shopper', to: 'checkout', label: 'Enters the delivery address' },
+    { n: 2, from: 'checkout', to: 'orders', label: 'Saves the address', systemNote: 'The order is created as a draft.' },
+    { n: 3, from: 'shopper', to: 'checkout', label: 'Enters card details' },
+    { n: 4, from: 'checkout', to: 'payments', label: 'Confirms the payment' },
+    { n: 5, from: 'orders', to: 'orders', label: 'Marks the order paid', systemNote: 'When the payment webhook arrives.' },
+  ],
+};
+
 const projects: DemoProject[] = [
   {
     repo: 'acme',
@@ -33,12 +141,14 @@ const projects: DemoProject[] = [
     draft: '# Restock reminders\n\nRemind customers before a subscription item runs out, and let them reorder in one tap.\n\n## Approach\n\nA daily job finds subscriptions due in the next few days and sends a reminder.\n\nReminders go out by SMS and email.\n',
     threads: [
       { id: 'q1', type: 'questions', title: 'Who gets reminders at launch?', summary: 'Everyone, or only active subscribers?', status: 'your_turn', blocking: true, claude: "I'd start with active subscribers only: a smaller blast radius." },
-      { id: 'db1', type: 'database', title: 'One row per send, or per subscription?', summary: 'How often a RestockReminder row is written.', status: 'your_turn', claude: 'Per send keeps history for support. Per subscription is simpler.' },
-      { id: 'ui1', type: 'ui', title: 'Reminder settings card', summary: 'A new card on the account settings page.', status: 'your_turn', claude: 'Should the toggle sit above or below the schedule?', draft: 'Put it above the schedule.' },
+      { id: 'db1', type: 'database', title: 'One row per send, or per subscription?', summary: 'How often a RestockReminder row is written.', status: 'your_turn', claude: 'Per send keeps history for support. Per subscription is simpler.', data: REMINDER_TABLE },
+      { id: 'ui1', type: 'ui', title: 'Reminder settings card', summary: 'A new card on the account settings page.', status: 'your_turn', claude: 'Should the toggle sit above or below the schedule?', draft: 'Put it above the schedule.', data: SETTINGS_MOCKUP },
       { id: 'c1', type: 'concerns', title: 'Rate-limit reminder sends', summary: 'Stop a burst of sends if the job runs twice.', status: 'with_claude', claude: 'A second run on the same day could send twice.', you: 'What stops that?' },
       { id: 'q2', type: 'questions', title: 'Which channels?', summary: 'SMS, email or both.', status: 'resolved', claude: 'SMS, email or both?', you: 'Both.' },
       { id: 'i1', type: 'ideas', title: 'Snooze a reminder by 2 days', summary: 'Let customers push a reminder back.', status: 'parked', claude: 'Customers could snooze a reminder for two days.' },
-      { id: 'a1', type: 'architecture', title: 'System view', summary: 'Daily job, notifications and the orders table.', status: 'idle' },
+      { id: 'a1', type: 'architecture', title: 'System view', summary: 'Daily job, notifications and the orders table.', status: 'idle', data: SYSTEM_VIEW },
+      { id: 'p1', type: 'phases', title: 'Send the first reminders', summary: 'The daily job, its table and the sends.', status: 'idle', data: { order: 1, goal: 'Reminders go out by SMS and email before an item runs out.', doneWhen: ['The daily job runs in production', 'Support can see every reminder sent'], itemIds: ['item-a1', 'item-db1'] } },
+      { id: 'p2', type: 'phases', title: 'Reorder in one tap', summary: 'The settings card and the reorder link.', status: 'idle', data: { order: 2, goal: 'Customers turn reminders on and reorder from them in one tap.', doneWhen: ['The settings card is live', 'Each reminder links straight to reorder'], itemIds: ['item-ui1'] } },
     ],
   },
   {
@@ -71,7 +181,7 @@ const projects: DemoProject[] = [
     threads: [
       { id: 'q', type: 'questions', title: 'Keep guest checkout?', summary: 'Guest checkout or accounts only.', status: 'your_turn', blocking: true, claude: 'Guest checkout lifts conversion but complicates order history.' },
       { id: 'c', type: 'concerns', title: 'Card form accessibility', summary: 'Screen reader labels on the card form.', status: 'your_turn', claude: 'The new card form has no visible labels.' },
-      { id: 'f', type: 'flows', title: 'Payment step order', summary: 'Address before payment.', status: 'resolved', claude: 'Address first, then payment?', you: 'Yes.' },
+      { id: 'f', type: 'flows', title: 'Payment step order', summary: 'Address before payment.', status: 'resolved', claude: 'Address first, then payment?', you: 'Yes.', data: PAYMENT_FLOW },
     ],
   },
 ];
@@ -91,7 +201,7 @@ export async function writeDemoProjects(root: string, now: Date = new Date()): P
       const itemId = `item-${t.id}`;
       const threadId = `thread-${t.id}`;
       await writeJsonAtomic(path.join(dir, 'items', `${itemId}.json`), {
-        id: itemId, type: t.type, title: t.title, summary: t.summary, fields: t.blocking ? { blocking: 'true' } : {}, threadId, createdBy: 'import',
+        id: itemId, type: t.type, title: t.title, summary: t.summary, fields: t.blocking ? { blocking: 'true' } : {}, ...(t.data !== undefined ? { data: t.data } : {}), threadId, createdBy: 'import',
       });
       const messages: { id: string; at: string; author: 'claude' | 'you'; text: string }[] = [];
       if (t.claude) messages.push({ id: `${t.id}-1`, at: at(p.ageMinutes + 60), author: 'claude', text: t.claude });

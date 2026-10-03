@@ -15,7 +15,14 @@ const rootRoute = createRootRoute({ component: Root, notFoundComponent: () => <P
 const indexRoute = createRoute({ getParentRoute: () => rootRoute, path: '/', component: AppHome });
 const projectRoute = createRoute({ getParentRoute: () => rootRoute, path: '/p/$repo/$project', component: ProjectLayout });
 const inboxRoute = createRoute({ getParentRoute: () => projectRoute, path: '/', component: InboxView });
-const typeRoute = createRoute({ getParentRoute: () => projectRoute, path: 't/$type', component: TypeView });
+/** `?item=` opens one item on a visual screen: a diagram, a table, a UI screen or a flow. */
+type TypeSearch = { item?: string };
+const typeRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: 't/$type',
+  component: TypeView,
+  validateSearch: (search: Record<string, unknown>): TypeSearch => (typeof search.item === 'string' && search.item ? { item: search.item } : {}),
+});
 const threadRoute = createRoute({ getParentRoute: () => projectRoute, path: 'th/$thread', component: ThreadView });
 const docRoute = createRoute({ getParentRoute: () => projectRoute, path: 'd/$doc', component: DocumentView });
 const settingsRoute = createRoute({ getParentRoute: () => rootRoute, path: '/settings', component: SettingsPage });
