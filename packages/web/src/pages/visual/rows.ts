@@ -55,15 +55,17 @@ export const itemAnchorId = (itemId: string) => `item-${itemId}`;
 /** From this width a screen's panel sits beside or after its drawing. Narrower, it opens under what you tapped. */
 const WIDE = '(min-width: 1100px)';
 const wideNow = () => (typeof window.matchMedia === 'function' ? window.matchMedia(WIDE).matches : window.innerWidth >= 1100);
+/** One function for every render, so React subscribes once rather than on each render. */
+const onWideChange = (onChange: () => void) => {
+  if (typeof window.matchMedia !== 'function') return () => {};
+  const mq = window.matchMedia(WIDE);
+  mq.addEventListener('change', onChange);
+  return () => mq.removeEventListener('change', onChange);
+};
 
 /** Whether the window is 1100 px or wider, kept up to date as it resizes. */
 export function useWide(): boolean {
-  return useSyncExternalStore((onChange) => {
-    if (typeof window.matchMedia !== 'function') return () => {};
-    const mq = window.matchMedia(WIDE);
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, wideNow);
+  return useSyncExternalStore(onWideChange, wideNow);
 }
 
 /**
