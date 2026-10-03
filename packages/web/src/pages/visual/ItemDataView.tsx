@@ -1,6 +1,7 @@
 import { parseData, type DataChecks, type DataKind } from '@dev-plumbing/core/schemas';
 import { Link } from '@tanstack/react-router';
-import { MockupFrame, markupHash } from '../../components/MockupFrame';
+import { useState } from 'react';
+import { deviceForWindow, MockupFrame, markupHash } from '../../components/MockupFrame';
 import { DiagramView } from '../../diagram/DiagramView';
 import { TableCard } from './DatabaseScreen';
 import { DataProblem } from './DataProblem';
@@ -35,6 +36,8 @@ function MockupView({
   proposal?: Proposal;
 }) {
   const typeId = useMockupItems(repo, project).get(itemId)?.typeId;
+  // Phone width on a phone, as UI changes picks it.
+  const [device] = useState(deviceForWindow);
   const where = [mockup.route, ...mockup.files].filter(Boolean).join(' · ');
   const after = mockup.after?.trim();
   // The URL stays the same when the markup is redrawn (an accepted option, a small edit, an Undo), so the markup's hash
@@ -43,7 +46,7 @@ function MockupView({
   return (
     <div data-testid="mockup-view">
       {after ? (
-        <MockupFrame repo={repo} project={project} itemId={itemId} side="after" device="desktop" proposal={proposal} version={version} />
+        <MockupFrame repo={repo} project={project} itemId={itemId} side="after" device={device} proposal={proposal} version={version} />
       ) : (
         <p className="text-[13px] text-ink-3">No mockup yet.</p>
       )}

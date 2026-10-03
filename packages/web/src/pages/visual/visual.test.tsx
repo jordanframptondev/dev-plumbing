@@ -107,6 +107,20 @@ describe('ItemDataView', () => {
     expect(screen.queryByTestId('mockup-problems')).toBeNull();
   });
 
+  it('draws the mockup at phone width on a phone, as UI changes does', () => {
+    try {
+      vi.stubGlobal('innerWidth', 375);
+      view(mockup('<section class="p-4"><h2>Restock settings</h2></section>'));
+      expect(screen.getByTestId('mockup-frame').getAttribute('width')).toBe('390');
+      cleanup();
+      vi.stubGlobal('innerWidth', 1280);
+      view(mockup('<section class="p-4"><h2>Restock settings</h2></section>'));
+      expect(screen.getByTestId('mockup-frame').getAttribute('width')).toBe('1280');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("says why when there's no markup to draw", () => {
     view({ location: 'nowhere', after: 42 });
     expect(screen.getByTestId('data-problem')).toBeTruthy();

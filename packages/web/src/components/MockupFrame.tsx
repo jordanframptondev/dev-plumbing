@@ -3,13 +3,17 @@ import { mockupUrl, proposalMockupUrl } from '../api/client';
 import type { Tone } from '../diagram/DiagramView';
 
 export type FramePin = { id: string; selector: string; n: number; tone: Tone };
+export type Device = 'desktop' | 'mobile';
+
+/** The device a mockup first shows as: mobile on a phone-sized window (under 768 px), desktop otherwise. */
+export const deviceForWindow = (): Device => (window.innerWidth < 768 ? 'mobile' : 'desktop');
 
 type Props = {
   repo: string;
   project: string;
   itemId: string;
   side: 'after' | 'before';
-  device: 'desktop' | 'mobile';
+  device: Device;
   pins?: FramePin[];
   pinMode?: boolean;
   onPicked?: (pick: { selector: string; text: string }) => void;

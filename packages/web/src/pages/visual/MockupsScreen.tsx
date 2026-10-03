@@ -6,7 +6,7 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { api } from '../../api/client';
 import { Button } from '../../components/Button';
-import { MockupFrame, markupHash, type FramePin } from '../../components/MockupFrame';
+import { deviceForWindow, MockupFrame, markupHash, type Device, type FramePin } from '../../components/MockupFrame';
 import { Segmented } from '../../components/Segmented';
 import { StatusMark } from '../../components/StatusMark';
 import { AnchorForm } from './AnchorForm';
@@ -16,7 +16,6 @@ import { anchorsOn, toneOf } from './rows';
 import type { ScreenProps } from './VisualScreen';
 
 type Side = 'after' | 'before';
-type Device = 'desktop' | 'mobile';
 export type Mockup = { after: string | null; before: string | null; route: string | null; files: string[]; kit: string | null };
 type UiScreen = { row: TypeItemRow; mockup: Mockup | null; problems: string[] };
 
@@ -85,7 +84,7 @@ function NoMockup({ row, repo, project }: { row: TypeItemRow; repo: string; proj
 function ScreenView({ screen, pins, repo, project, typeId }: { screen: UiScreen; pins: TypeItemRow[]; repo: string; project: string; typeId: string }) {
   const { row, mockup, problems } = screen;
   const navigate = useNavigate();
-  const [device, setDevice] = useState<Device>(() => (window.innerWidth < 768 ? 'mobile' : 'desktop'));
+  const [device, setDevice] = useState<Device>(deviceForWindow);
   const [side, setSide] = useState<Side>(mockup?.after || !mockup?.before ? 'after' : 'before');
   const [pinMode, setPinMode] = useState(false);
   const [anchor, setAnchor] = useState<Anchor | null>(null);
