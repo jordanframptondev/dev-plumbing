@@ -83,6 +83,21 @@ describe('DiagramView', () => {
     for (const s of ['new', 'changed', 'unchanged', 'external']) expect(swatch(s).fill).toBe('none');
   }, 15_000);
 
+  it('is never drawn wider than its layout, so a small diagram keeps its size and sits centred', async () => {
+    vi.mocked(layout.layoutDiagram).mockClear();
+    render(<DiagramView data={data} />);
+    await screen.findAllByTestId('diagram-node', {}, { timeout: 10_000 });
+    const laidOut = await vi.mocked(layout.layoutDiagram).mock.results.at(-1)!.value;
+    const svg = document.querySelector('figure > svg') as SVGElement;
+    expect(laidOut.width).toBeGreaterThan(0);
+    expect(svg.style.maxWidth).toBe(`${laidOut.width}px`);
+    // It still shrinks to fit a narrow column, and pinch-zooms.
+    expect(svg.getAttribute('width')).toBe('100%');
+    expect(svg.getAttribute('viewBox')).toBe(`0 0 ${laidOut.width} ${laidOut.height}`);
+    expect(svg.style.touchAction).toBe('pan-x pan-y pinch-zoom');
+    expect(svg.classList.contains('mx-auto')).toBe(true);
+  }, 15_000);
+
   it("says the drawing couldn't be shown, with the reason, when the layout fails", async () => {
     vi.mocked(layout.layoutDiagram).mockRejectedValueOnce(new Error('boom'));
     render(<DiagramView data={data} />);

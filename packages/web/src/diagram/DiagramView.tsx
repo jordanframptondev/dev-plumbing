@@ -92,11 +92,12 @@ export function DiagramView({
       ) : !drawn ? (
         <p className="py-6 text-[12.5px] text-ink-3">Drawing…</p>
       ) : (
+        // Never wider than the layout: a small diagram keeps its own size, centred, instead of being scaled up.
         <svg
           viewBox={`0 0 ${drawn.layout.width} ${drawn.layout.height}`}
           width="100%"
-          className="block"
-          style={{ touchAction: 'pan-x pan-y pinch-zoom', maxHeight: compact ? 360 : undefined }}
+          className="mx-auto block"
+          style={{ maxWidth: drawn.layout.width, touchAction: 'pan-x pan-y pinch-zoom', maxHeight: compact ? 360 : undefined }}
         >
           <defs>
             <marker id={arrow} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
