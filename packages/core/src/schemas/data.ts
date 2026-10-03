@@ -169,22 +169,28 @@ function tableProblems(t: TableDiff): string[] {
 /** Each distinct tag name the pattern finds, lowercased. */
 const tagsIn = (markup: string, pattern: RegExp) => [...new Set([...markup.matchAll(pattern)].map((m) => m[1].toLowerCase()))];
 
+/** The order outside-file problems are listed in. Hrefs on SVG <image> and <use> come last, as they appear. */
+const CAUSE_ORDER = ['a src or srcset', 'a poster'];
+
 /**
- * Whether the markup loads a file from another site: a src, srcset or poster attribute, or an href on SVG <image> or <use>.
- * Entity-encoded URLs (&#104;ttp...) are left to the frame's CSP, which is the real guard.
+ * What in the markup loads a file from another site, named for the message: a src or srcset, a poster, or an href on
+ * SVG <image> or <use>. Each cause once. Entity-encoded URLs (&#104;ttp...) are left to the frame's CSP, which is the
+ * real guard.
  */
-function loadsOutsideFiles(markup: string): boolean {
+function outsideFileCauses(markup: string): string[] {
+  const causes = new Set<string>();
   // Not preceded by a word character or dash, so data-src stays allowed and `<img/src=...>` is caught.
-  for (const m of markup.matchAll(/(?<![\w-])(?:src|srcset|poster)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
-    const value = (m[1] ?? m[2] ?? m[3] ?? '').trim();
-    if (/(?:^|[\s,])(?:https?:|\/\/)/i.test(value)) return true;
+  for (const m of markup.matchAll(/(?<![\w-])(src|srcset|poster)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
+    const value = (m[2] ?? m[3] ?? m[4] ?? '').trim();
+    if (/(?:^|[\s,])(?:https?:|\/\/)/i.test(value)) causes.add(m[1].toLowerCase() === 'poster' ? 'a poster' : 'a src or srcset');
   }
-  for (const tag of markup.matchAll(/<(?:image|use)\b[^>]*>/gi)) {
+  for (const tag of markup.matchAll(/<(image|use)\b[^>]*>/gi)) {
     for (const m of tag[0].matchAll(/(?<![\w-])href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
-      if (/^\s*(?:https?:|\/\/)/i.test(m[1] ?? m[2] ?? m[3] ?? '')) return true;
+      if (/^\s*(?:https?:|\/\/)/i.test(m[1] ?? m[2] ?? m[3] ?? '')) causes.add(`an href on an SVG <${tag[1].toLowerCase()}>`);
     }
   }
-  return false;
+  const rank = (cause: string) => (CAUSE_ORDER.includes(cause) ? CAUSE_ORDER.indexOf(cause) : CAUSE_ORDER.length);
+  return [...causes].sort((a, b) => rank(a) - rank(b));
 }
 
 /** Mockup markup is body markup that draws with the kit and nothing else: no scripts, no page tags, nothing loaded. */
@@ -196,8 +202,8 @@ function markupProblems(side: 'after' | 'before', markup: string): string[] {
   // <template> too: a declarative shadow root (shadowrootmode) can hide a link from the frame's click guard.
   if (/<template\b/i.test(markup)) problems.push(`${side}: remove the <template> tags. Mockups can't use <template> elements.`);
   for (const tag of tagsIn(markup, /<(link|iframe|object|embed)\b/gi)) problems.push(`${side}: remove the <${tag}> tag. Mockups can't load or embed other files.`);
-  if (loadsOutsideFiles(markup)) {
-    problems.push(`${side}: a src or srcset points at another site. Use inline SVG or plain boxes for images; outside files don't load in mockups.`);
+  for (const cause of outsideFileCauses(markup)) {
+    problems.push(`${side}: ${cause} points at another site. Use inline SVG or plain boxes for images; outside files don't load in mockups.`);
   }
   return problems;
 }

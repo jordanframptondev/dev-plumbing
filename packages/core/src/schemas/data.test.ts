@@ -247,9 +247,13 @@ describe('visual data shapes', () => {
     expect(withAfter('<img SRC=http://acme.test/a.png>')).toEqual([outside]);
     expect(withAfter('<img/src="https://cdn.acme.test/a.png">')).toEqual([outside]);
     expect(withAfter('<img alt="x"src="https://cdn.acme.test/a.png">')).toEqual([outside]);
-    expect(withAfter('<svg viewBox="0 0 4 4"><image href="https://cdn.acme.test/a.png"/></svg>')).toEqual([outside]);
-    expect(withAfter('<svg viewBox="0 0 4 4"><use href="//cdn.acme.test/a.svg#x"/></svg>')).toEqual([outside]);
-    expect(withAfter('<video poster="https://cdn.acme.test/a.png"></video>')).toEqual([outside]);
+    // The message names the attribute that loads the file.
+    const tail = "points at another site. Use inline SVG or plain boxes for images; outside files don't load in mockups.";
+    expect(withAfter('<svg viewBox="0 0 4 4"><image href="https://cdn.acme.test/a.png"/></svg>')).toEqual([`after: an href on an SVG <image> ${tail}`]);
+    expect(withAfter('<svg viewBox="0 0 4 4"><use href="//cdn.acme.test/a.svg#x"/></svg>')).toEqual([`after: an href on an SVG <use> ${tail}`]);
+    expect(withAfter('<svg viewBox="0 0 4 4"><image xlink:href="https://cdn.acme.test/a.png"/></svg>')).toEqual([`after: an href on an SVG <image> ${tail}`]);
+    expect(withAfter('<video poster="https://cdn.acme.test/a.png"></video>')).toEqual([`after: a poster ${tail}`]);
+    expect(withAfter('<video poster="https://cdn.acme.test/a.png"></video><img src="https://cdn.acme.test/b.png">')).toEqual([outside, `after: a poster ${tail}`]);
     expect(withAfter('<a href="https://acme.test">Docs</a>')).toEqual([]);
     expect(withAfter('<img data-src="https://cdn.acme.test/a.png">')).toEqual([]);
     expect(withAfter('<img srcset="small.png 1x, https://cdn.acme.test/big.png 2x">')).toEqual([outside]);
