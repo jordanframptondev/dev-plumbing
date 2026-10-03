@@ -20,6 +20,7 @@ function mockupResponse(c: Context, o: { body: string; kitCss: string; title: st
     'Content-Security-Policy': mockupCsp(nonce),
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'no-referrer',
   });
 }
 

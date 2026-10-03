@@ -162,17 +162,56 @@ test('a UI item without markup offers Ask Claude for a mockup', async ({ page })
   expect(detail.thread.messages.at(-1)).toMatchObject({ author: 'you', text: ASK });
 });
 
-test('a page sized to the viewport keeps a stable frame height', async ({ page }) => {
+test('a page sized to the viewport is one device screen tall, and scrolls inside the frame beyond that', async ({ page }) => {
   const p = await importProject('mockups-tall', 'Mockups tall', { ui: [settings] });
-  await writeRawData(p, 'ui-settings', { ...SETTINGS_DATA, after: '<header class="h-16">h</header><main class="min-h-screen">m</main>' });
+  await writeRawData(p, 'ui-settings', { ...SETTINGS_DATA, after: '<header class="h-16">h</header><main class="min-h-screen" data-testid="tall">m</main>' });
   await page.goto(`${p.url}/t/ui`);
   const frame = page.getByTestId('mockup-frame');
-  await expect(frameOf(page).getByText('m', { exact: true })).toBeVisible();
-  await page.waitForTimeout(500);
-  const first = await frame.getAttribute('height');
-  await page.waitForTimeout(1000);
-  expect(await frame.getAttribute('height')).toBe(first);
-  expect(Number(first)).toBeLessThanOrEqual(12000);
+  await expect(frame).toHaveAttribute('height', '800');
+  await expect(frameOf(page).getByTestId('tall')).toBeVisible();
+  // min-h-screen is one screen of the frame's own viewport, not something that grows with the frame.
+  await expect.poll(() => frameOf(page).getByTestId('tall').evaluate((el) => el.getBoundingClientRect().height)).toBe(800);
+  await expect(frame).toHaveAttribute('height', '800');
+});
+
+test('a frame that navigates itself is put back, and one that does not is left alone', async ({ page }) => {
+  const p = await importProject('mockups-nav', 'Mockups nav', { ui: [settings] });
+  const requests: string[] = [];
+  page.on('request', (r) => {
+    if (r.url().includes('/items/ui-settings/mockup/after')) requests.push(r.url());
+  });
+  await page.goto(`${p.url}/t/ui`);
+  const card = frameOf(page).getByTestId('card');
+  await expect(card).toBeVisible();
+  // Untouched, it loads once: no reset, no second request.
+  await page.waitForTimeout(1500);
+  expect(requests).toHaveLength(1);
+
+  const child = page.frames().find((f) => f.url().includes('/mockup/after'))!;
+  await child.evaluate(() => {
+    location.href = 'about:blank';
+  });
+  await expect.poll(() => requests.length).toBe(2);
+  await expect(card).toBeVisible();
+  await expect(page.getByText("This mockup couldn't be shown.")).toHaveCount(0);
+});
+
+test('a pin on a side with no markup stays listed and openable', async ({ page }) => {
+  const p = await importProject('mockups-gone', 'Mockups gone', { ui: [settings] });
+  await api(`/api/projects/${p.repo}/${p.project}/items`, 'POST', {
+    type: 'ui',
+    title: 'About old copy',
+    text: 'Is this still right?',
+    anchor: { itemId: 'ui-settings', kind: 'element', ref: 'body > main:nth-of-type(1) > p:nth-of-type(1)', label: 'No reminders yet', side: 'before' },
+  });
+  await writeRawData(p, 'ui-settings', { ...SETTINGS_DATA, before: undefined });
+  await page.goto(`${p.url}/t/ui?item=ui-settings`);
+  await expect(frameOf(page).getByTestId('card')).toBeVisible();
+  const pin = page.getByTestId('mockup-pin');
+  await expect(pin).toHaveCount(1);
+  await expect(pin).toContainText('Not in this version');
+  await pin.getByRole('link', { name: 'About old copy' }).click();
+  await expect(page).toHaveURL(/\/th\/t-ui-about-old-copy$/);
 });
 
 test.describe('on a phone', () => {

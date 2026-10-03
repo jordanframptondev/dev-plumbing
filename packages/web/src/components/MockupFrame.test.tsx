@@ -32,7 +32,11 @@ describe('MockupFrame', () => {
     expect(box.style.height).toBe('240px');
     message({ source: 'dp-mockup', type: 'size', height: 500 });
     expect(box.style.height).toBe('500px');
-    expect(frameEl().getAttribute('height')).toBe('500');
+    // The frame's own viewport is the device's, so vh in a mockup means one screen and never follows the content.
+    expect(frameEl().getAttribute('height')).toBe('800');
+    message({ source: 'dp-mockup', type: 'size', height: 5000 });
+    expect(box.style.height).toBe('800px');
+    expect(frameEl().getAttribute('height')).toBe('800');
   });
 
   it('listens only to its own frame, and only for what it asked for', () => {
@@ -161,16 +165,7 @@ describe('MockupFrame', () => {
       expect(onMissingPins).toHaveBeenCalledWith([PIN.id]);
     });
 
-    it('stops following a page that grows every time the frame does', () => {
-      render(<MockupFrame {...base} />);
-      const box = frameEl().parentElement!;
-      for (let i = 1; i <= 30; i++) message({ source: 'dp-mockup', type: 'size', height: 300 + i * 64 });
-      expect(box.style.height).toBe(`${300 + 8 * 64}px`);
-      message({ source: 'dp-mockup', type: 'size', height: 400 }); // shrinking still works
-      expect(box.style.height).toBe('400px');
-    });
-
-    it('caps the height, and ignores heights that are not sane', () => {
+    it('clamps the height to the device screen, and ignores heights that are not sane', () => {
       render(<MockupFrame {...base} />);
       const box = frameEl().parentElement!;
       message({ source: 'dp-mockup', type: 'size', height: 500 });
@@ -180,7 +175,47 @@ describe('MockupFrame', () => {
       message({ source: 'dp-mockup', type: 'size', height: '900' });
       expect(box.style.height).toBe('500px');
       message({ source: 'dp-mockup', type: 'size', height: 1e9 });
-      expect(box.style.height).toBe('12000px');
+      expect(box.style.height).toBe('800px');
+    });
+
+    it('treats a pagehide as a navigation, and gives up on a frame that keeps leaving', () => {
+      const onPicked = vi.fn();
+      setup({ pinMode: true, onPicked });
+      const setSrc = vi.spyOn(HTMLIFrameElement.prototype, 'src', 'set');
+      fireEvent.load(frameEl());
+      message({ source: 'dp-mockup', type: 'leaving' });
+      expect(setSrc).toHaveBeenCalledTimes(1);
+      message({ source: 'dp-mockup', type: 'picked', selector: PIN.selector, text: 'x' });
+      expect(onPicked).not.toHaveBeenCalled();
+      fireEvent.load(frameEl());
+      message({ source: 'dp-mockup', type: 'leaving' });
+      expect(setSrc).toHaveBeenCalledTimes(2);
+      fireEvent.load(frameEl());
+      expect(screen.queryByText("This mockup couldn't be shown.")).toBeNull();
+      message({ source: 'dp-mockup', type: 'leaving' }); // the third in a row
+      expect(screen.queryByTestId('mockup-frame')).toBeNull();
+      expect(screen.getByText("This mockup couldn't be shown.")).toBeTruthy();
+      setSrc.mockRestore();
+    });
+
+    it('blanks the frame after three navigations of any kind', () => {
+      setup();
+      fireEvent.load(frameEl());
+      fireEvent.load(frameEl()); // 1
+      fireEvent.load(frameEl());
+      fireEvent.load(frameEl()); // 2
+      expect(screen.getByTestId('mockup-frame')).toBeTruthy();
+      fireEvent.load(frameEl());
+      fireEvent.load(frameEl()); // 3
+      expect(screen.queryByTestId('mockup-frame')).toBeNull();
+    });
+
+    it('cuts a pick down to a label and a selector', () => {
+      const onPicked = vi.fn();
+      setup({ pinMode: true, onPicked });
+      fireEvent.load(frameEl());
+      message({ source: 'dp-mockup', type: 'picked', selector: 's'.repeat(900), text: 't'.repeat(300) });
+      expect(onPicked).toHaveBeenCalledWith({ selector: 's'.repeat(500), text: 't'.repeat(60) });
     });
   });
 });

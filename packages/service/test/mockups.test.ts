@@ -90,6 +90,7 @@ describe('mockup documents', () => {
     expect(res.headers.get('content-security-policy')).toBe(POLICY(nonce));
     expect(mockupCsp('abc')).toBe(POLICY('abc'));
     expect(res.headers.get('x-frame-options')).toBe('SAMEORIGIN');
+    expect(res.headers.get('referrer-policy')).toBe('no-referrer');
     expect(count(html, '<script')).toBe(2);
     expect(count(html, `nonce="${nonce}"`)).toBe(2);
     // The markup goes in exactly as written: the policy, not a rewrite, is what keeps it harmless.
@@ -174,6 +175,7 @@ describe('mockup documents', () => {
     expect(html).not.toContain('Restock soon');
     expect(html).toContain('--color-brand: #0f766e;');
     expect(res.headers.get('content-security-policy')).toBe(POLICY(nonceOf(html)));
+    expect(res.headers.get('referrer-policy')).toBe('no-referrer');
     // The saved mockup is unchanged until the option is accepted.
     expect(await (await t.get('/items/ui-settings/mockup/after')).text()).toContain(MARKUP);
 
@@ -292,6 +294,14 @@ describe('the pin script against hostile markup', () => {
     win.document.getElementById('f')!.dispatchEvent(submit);
     expect(submit.defaultPrevented).toBe(true);
     expect(posted.some((m) => m.type === 'size')).toBe(true);
+  });
+
+  it('tells the app when the document is being left, whatever the markup does', async () => {
+    const { win, posted } = await loadFrame(HOSTILE);
+    posted.length = 0;
+    win.dispatchEvent(new win.Event('pagehide'));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(posted).toEqual([{ source: 'dp-mockup', type: 'leaving' }]);
   });
 
   it('stops a link inside an open shadow root', async () => {

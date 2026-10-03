@@ -68,6 +68,8 @@ export const PIN_SCRIPT = String.raw`(() => {
     e.preventDefault();
     e.stopPropagation();
   }, true);
+  // However the frame got here, the app hears that this document is going away, so it can put the frame back.
+  winListen('pagehide', () => post({ type: 'leaving' }));
 
   let ready = false;
   const pending = [];

@@ -101,6 +101,9 @@ function ScreenView({ screen, pins, repo, project, typeId }: { screen: UiScreen;
   const markup = side === 'after' ? mockup?.after : mockup?.before;
   const kit = useQuery({ queryKey: ['mockupKit', repo, project, row.id], queryFn: () => api.mockupKit(repo, project, row.id), enabled: hasMarkup });
   const sidePins = pins.filter((r) => (r.anchor?.side ?? 'after') === side);
+  // Pins on a side that has no markup can never be drawn, but they stay listed and openable.
+  const hasSide = (s: Side) => Boolean(s === 'after' ? mockup?.after : mockup?.before);
+  const unreachable = pins.filter((r) => !hasSide(r.anchor?.side ?? 'after') && !sidePins.includes(r));
   // A pin's marker colour is its thread's status, as StatusMark shows it.
   const framePins: FramePin[] = sidePins.map((r, i) => ({ id: r.id, selector: r.anchor?.ref ?? '', n: i + 1, tone: toneOf([r.status]) }));
   const thread = (threadId: string) => ({ to: '/p/$repo/$project/th/$thread', params: { repo, project, thread: threadId } }) as const;
@@ -209,24 +212,24 @@ function ScreenView({ screen, pins, repo, project, typeId }: { screen: UiScreen;
           ) : (
             <NoMockup row={row} repo={repo} project={project} />
           )}
-          {sidePins.length > 0 && (
-            <section aria-label="Pins" className="mt-4">
-              <h4 className="mb-1.5 ml-0.5 text-[12px] font-semibold text-ink-3">Pins</h4>
-              <ol className={LIST}>
-                {sidePins.map((r, i) => (
-                  <li key={r.id} data-testid="mockup-pin" className="flex items-center gap-2.5 px-3 py-2 text-[13px]">
-                    <span className="w-4 shrink-0 text-right font-mono text-[11px] text-ink-3">{i + 1}</span>
-                    <StatusMark status={r.status} />
-                    <Link {...thread(r.threadId)} className="min-w-0 flex-1 truncate font-medium">
-                      {r.title}
-                    </Link>
-                    {missing.includes(r.id) && <span className="shrink-0 text-[11.5px] text-amber">Not in this version</span>}
-                  </li>
-                ))}
-              </ol>
-            </section>
-          )}
         </>
+      )}
+      {(sidePins.length > 0 || unreachable.length > 0) && (
+        <section aria-label="Pins" className="mt-4">
+          <h4 className="mb-1.5 ml-0.5 text-[12px] font-semibold text-ink-3">Pins</h4>
+          <ol className={LIST}>
+            {[...sidePins.map((r, i) => ({ r, n: String(i + 1), gone: !hasSide(side) || missing.includes(r.id) })), ...unreachable.map((r) => ({ r, n: '–', gone: true }))].map(({ r, n, gone }) => (
+              <li key={r.id} data-testid="mockup-pin" className="flex items-center gap-2.5 px-3 py-2 text-[13px]">
+                <span className="w-4 shrink-0 text-right font-mono text-[11px] text-ink-3">{n}</span>
+                <StatusMark status={r.status} />
+                <Link {...thread(r.threadId)} className="min-w-0 flex-1 truncate font-medium">
+                  {r.title}
+                </Link>
+                {gone && <span className="shrink-0 text-[11.5px] text-amber">Not in this version</span>}
+              </li>
+            ))}
+          </ol>
+        </section>
       )}
     </section>
   );

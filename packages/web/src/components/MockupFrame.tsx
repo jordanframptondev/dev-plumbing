@@ -23,21 +23,25 @@ type Props = {
 
 type FrameMessage =
   | { type: 'size'; height: number }
+  | { type: 'leaving' }
   | { type: 'picked'; selector: string; text: string }
   | { type: 'open-pin'; id: string }
   | { type: 'missing-pins'; ids: unknown[] };
 
 /** Desktop renders 1280 px wide and mobile 390 px, both scaled down to fit. Thumbnails render as mobile. */
 const WIDTHS = { desktop: 1280, mobile: 390 } as const;
-/** The box's height until the frame says how tall its content is. */
+/** The box's height until the frame says how tall its content is (240 px, before scaling). */
 const MIN_HEIGHT = 240;
-/** The tallest a frame may report. A page sized to the viewport (min-h-screen) would otherwise grow without end. */
-const MAX_HEIGHT = 12000;
 /**
- * A page sized to the viewport (min-h-screen) grows each time the frame grows to fit it. Real content settles within a
- * few reports, so after this many growths in a row the frame stops following it.
+ * The frame's own height is a device screen and never follows the content, so a mockup's vh units mean one screen
+ * (min-h-screen is one screen, not a loop). Pages taller than that scroll inside the frame, as on a device.
  */
-const MAX_GROWTHS = 8;
+const DEVICE_HEIGHTS = { desktop: 800, mobile: 844 } as const;
+/** A frame that navigates itself is put back this many times per document before it's blanked. */
+const MAX_RESETS = 2;
+/** What a picked element's label and selector are cut to before the app sees them. */
+const MAX_LABEL = 60;
+const MAX_SELECTOR = 500;
 
 /**
  * One side of a UI item's mockup. The frame is sandboxed with scripts but without same-origin, so its document has an
@@ -57,10 +61,13 @@ export function MockupFrame(p: Props) {
   /** True from a self-navigation until the reset document loads: nothing the frame says counts meanwhile. */
   const navigated = useRef(false);
   /** The ids the frame was last given pins for. It may open only these. */
-  const growths = useRef({ last: 0, run: 0 });
+  /** How many times this document has been put back after navigating. */
+  const resets = useRef(0);
+  const [broken, setBroken] = useState(false);
   const sentPins = useRef<Set<string>>(new Set());
   const [visible, setVisible] = useState(!p.thumbnail || typeof IntersectionObserver === 'undefined');
   const width = p.thumbnail ? WIDTHS.mobile : WIDTHS[p.device];
+  const deviceHeight = p.thumbnail ? DEVICE_HEIGHTS.mobile : DEVICE_HEIGHTS[p.device];
   const scale = boxWidth > 0 ? Math.min(1, boxWidth / width) : 1;
   const src = p.proposal
     ? proposalMockupUrl(p.repo, p.project, p.proposal.threadId, p.proposal.optionId, p.side)
@@ -78,11 +85,25 @@ export function MockupFrame(p: Props) {
     loads.current = 0;
     navigated.current = false;
     sentPins.current = new Set();
-    growths.current = { last: 0, run: 0 };
+    resets.current = 0;
+    setBroken(false);
   }, [src, visible]);
 
-  // A sandbox and a CSP can't stop a frame navigating itself, so the first load is the only one we trust. Any later
-  // load means it went somewhere else: put it back, and ignore it until the reset document has loaded.
+  // A sandbox and a CSP can't stop a frame navigating itself. The document says when it's leaving, and any load after
+  // the first means it went somewhere. Either way: put it back, ignore it until the reset document has loaded, and
+  // blank a frame that keeps doing it.
+  const navigatedAway = () => {
+    navigated.current = true;
+    loads.current = 0;
+    sentPins.current = new Set();
+    setLoaded(false);
+    resets.current += 1;
+    if (resets.current > MAX_RESETS) {
+      setBroken(true);
+      return;
+    }
+    if (frame.current) frame.current.src = srcRef.current;
+  };
   const onFrameLoad = () => {
     if (!visible) return;
     loads.current += 1;
@@ -91,11 +112,7 @@ export function MockupFrame(p: Props) {
       setLoaded(true);
       return;
     }
-    navigated.current = true;
-    loads.current = 0;
-    sentPins.current = new Set();
-    setLoaded(false);
-    if (frame.current) frame.current.src = srcRef.current;
+    navigatedAway();
   };
 
   useEffect(() => {
@@ -128,19 +145,17 @@ export function MockupFrame(p: Props) {
       const now = latest.current;
       if (m.type === 'size') {
         if (typeof m.height !== 'number' || !Number.isFinite(m.height) || m.height < 0) return;
-        const next = Math.min(MAX_HEIGHT, Math.max(1, Math.ceil(m.height)));
-        const g = growths.current;
-        if (next > g.last) {
-          if (g.run >= MAX_GROWTHS) return;
-          g.run += 1;
-        } else g.run = 0;
-        g.last = next;
-        setHeight(next);
+        setHeight(Math.max(1, Math.ceil(m.height)));
+        return;
+      }
+      // Before the first load, a "leaving" is the previous document going away because we changed the src.
+      if (m.type === 'leaving') {
+        if (loads.current > 0) navigatedAway();
         return;
       }
       if (now.thumbnail || now.proposal) return;
       // A pick only counts in pin mode, and an open-pin only for a pin this frame was given.
-      if (m.type === 'picked' && now.pinMode && typeof m.selector === 'string') now.onPicked?.({ selector: m.selector, text: String(m.text ?? '') });
+      if (m.type === 'picked' && now.pinMode && typeof m.selector === 'string') now.onPicked?.({ selector: m.selector.slice(0, MAX_SELECTOR), text: String(m.text ?? '').slice(0, MAX_LABEL) });
       else if (m.type === 'open-pin' && typeof m.id === 'string' && sentPins.current.has(m.id)) now.onOpenPin?.(m.id);
       else if (m.type === 'missing-pins' && Array.isArray(m.ids)) now.onMissingPins?.(m.ids.filter((id): id is string => typeof id === 'string' && sentPins.current.has(id)));
     };
@@ -160,11 +175,20 @@ export function MockupFrame(p: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded, pinsKey, p.pinMode, pinnable]);
 
+  if (broken) {
+    return (
+      <div ref={box} className="w-full min-w-0 py-6 text-center text-[13px] text-ink-3">
+        This mockup couldn't be shown.
+      </div>
+    );
+  }
+
+  const shown = height === null ? MIN_HEIGHT : Math.min(height, deviceHeight);
   return (
     <div ref={box} className="w-full min-w-0">
       <div
         className="relative mx-auto overflow-hidden rounded-[10px] border-[0.5px] border-separator"
-        style={{ width: Math.round(width * scale), maxWidth: '100%', height: height === null ? MIN_HEIGHT : Math.round(height * scale), pointerEvents: p.thumbnail ? 'none' : undefined }}
+        style={{ width: Math.round(width * scale), maxWidth: '100%', height: Math.round(shown * scale), pointerEvents: p.thumbnail ? 'none' : undefined }}
       >
         <iframe
           ref={frame}
@@ -176,7 +200,7 @@ export function MockupFrame(p: Props) {
           tabIndex={p.thumbnail ? -1 : undefined}
           src={visible ? src : undefined}
           width={width}
-          height={height ?? Math.round(MIN_HEIGHT / scale)}
+          height={deviceHeight}
           onLoad={onFrameLoad}
           className="absolute left-0 top-0 block border-0 bg-white"
           style={{ transform: `scale(${scale})`, transformOrigin: '0 0' }}
