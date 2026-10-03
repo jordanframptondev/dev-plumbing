@@ -2,7 +2,7 @@
 
 Plumb a feature plan before you build it. dev-plumbing turns a plan (for example a Superpowers spec) into a local web app where every question, concern, diagram and schema change has its own thread with Claude.
 
-**Status:** the Claude loop works. Import a plan, answer threads in the app, and Claude replies through subagents. Visual screens, Finalize spec and Whiteboard Defense come next. The design is in [SPEC.md](SPEC.md), and the plans are in [docs/superpowers/plans](docs/superpowers/plans).
+**Status:** the Claude loop and the visual screens work. Finalize spec and Whiteboard Defense come next. The design is in [SPEC.md](SPEC.md), and the plans are in [docs/superpowers/plans](docs/superpowers/plans).
 
 ## Requirements
 
@@ -42,6 +42,18 @@ Setup installs the Claude Code plugin for your user (skip it with `--no-plugin`)
 - **Keep this checkout:** the plugin and the app both run from its build here. After you pull, run `pnpm build`, restart the app (`dev-plumbing stop`, then `dev-plumbing start`), and start a new Claude Code session.
 
 How the app, the plugin, its agents and its tools fit together is explained in [docs/how-it-works.md](docs/how-it-works.md).
+
+## Screens
+
+Each plumbing type has its own screen in the app:
+- **Questions, Concerns, Ideas, Testing and Security:** lists you answer in place.
+- **Architecture:** each diagram as boxes and lines, grouped by app or package. Marks show what's new, changed, unchanged or external, and ✓ marks file references that exist in your repo. Click a box to ask about it.
+- **Database:** a relationship strip, a migration panel, and one diff card per table, shown as a visual diff or as Prisma. Tables are checked against your repo's Prisma schema.
+- **UI changes:** each screen as a mockup built with your app's own design kit, on Desktop or Mobile, Before or After. **+ Pin** starts a thread on any part of it.
+- **Flows:** user flows as storyboards and system flows as sequence diagrams, or both, with matching step numbers.
+- **Phases & milestones:** a timeline of phases, each with its goal, its "done when" and its items.
+
+Every thread also draws its item, and shows what a proposed change does to the drawing before you accept it.
 
 ## Commands
 

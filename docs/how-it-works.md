@@ -17,7 +17,7 @@ This guide explains, in plain terms, what each part of dev-plumbing does, how it
 | Piece | What it is | Where it lives |
 |---|---|---|
 | **The service** | A small Node program that holds everything together. It reads and writes your projects, serves the web app, and answers the plugin's requests. It only listens on your own Mac (`127.0.0.1`, port 4545 by default). | Runs from this checkout's build. `dev-plumbing start`, `stop` and `status` control it. |
-| **The web app** | The pages you use in the browser: projects, threads, lists, the Draft and Settings. It gets live updates from the service, so replies appear without reloading. | Served by the service at `http://127.0.0.1:4545`. |
+| **The web app** | The pages you use in the browser: projects, threads, lists, drawings, the Draft and Settings. It gets live updates from the service, so replies appear without reloading. | Served by the service at `http://127.0.0.1:4545`. |
 | **The CLI** | The `dev-plumbing` command in your terminal. `setup` creates your config, installs the plugin, and can turn on start-at-login. | `packages/cli` |
 | **The plugin** | The Claude Code add-on: one skill, three agents and one MCP server, all explained below. | `plugin/` in this repo. Claude Code loads it from here. |
 | **Your config** | Settings, models, repo profiles, and the rules for each plumbing type, all in plain files you can edit (or edit in the app). | `~/.dev-plumbing/` |
@@ -140,6 +140,30 @@ Two things to know:
 - **Anything that changes meaning** waits for you.
 
 Open the **Draft** and switch to **Changes** to see every change against the original. Each change links to the thread that caused it, with Undo or Apply where they apply.
+
+## Drawings
+
+Architecture, Database, UI changes, Flows and Phases items carry **data**: boxes and lines, a table diff, mockup markup, steps, or a phase. Claude writes the data; the app draws it.
+
+- **One shape per screen.** Each screen's data shape is defined once, in `packages/core/src/schemas/data.ts`.
+  - The service checks every write against it: an importer's batch, a thread agent's new items, and every option or small edit that changes a drawing.
+  - A line to a box that isn't there, a step on a lane that doesn't exist, or a mockup with a script is refused as a whole, and the agent is told what to fix.
+  - Agents get the same shape, as text, in their context pack (`type.dataShape`), so the instructions and the checks can't drift apart.
+- **Checks happen when you look.** Each time you open a screen or a thread, the service checks the drawing against the plan's clone:
+  - ✓ on boxes whose file exists;
+  - tables against the Prisma schema in your repo profile.
+
+  The results are never stored, so they're never stale. Without a clone or a schema file, the screen says "Not checked", and why.
+- **Mockups use your app's kit.** A UI mockup is body markup with your app's Tailwind classes. The service builds a page around it:
+  - your kit's CSS, read from the clone (only `.css` files inside it, up to 1 MB);
+  - Tailwind's in-browser compiler, served by the service itself, so nothing loads from the internet.
+
+  The page runs in a sandboxed frame with a strict Content-Security-Policy, so the markup can't run scripts, load files or reach the app.
+- **Pins.** Clicking a box, a step or a part of a mockup starts a new item about it, with its own thread.
+  - The screen draws a pin or a bubble where it points. Nothing is written into the drawing itself, so Claude can redraw it without losing your pins.
+  - A pin whose part is gone is still listed, marked "Not in this version".
+- **Data that can't be drawn**, from an older version say, never blanks a screen. That item shows "This item's drawing couldn't be shown" with the reasons, and everything else still draws.
+- **Changes to drawings.** When an option changes a drawing, "What changes if you accept" says what changes in words, and **View proposed** draws the new version.
 
 ## Where everything is stored
 
