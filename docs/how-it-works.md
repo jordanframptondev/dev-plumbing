@@ -8,7 +8,7 @@ This guide explains, in plain terms, what each part of dev-plumbing does, how it
   - **The app:** a small program on your Mac, plus a web page. It stores your plumbing projects and lets you read and answer threads.
   - **The plugin:** an add-on for **Claude Code** that lets Claude work with that app.
 - **`/dev-plumbing` is a Claude Code command, not a terminal command.** You type it inside a Claude Code session (the `claude` CLI, the desktop app or an IDE extension). A plain shell doesn't know it.
-- **Claude never edits your plan or your code.** It reads them, and writes only into dev-plumbing's own files, through a few dedicated tools. The one file that lands in your repo is the final spec, and only when you accept it.
+- **Claude never edits your plan or your code.** It reads them, and writes only into dev-plumbing's own files, through a few dedicated tools. The only things that land in your repo are the final spec and its mockups in `<name>.assets/`, and only when you accept it.
 - **Your main Claude window stays light.** It hands every real piece of work to **subagents**: helper Claudes, each with its own fresh memory. It only ever sees one-line summaries.
 - **The app works without Claude.** You can read, answer and save drafts any time. You only need a Claude window listening for Claude to reply.
 
@@ -172,8 +172,8 @@ Architecture, Database, UI changes, Flows and Phases items carry **data**: boxes
 When the threads that matter are answered, **Finalize spec** (in the project's header) turns the draft into the **final**: the spec an implementing AI builds from, in the structure `~/.dev-plumbing/outputs/finalize.md` sets.
 
 1. **The checklist.** The Finalize page lists:
-   - **These block Finalize:** a blocking question or a high or critical concern that isn't resolved, a thread Claude is still working on, a proposal waiting for your answer, or a small edit waiting to be applied. Resolve or park these first.
-   - **These will use their default:** questions you haven't answered that have a default.
+   - **These block Finalize:** a blocking question or a high or critical concern that isn't resolved, a thread Claude is still working on, a proposal waiting for your answer, or a small edit waiting to be applied. Deal with each one first: resolve or park a question or concern, wait for Claude's reply, answer the proposal, or apply the edit.
+   - **These will use their default:** unresolved items that have a default.
    - **Parked: left out of the final.**
    - **Nobody has reviewed these:** items whose threads you never wrote in. This is only a warning.
 2. **Start.** **Start finalize** saves a request in the project. A listening Claude window picks it up through `dp_wait` and starts one `finalizer` subagent, on the model `agents.json` sets for it.
@@ -199,10 +199,10 @@ When the threads that matter are answered, **Finalize spec** (in the project's h
 6. **Accept.** Pick the clone to copy into: the one the plan came from, or another clone the project was opened from. Accept then:
    - saves `docs/final.md` in the plumbing project, after moving the previous one to `finals/`;
    - copies it into the repo as `<name>.final.md`, next to the plan;
-   - writes each UI mockup to `<name>.assets/` as a plain HTML file: the mockup's markup with your app's own classes, and a comment naming the app, route and kit files. Mockups this project wrote before and no longer needs are removed; anything else in that folder is left alone. The mockup files live only in the repo copy: the plumbing project keeps the mockups as item data, so in the app a mockup link shows as text ("Opens from the repo copy.");
+   - writes each UI mockup to `<name>.assets/` as a plain HTML file: the mockup's markup with your app's own classes, and a comment naming the app, route and kit files. Mockups this project wrote before and no longer needs are removed; anything else in that folder is left alone. The mockup files live only in the repo copy: the plumbing project keeps the mockups as item data, so in the app a mockup link's text shows plain, and hovering over it says it opens from the repo copy;
    - marks the project **Finalized**.
 
-   If anything the final is built from changed after the finalizer picked the request up (the draft, an item's drawing data such as a redrawn diagram, or a decision, including one made while Claude is writing), Accept is refused: "The draft changed since Claude wrote this. Finalize again." You never accept a final that misses a later decision.
+   If anything the final is built from changed after the finalizer picked the request up (the draft, an item's drawing data such as a redrawn diagram, an item you park or unpark, or a decision, including one made while Claude is writing), Accept is refused: "The draft changed since Claude wrote this. Finalize again." You never accept a final that misses a later decision.
 7. **Next.** The page shows the next command to run, such as `writing-plans docs/specs/restock-reminders.final.md`, with a copy button. Later answers don't undo Finalized. **Finalize again** writes a new final, and replaces both copies once you accept it.
 
 ## Where everything is stored

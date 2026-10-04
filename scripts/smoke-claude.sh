@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # The real thing. Claude Code runs /dev-plumbing on a small plan, in a scratch repo with a Prisma schema and a
 # Tailwind v4 kit. scripts/smoke-user.mjs checks the drawings the importers wrote, answers one thread the way you
-# would in the browser, and a thread subagent replies. Then it finalizes: it accepts Claude's proposals, parks
-# whatever still blocks Finalize, starts it, waits for the finalizer's final, accepts it into the scratch repo and
-# checks the copy. It uses a temporary dev-plumbing home and leaves your real ~/.dev-plumbing alone. It makes real
-# model calls.
+# would in the browser, and a thread subagent replies. Then it finalizes: it applies small edits, accepts Claude's
+# proposals, parks whatever still blocks Finalize, starts it, waits for the finalizer's final, accepts it into the
+# scratch repo and checks the copy. It uses a temporary dev-plumbing home and leaves your real ~/.dev-plumbing alone.
+# It makes real model calls.
 #   scripts/smoke-claude.sh                   about 20 minutes (the finalizer runs on opus)
 #   DP_SMOKE_LONG=1 scripts/smoke-claude.sh   waits 35 minutes before answering, to check the long wait
 set -euo pipefail
