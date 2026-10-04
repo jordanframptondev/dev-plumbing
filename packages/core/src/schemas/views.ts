@@ -2,7 +2,7 @@ import type { ChangeState, Decision, Option, ThreadDraft } from './loop';
 import type { Item, PlumbingProject, Thread } from './project';
 import type { Screen } from './plumbingType';
 import type { Anchor, DataKind } from './data';
-import type { FinalizeState } from './finalize';
+import type { FinalizeChecklist, FinalizeRequest, FinalizeState } from './finalize';
 
 export type ConfigProblem = { file: string; key?: string; message: string };
 export type RuleSummary = { file: string; id: string; title: string; order: number; screen: Screen; enabled: boolean };
@@ -166,3 +166,22 @@ export type DataChecks =
 
 /** What a mockup's toolbar says about its design kit: the app it came from, its files, and what was skipped. */
 export type MockupKitInfo = { app: string | null; files: string[]; warnings: string[] };
+
+/** The Finalize page: GET /api/projects/:repo/:id/finalize. */
+export type FinalizeView = {
+  checklist: FinalizeChecklist;
+  request: FinalizeRequest | null;
+  /**
+   * The finalizer's proposal. Stale once the draft, an item or a decision changed after it was written (finalInputsHash).
+   * diff is against docs/final.md, when there is one.
+   */
+  proposal: { markdown: string; stale: boolean; diff: DiffSegment[] | null } | null;
+  /** The last accepted final: where it was copied, and the command that turns it into an implementation plan. */
+  final: { exportedTo: NonNullable<PlumbingProject['docs']['exportedTo']>; nextCommand: string } | null;
+  /** The clones this project was opened from that are still folders on this Mac, the source clone first. */
+  clones: { path: string; source: boolean }[];
+  /** finalName(source.path): the repo copy is <name>.final.md, with mockups in <name>.assets/. */
+  name: string;
+  listening: ListeningState;
+  changesSinceFinal: number;
+};

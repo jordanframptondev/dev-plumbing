@@ -4,7 +4,10 @@ import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import {
   expandHome,
+  finalizePack,
+  finalName,
   findProjects,
+  finishFinalize,
   finishImport,
   finishSubmission,
   finishWindowSubmissions,
@@ -21,23 +24,29 @@ import {
   openPlan,
   pendingSubmissions,
   pickUp,
+  pickUpFinalize,
   postReply,
+  readFinalize,
   readItem,
   readProjectFile,
   readSubmission,
   readThread,
+  recordClone,
   relevantDecisions,
   replySchema,
   repoProfileSchema,
   repoProjectsFolder,
+  requeueFinalize,
   requeueUnfinished,
   resolvePlan,
+  saveProposal,
   StoreError,
   suggestRepoName,
   summarizeProject,
   threadPack,
   writeImportBatch,
   writeJsonAtomic,
+  type FinalizeRequest,
   type LoadedConfig,
   type PlumbingType,
   type ProjectRef,
@@ -61,13 +70,20 @@ const itemsBody = importBatchSchema.merge(projectBody).extend({ type: z.string()
 const waitBody = projectBody.extend({
   windowId: z.string().min(1),
   timeoutSeconds: z.number().min(0).max(600).optional(),
+  // What the window just finished: a submission (with any conflicts it found), or a finalize request (its id).
   finished: z
-    .object({ submission: z.string().min(1), conflicts: z.array(z.object({ threads: z.array(z.string()).min(1), text: z.string().min(1) })).default([]) })
+    .object({
+      submission: z.string().min(1).optional(),
+      conflicts: z.array(z.object({ threads: z.array(z.string()).min(1), text: z.string().min(1) })).default([]),
+      finalize: z.string().min(1).optional(),
+    })
     .optional(),
 });
 const aliveBody = z.object({ windowId: z.string().min(1) });
-const contextBody = projectBody.extend({ threadId: z.string().optional(), importType: z.string().optional() });
+const contextBody = projectBody.extend({ threadId: z.string().optional(), importType: z.string().optional(), finalize: z.boolean().optional() });
 const replyBody = replySchema.merge(projectBody).extend({ cwd: z.string().optional() });
+// The 1–500,000 character limit is saveProposal's, so its message is the one Claude reads.
+const finalizeBody = projectBody.extend({ request: z.string().min(1), markdown: z.string() });
 
 async function parse<S extends z.ZodTypeAny>(c: Context, schema: S): Promise<z.infer<S>> {
   const body = await readJsonObject(c);
@@ -89,6 +105,9 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
     return info?.root ?? expandHome((await readProjectFile(ref.dir)).source.clone, ctx.home);
   };
   const changed = (ref: ProjectRef) => rt.events.projectChanged(ref.repo, ref.id);
+  /** outputs/finalize.md from the config folder, or the shipped default when the user's copy is missing. */
+  const finalizeRules = () =>
+    fs.readFile(path.join(ctx.configDir, 'outputs', 'finalize.md'), 'utf8').catch(() => fs.readFile(path.join(ctx.defaultsDir, 'outputs', 'finalize.md'), 'utf8'));
 
   r.post(
     '/open',
@@ -148,7 +167,13 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
 
       const key = projectKey(ref.repo, ref.id);
       if (body.windowId) rt.listeners.seen(body.windowId, key);
-      await rt.withLock(key, () => requeueUnfinished(ref.dir, (w) => rt.listeners.isAlive(w)));
+      const isAlive = (w: string) => rt.listeners.isAlive(w);
+      await rt.withLock(key, async () => {
+        // Every clone a project is opened from is remembered, so Accept can offer it.
+        await recordClone(ref.dir, git.root, ctx.home);
+        await requeueUnfinished(ref.dir, isAlive);
+        await requeueFinalize(ref.dir, isAlive);
+      });
       const project = await readProjectFile(ref.dir);
       // Flows and phases point at items the other importers write (a step's mockupId, a phase's itemIds), so they go last.
       const later = (t: PlumbingType) => t.screen === 'flows' || t.timeline;
@@ -249,6 +274,17 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
     };
   }
 
+  /** What dp_wait returns for a finalize request: one finalizer subagent, with the finalizer model. */
+  function describeFinalize(ref: ProjectRef, request: FinalizeRequest, cfg: LoadedConfig) {
+    const model = cfg.agents.models.finalizer;
+    return {
+      kind: 'finalize' as const,
+      request: request.id,
+      model,
+      next: `Start one dev-plumbing:finalizer subagent (model ${model}) with the prompt "Write the final spec for repo ${ref.repo}, plumbing project ${ref.id}, request ${request.id}." When it returns, call dp_wait with finished: { finalize: "${request.id}" }.`,
+    };
+  }
+
   r.post(
     '/wait',
     handle(async (c) => {
@@ -260,19 +296,28 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
       const alreadyWaiting = rt.listeners.inWait(body.windowId, key);
       rt.listeners.polled(body.windowId, key);
       if (!alreadyWaiting) rt.listeners.setBusy(body.windowId, false);
+      const isAlive = (w: string) => (w === body.windowId ? alreadyWaiting : rt.listeners.isAlive(w));
+      const finished = body.finished;
       const importDone = await rt.withLock(key, async () => {
-        if (body.finished) {
-          const owned = await readSubmission(ref.dir, body.finished.submission).then(
+        if (finished?.submission) {
+          const owned = await readSubmission(ref.dir, finished.submission).then(
             (s) => s.pickedUpBy === body.windowId,
             (e) => {
               if (e instanceof StoreError && /doesn't exist/.test(e.message)) return false;
               throw e;
             },
           );
-          if (owned) await finishSubmission(ref.dir, body.finished.submission, body.finished.conflicts);
+          if (owned) await finishSubmission(ref.dir, finished.submission, finished.conflicts);
         }
         if (!alreadyWaiting) await finishWindowSubmissions(ref.dir, body.windowId);
-        await requeueUnfinished(ref.dir, (w) => (w === body.windowId ? alreadyWaiting : rt.listeners.isAlive(w)));
+        // A window back from a finalize it picked up, with or without finished.finalize, sent all it was going to.
+        // If no final came, the request fails with Try again, so the page never stays on "Claude is writing the final."
+        const held = await readFinalize(ref.dir);
+        if (held?.state === 'writing' && held.pickedUpBy === body.windowId && (!alreadyWaiting || finished?.finalize === held.id)) {
+          await finishFinalize(ref.dir, { requestId: held.id, windowId: body.windowId });
+        }
+        await requeueUnfinished(ref.dir, isAlive);
+        await requeueFinalize(ref.dir, isAlive);
         return finishImport(ref.dir);
       });
       changed(ref);
@@ -280,15 +325,18 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
 
       const timeoutMs = Math.min(body.timeoutSeconds ?? cfg.agents.waitHeartbeatSeconds, MAX_POLL_SECONDS) * 1000;
       for (let round = 0; round < 2; round++) {
+        // Submissions first, oldest first. Then a requested finalize.
         const picked = await rt.withLock(key, async () => {
           if (c.req.raw.signal.aborted) return null;
           const next = (await pendingSubmissions(ref.dir))[0];
-          return next ? pickUp(ref.dir, next.id, body.windowId) : null;
+          if (next) return { kind: 'submission' as const, submission: await pickUp(ref.dir, next.id, body.windowId) };
+          const request = await pickUpFinalize(ref.dir, body.windowId);
+          return request ? { kind: 'finalize' as const, request } : null;
         });
         if (picked) {
           rt.listeners.setBusy(body.windowId, true);
           changed(ref);
-          return c.json(await describeSubmission(ref, picked, cfg));
+          return c.json(picked.kind === 'submission' ? await describeSubmission(ref, picked.submission, cfg) : describeFinalize(ref, picked.request, cfg));
         }
         if (round === 1 || timeoutMs === 0) break;
         if ((await rt.listeners.wait(body.windowId, key, timeoutMs, c.req.raw.signal)) !== 'notified') break;
@@ -314,7 +362,8 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
       const profile = cfg.repos.find((p) => p.name === ref.repo);
       if (body.threadId) return c.json(await threadPack({ dir: ref.dir, threadId: body.threadId, types: cfg.types, profile }));
       if (body.importType) return c.json(await importPack({ dir: ref.dir, typeId: body.importType, types: cfg.types, profile }));
-      throw new InputError('Give threadId (for a thread) or importType (for an importer).');
+      if (body.finalize) return c.json(await finalizePack({ dir: ref.dir, types: cfg.types, profile, rules: await finalizeRules() }));
+      throw new InputError('Give threadId (for a thread), importType (for an importer) or finalize: true (for the finalizer).');
     }),
   );
 
@@ -334,6 +383,26 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
         appliedEdits: result.edits.filter((e) => e.appliedAt).length,
         pendingEdits: result.edits.filter((e) => !e.appliedAt).length,
         newThreads: result.newThreadIds,
+      });
+    }),
+  );
+
+  // The finalizer's document. saveProposal checks it and expands every token, or refuses it whole with every problem.
+  r.post(
+    '/finalize',
+    handle(async (c) => {
+      const body = await parse(c, finalizeBody);
+      const { cfg, ref } = await locateProject(ctx, body.repo, body.project);
+      const saved = await rt.withLock(projectKey(ref.repo, ref.id), async () => {
+        const project = await readProjectFile(ref.dir);
+        return saveProposal(ref.dir, { requestId: body.request, markdown: body.markdown, types: cfg.types, name: finalName(project.source.path) });
+      });
+      changed(ref);
+      return c.json({
+        ok: true,
+        request: saved.id,
+        length: saved.proposal?.length ?? body.markdown.length,
+        next: 'Saved. The user previews the final in the app and accepts it there. Reply with your one line.',
       });
     }),
   );
