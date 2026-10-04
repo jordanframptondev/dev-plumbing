@@ -7,6 +7,7 @@ import {
   finalizePack,
   finalName,
   findProjects,
+  finishDetect,
   finishFinalize,
   finishImport,
   finishSubmission,
@@ -20,8 +21,10 @@ import {
   linkIntoClone,
   loadConfig,
   matchProfile,
+  mergeDetected,
   normalizeRemote,
   openPlan,
+  pendingDetect,
   pendingSubmissions,
   pickUp,
   pickUpFinalize,
@@ -53,6 +56,7 @@ import {
   type Submission,
 } from '@dev-plumbing/core';
 import type { AppContext } from '../context';
+import { cloneOf } from '../checker';
 import { handle } from '../errors';
 import { EXPECTED_OBJECT, readJsonObject } from '../json';
 import { locateProject } from '../locate';
@@ -70,12 +74,14 @@ const itemsBody = importBatchSchema.merge(projectBody).extend({ type: z.string()
 const waitBody = projectBody.extend({
   windowId: z.string().min(1),
   timeoutSeconds: z.number().min(0).max(600).optional(),
-  // What the window just finished: a submission (with any conflicts it found), or a finalize request (its id).
+  // What the window just finished: a submission (with any conflicts it found), a finalize request (its id), or a
+  // Detect again (the repo).
   finished: z
     .object({
       submission: z.string().min(1).optional(),
       conflicts: z.array(z.object({ threads: z.array(z.string()).min(1), text: z.string().min(1) })).default([]),
       finalize: z.string().min(1).optional(),
+      detect: z.string().min(1).optional(),
     })
     .optional(),
 });
@@ -108,6 +114,30 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
   /** outputs/finalize.md from the config folder, or the shipped default when the user's copy is missing. */
   const finalizeRules = () =>
     fs.readFile(path.join(ctx.configDir, 'outputs', 'finalize.md'), 'utf8').catch(() => fs.readFile(path.join(ctx.defaultsDir, 'outputs', 'finalize.md'), 'utf8'));
+  /** A window that comes back (it opens a project, or listens again) is done with any Detect again it was handed. */
+  const cameBack = (windowId: string) => {
+    for (const h of rt.detects.values()) if (h.windowId === windowId) h.back = true;
+  };
+  /**
+   * How long a window holds a Detect again it was handed, even when it isn't alive as a listener: a window that got
+   * the request through /open isn't listening anywhere while its repo-setup subagent runs.
+   */
+  const DETECT_HOLD_MS = 10 * 60_000;
+  /**
+   * Hands this repo's Detect again request to the window, if there is one and nobody holds it. A request goes to one
+   * window at a time. A window that isn't back holds it while it's alive, or for DETECT_HOLD_MS after it was handed
+   * out, whichever lasts longer. Once a window came back from it, it isn't handed out again until Detect again is
+   * pressed again, so a repo-setup subagent that can't save never runs in a loop. Without a window id it's handed out
+   * every time, and nothing is recorded.
+   */
+  const handOutDetect = (repo: string, windowId: string | undefined) =>
+    rt.withLock('config:repos', async () => {
+      if (!(await pendingDetect(ctx.configDir, repo))) return false;
+      const held = rt.detects.get(repo);
+      if (held && (held.back || rt.listeners.isAlive(held.windowId) || rt.now() - held.at < DETECT_HOLD_MS)) return false;
+      if (windowId) rt.detects.set(repo, { windowId, at: rt.now(), back: false });
+      return true;
+    });
 
   r.post(
     '/open',
@@ -128,6 +158,20 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
           suggestedName: suggestRepoName(git.remote, git.root),
           model: models.repoSetup,
           next: `Start the dev-plumbing:repo-setup subagent (model ${models.repoSetup}) with the clone path. When it returns, call dp_open again with the same arguments.`,
+        });
+      }
+      // The user pressed Detect again for this repo's profile: that comes before opening.
+      if (body.windowId) cameBack(body.windowId);
+      if (await handOutDetect(profile.name, body.windowId)) {
+        return c.json({
+          kind: 'needs-profile',
+          redetect: true,
+          name: profile.name,
+          remote: normalizeRemote(git.remote),
+          clone: git.root,
+          suggestedName: profile.name,
+          model: models.repoSetup,
+          next: `The user asked for the ${profile.name} repo profile to be detected again. Start the dev-plumbing:repo-setup subagent (model ${models.repoSetup}) with the clone path. When it returns, call dp_open again with the same arguments.`,
         });
       }
       const folder = repoProjectsFolder(cfg.settings, profile, ctx.home);
@@ -205,14 +249,12 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
     handle(async (c) => {
       const body = await parse(c, profileBody);
       const git = await gitInfo(body.cwd);
+      const remote = git.remote ? normalizeRemote(git.remote) : null;
       if (body.profile === undefined) {
         const cfg = await loadConfig(ctx.configDir);
         const existing = matchProfile(git.remote, cfg.repos);
-        return c.json(
-          existing
-            ? { kind: 'existing', profile: existing }
-            : { kind: 'missing', remote: git.remote ? normalizeRemote(git.remote) : null, clone: git.root, suggestedName: suggestRepoName(git.remote, git.root) },
-        );
+        if (existing && (await pendingDetect(ctx.configDir, existing.name))) return c.json({ kind: 'redetect', profile: existing, remote, clone: git.root });
+        return c.json(existing ? { kind: 'existing', profile: existing } : { kind: 'missing', remote, clone: git.root, suggestedName: suggestRepoName(git.remote, git.root) });
       }
       // The repo-setup agent reads untrusted repo files, so it may not choose where the service writes.
       const raw = body.profile as Record<string, unknown> | null;
@@ -220,22 +262,32 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
       if (raw && typeof raw === 'object' && (raw.projectsFolder !== undefined || (link && typeof link === 'object' && link.enabled === true))) {
         throw new InputError('Leave out projectsFolder and linkIntoClones. The user sets those in Settings → Repos.');
       }
-      if (!git.remote) throw new InputError(NO_REMOTE);
+      if (!remote) throw new InputError(NO_REMOTE);
       const parsed = repoProfileSchema.safeParse(body.profile);
       if (!parsed.success) throw new InputError(`The profile isn't valid: ${formatZodError(parsed.error)}`);
       const profile = parsed.data;
-      const remote = normalizeRemote(git.remote);
       if (!profile.match.some((m) => normalizeRemote(m) === remote)) throw new InputError(`match must include ${remote}, this clone's remote.`);
-      const file = path.join(ctx.configDir, 'repos', `${profile.name}.json`);
-      await rt.withLock('config:repos', async () => {
+      const saved = await rt.withLock('config:repos', async () => {
         const cfg = await loadConfig(ctx.configDir);
         const existing = matchProfile(git.remote, cfg.repos);
-        if (existing) throw new InputError(`This repo already has a repo profile (${existing.name}). Change it in Settings → Repos.`);
+        if (existing) {
+          // Only Detect again replaces a profile, and only the parts detection finds. The rest stays the user's.
+          if (!(await pendingDetect(ctx.configDir, existing.name))) throw new InputError(`This repo already has a repo profile (${existing.name}). Change it in Settings → Repos.`);
+          const merged = mergeDetected(existing, profile);
+          await writeJsonAtomic(path.join(ctx.configDir, 'repos', `${existing.name}.json`), merged);
+          await finishDetect(ctx.configDir, existing.name);
+          rt.detects.delete(existing.name);
+          return merged;
+        }
+        const file = path.join(ctx.configDir, 'repos', `${profile.name}.json`);
         if (await fs.access(file).then(() => true, () => false)) throw new InputError(`A repo profile named ${profile.name} already exists. Pick another name.`);
         await writeJsonAtomic(file, profile);
+        // Settings shows when a profile was last detected, the first time included.
+        await finishDetect(ctx.configDir, profile.name);
+        return profile;
       });
       rt.events.emit({ type: 'config' });
-      return c.json({ saved: `repos/${profile.name}.json`, profile });
+      return c.json({ saved: `repos/${saved.name}.json`, profile: saved });
     }),
   );
 
@@ -285,6 +337,18 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
     };
   }
 
+  /** What dp_wait returns for a Detect again request: one repo-setup subagent, looking at the project's clone. */
+  function describeDetect(repo: string, clone: string, cfg: LoadedConfig) {
+    const model = cfg.agents.models.repoSetup;
+    return {
+      kind: 'detect-profile' as const,
+      repo,
+      clone,
+      model,
+      next: `Start one dev-plumbing:repo-setup subagent (model ${model}) with the prompt "Detect the repo profile for ${repo} again. The clone is at ${clone}." When it returns, call dp_wait with finished: { detect: "${repo}" }.`,
+    };
+  }
+
   r.post(
     '/wait',
     handle(async (c) => {
@@ -298,6 +362,8 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
       if (!alreadyWaiting) rt.listeners.setBusy(body.windowId, false);
       const isAlive = (w: string) => (w === body.windowId ? alreadyWaiting : rt.listeners.isAlive(w));
       const finished = body.finished;
+      // Back for more, or reporting a detect: any Detect again this window held is done.
+      if (!alreadyWaiting || finished?.detect) cameBack(body.windowId);
       const importDone = await rt.withLock(key, async () => {
         if (finished?.submission) {
           const owned = await readSubmission(ref.dir, finished.submission).then(
@@ -337,6 +403,12 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
           rt.listeners.setBusy(body.windowId, true);
           changed(ref);
           return c.json(picked.kind === 'submission' ? await describeSubmission(ref, picked.submission, cfg) : describeFinalize(ref, picked.request, cfg));
+        }
+        // Then a Detect again request for this repo. The subagent looks at the project's clone.
+        const clone = c.req.raw.signal.aborted ? null : await cloneOf(ctx, ref);
+        if (clone && (await handOutDetect(ref.repo, body.windowId))) {
+          rt.listeners.setBusy(body.windowId, true);
+          return c.json(describeDetect(ref.repo, clone, cfg));
         }
         if (round === 1 || timeoutMs === 0) break;
         if ((await rt.listeners.wait(body.windowId, key, timeoutMs, c.req.raw.signal)) !== 'notified') break;

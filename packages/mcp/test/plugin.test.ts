@@ -96,4 +96,14 @@ describe('the plugin', () => {
       expect(skill).toContain(s);
     }
   });
+
+  it("detects a repo profile again when the user asks, keeping the user's own settings", () => {
+    const setup = parseFrontMatter(read('plugin/agents/repo-setup.md'));
+    expect(String(setup.data.description)).toContain('Detect again');
+    for (const s of ['`redetect`', 'send the whole detected profile', "the service keeps your name, match and the user's own settings"]) expect(setup.content).toContain(s);
+    const skill = parseFrontMatter(read('plugin/skills/dev-plumbing/SKILL.md')).content;
+    for (const s of ['redetect: true', '**kind: detect-profile**', '> Detect the repo profile for `<repo>` again. The clone is at `<clone>`.', 'finished: { detect:']) {
+      expect(skill).toContain(s);
+    }
+  });
 });

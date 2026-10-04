@@ -59,7 +59,7 @@ export function createDpServer(o: { client: ServiceClient; cwd: string; windowId
     'dp_repo_profile',
     {
       description:
-        "Read this repo's profile, or save one you detected. Without profile: returns existing, or missing with the remote and a suggested name. With profile: saves it as repos/<name>.json. match must include this clone's remote. It never overwrites an existing profile.",
+        "Read this repo's profile, or save one you detected. Without profile: returns existing, missing (with the remote and a suggested name), or redetect when the user pressed Detect again (with the current profile). With profile: saves it as repos/<name>.json. match must include this clone's remote. It never overwrites an existing profile, except after Detect again, when it replaces only planFolders, schema, conventions, apps and sensitiveData.",
       inputSchema: { profile: repoProfileSchema.optional() },
     },
     async (args) => call('/repo-profile', { cwd: o.cwd, ...(args.profile ? { profile: args.profile } : {}) }),

@@ -3,15 +3,19 @@ import path from 'node:path';
 import { Hono } from 'hono';
 import {
   agentsFields,
+  findProjects,
   flatten,
   formatZodError,
+  lastDetected,
   loadConfig,
   newRulesFileTemplate,
   parseAgents,
   parseFields,
   parseRulesFile,
   parseSettings,
+  pendingDetect,
   repoProfileSchema,
+  requestDetect,
   resetToDefault,
   settingsFields,
   unflatten,
@@ -24,7 +28,7 @@ import {
 } from '@dev-plumbing/core';
 import type { AppContext } from '../context';
 import { EXPECTED_OBJECT, readJsonObject } from '../json';
-import type { Runtime } from '../runtime';
+import { projectKey, type Runtime } from '../runtime';
 
 const FILE = /^[a-z][a-z0-9-]*\.md$/;
 const NAME = /^[a-z0-9][a-z0-9._-]*$/i;
@@ -68,7 +72,11 @@ export function configRoutes(ctx: AppContext, rt: Runtime): Hono {
 
   r.get('/config', async (c) => {
     const cfg = await loadConfig(ctx.configDir);
-    return c.json({ dir: cfg.dir, settings: cfg.settings, agents: cfg.agents, repos: cfg.repos, types: summaries(cfg.types), outputs: cfg.outputs, problems: cfg.problems });
+    // Detect again: the profiles waiting for detection, and when each was last detected.
+    const pending: string[] = [];
+    for (const p of cfg.repos) if (await pendingDetect(ctx.configDir, p.name)) pending.push(p.name);
+    const detect = { pending, last: await lastDetected(ctx.configDir) };
+    return c.json({ dir: cfg.dir, settings: cfg.settings, agents: cfg.agents, repos: cfg.repos, types: summaries(cfg.types), outputs: cfg.outputs, problems: cfg.problems, detect });
   });
 
   /** Makes the login item match startAtLogin. Returns a message if it couldn't; the settings stay saved either way. */
@@ -115,6 +123,23 @@ export function configRoutes(ctx: AppContext, rt: Runtime): Hono {
     await writeJsonAtomic(path.join(ctx.configDir, 'repos', `${name}.json`), parsed.data);
     changed();
     return c.json({ value: parsed.data });
+  });
+
+  r.post('/repos/:name/detect', async (c) => {
+    const name = c.req.param('name');
+    const cfg = await loadConfig(ctx.configDir);
+    if (!NAME.test(name) || !cfg.repos.some((p) => p.name === name)) return c.json({ error: 'Unknown repo profile.' }, 404);
+    await rt.withLock('config:repos', async () => {
+      await requestDetect(ctx.configDir, name);
+      // A new request: it's handed out again, even to a window that came back from an earlier one.
+      rt.detects.delete(name);
+    });
+    // Wake the windows listening on this repo's projects, so detection starts now, not at their next poll.
+    for (const ref of await findProjects(cfg.settings, cfg.repos, ctx.home)) {
+      if (ref.repo === name) rt.listeners.notify(projectKey(ref.repo, ref.id));
+    }
+    changed();
+    return c.json({ ok: true });
   });
 
   r.get('/rules', async (c) => {

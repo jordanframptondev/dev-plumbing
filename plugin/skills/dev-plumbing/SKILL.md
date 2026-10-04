@@ -16,7 +16,7 @@ Your tools are `dp_open` and `dp_wait`. The subagents are `dev-plumbing:repo-set
 
 Call `dp_open`. If the user gave a path ($ARGUMENTS), pass it as `plan`; otherwise pass nothing. Then follow `kind`:
 
-- **needs-profile**: this repo has no repo profile yet. Start one `dev-plumbing:repo-setup` subagent with the result's `model`, and tell it the `clone`, `remote` and `suggestedName`. When it returns, tell the user in one line what it saved, and that they can change it in Settings → Repos. Then call `dp_open` again once, with the same arguments. If it still says needs-profile, tell the user the repo-setup subagent couldn't save a profile, point them to Settings → Repos, and stop.
+- **needs-profile**: this repo has no repo profile yet, or, with `redetect: true`, the user pressed **Detect again** for its profile (`name`). Start one `dev-plumbing:repo-setup` subagent with the result's `model`, and tell it the `clone`, `remote` and `suggestedName`. When it returns, tell the user in one line what it saved, and that they can change it in Settings → Repos. Then call `dp_open` again once, with the same arguments. If it still says needs-profile, tell the user the repo-setup subagent couldn't save a profile, point them to Settings → Repos, and stop.
 - **pick-project**: show the user the projects as a short list (title, and how many are waiting), ask which one to open with AskUserQuestion, then call `dp_open` with `project` set to its id. If the list is empty, tell the user to run `/dev-plumbing path/to/plan.md`, and stop.
 - **created** or **reopened**, with a non-empty `importTypes`: go to 2.
 - **reopened** with no `importTypes`: tell the user the project's `url`, then go to 3.
@@ -38,11 +38,12 @@ Each returns one line. A line starting with `Failed:` means that plumbing type w
 
 ## 3. Listen
 
-Call `dp_wait` with `repo` and `project`. It waits until the user presses **Send this thread**, **Submit all** or **Start finalize** in the app. Never call `dp_wait` while one is still running in the background for this project: that one is already listening.
+Call `dp_wait` with `repo` and `project`. It waits until the user presses **Send this thread**, **Submit all** or **Start finalize** in the app, or **Detect again** in Settings. Never call `dp_wait` while one is still running in the background for this project: that one is already listening.
 
 - If the call moves to the background (Claude Code does this after two minutes), that's expected. Tell the user once: "Listening for your answers in the app. You can keep chatting here." Then end your turn. When the result arrives, carry on below.
 - **kind: submission**: answer it (4).
 - **kind: finalize**: write the final (5).
+- **kind: detect-profile**: detect the repo profile again (6).
 - **kind: still-waiting**: call `dp_wait` again, without `finished`.
 - **kind: replaced**: a newer `dp_wait` for this project took over. Stop here: that one is listening.
 
@@ -64,6 +65,15 @@ The user pressed **Start finalize** in the app. The result has `request`, the fi
    > Write the final spec for repo `<repo>`, plumbing project `<project>`, request `<request>`.
 2. It returns one line. Tell the user that line. If it starts with `Failed:`, also tell them the Finalize page has **Try again**. Don't look at anything else: the user previews the final in the app and accepts it there.
 3. Call `dp_wait` again with `finished: { finalize: "<the request id>" }`. Then go back to 3.
+
+## 6. Detect the repo profile again
+
+The user pressed **Detect again** for this repo in Settings → Repos. The result has `repo`, `clone` and `model`.
+
+1. Start one `dev-plumbing:repo-setup` subagent with the result's `model`. Prompt, filled in:
+   > Detect the repo profile for `<repo>` again. The clone is at `<clone>`.
+2. It returns one line. Tell the user that line, and that they can change the profile in Settings → Repos.
+3. Call `dp_wait` again with `finished: { detect: "<repo>" }`. Then go back to 3.
 
 ## Rules
 
