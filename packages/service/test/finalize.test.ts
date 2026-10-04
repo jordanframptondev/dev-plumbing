@@ -218,6 +218,21 @@ describe('Finalize over HTTP', () => {
     expect((await t.send('POST', `${P}/finalize/accept`, { clone: t.repo })).body.error).toBe('The draft changed since Claude wrote this. Finalize again.');
   });
 
+  it('a proposal goes stale when an item is parked after Claude wrote it, and Accept refuses it', async () => {
+    const t = await setup();
+    await unblock(t);
+    const id = await pickedUp(t);
+    expect((await t.claude('/finalize', { ...base, request: id, markdown: FINAL })).status).toBe(200);
+    expect((await t.send('GET', `${P}/finalize`)).body.proposal).toMatchObject({ stale: false });
+    // Parking leaves the item out of the final, so the one Claude wrote no longer matches.
+    expect((await t.send('POST', `${P}/threads/t-questions-days/park`, { parked: true })).status).toBe(200);
+    expect((await t.send('GET', `${P}/finalize`)).body.proposal).toMatchObject({ stale: true });
+    const refused = await t.send('POST', `${P}/finalize/accept`, { clone: t.repo });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toBe('The draft changed since Claude wrote this. Finalize again.');
+    expect(await exists(path.join(t.repo, FINAL_FILE))).toBe(false);
+  });
+
   it('a finalize request goes back in the queue when its window goes away', async () => {
     let now = Date.parse('2026-10-03T10:00:00Z');
     const t = await setup({ now: () => now });

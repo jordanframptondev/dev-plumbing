@@ -3,6 +3,7 @@ import path from 'node:path';
 import { disableLoginItem, enableLoginItem, isLoginItemEnabled, loginItemPath } from '@dev-plumbing/core';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app';
+import { createRuntime } from '../src/runtime';
 import { call, makeContext, removeTempDirs } from './helpers';
 
 afterAll(removeTempDirs);
@@ -56,6 +57,22 @@ describe('config API', () => {
     expect((await call(app, '/api/repos/acme', put({ ...profile, match: [] }))).status).toBe(400);
     const renamed = await call(app, '/api/repos/acme', put({ ...profile, name: 'other' }));
     expect(((await renamed.json()) as Record<string, unknown>).error).toMatch(/must stay "acme"/);
+  });
+
+  it('saves a repo profile under the repos lock, so it never lands inside a Detect again merge', async () => {
+    const { ctx } = await makeContext();
+    const rt = createRuntime();
+    const app = createApp(ctx, rt);
+    const file = path.join(ctx.configDir, 'repos', 'acme.json');
+    let release = () => {};
+    const merging = rt.withLock('config:repos', () => new Promise<void>((resolve) => (release = resolve)));
+    const saving = call(app, '/api/repos/acme', put({ name: 'acme', match: ['github.com/acme/acme'] }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(await fs.access(file).then(() => true, () => false)).toBe(false);
+    release();
+    await merging;
+    expect((await saving).status).toBe(200);
+    expect(JSON.parse(await fs.readFile(file, 'utf8'))).toMatchObject({ name: 'acme' });
   });
 
   it('reads and saves a rules file, and refuses a broken header', async () => {

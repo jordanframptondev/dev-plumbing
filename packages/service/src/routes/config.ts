@@ -120,7 +120,8 @@ export function configRoutes(ctx: AppContext, rt: Runtime): Hono {
     const parsed = repoProfileSchema.safeParse(body);
     if (!parsed.success) return c.json({ error: formatZodError(parsed.error) }, 400);
     if (parsed.data.name !== name) return c.json({ error: `The profile's name must stay "${name}".` }, 400);
-    await writeJsonAtomic(path.join(ctx.configDir, 'repos', `${name}.json`), parsed.data);
+    // Detect again's merge reads, merges and writes this file under the same lock, so a save never lands in between.
+    await rt.withLock('config:repos', () => writeJsonAtomic(path.join(ctx.configDir, 'repos', `${name}.json`), parsed.data));
     changed();
     return c.json({ value: parsed.data });
   });
