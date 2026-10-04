@@ -2,7 +2,7 @@
 
 Plumb a feature plan before you build it. dev-plumbing turns a plan (for example a Superpowers spec) into a local web app where every question, concern, diagram and schema change has its own thread with Claude.
 
-**Status:** the Claude loop and the visual screens work. Finalize spec and Whiteboard Defense come next. The design is in [SPEC.md](SPEC.md), and the plans are in [docs/superpowers/plans](docs/superpowers/plans).
+**Status:** the Claude loop, the visual screens and Finalize spec work. Bring changes in and Whiteboard Defense come next. The design is in [SPEC.md](SPEC.md), and the plans are in [docs/superpowers/plans](docs/superpowers/plans).
 
 ## Requirements
 
@@ -34,9 +34,10 @@ Setup installs the Claude Code plugin for your user (skip it with `--no-plugin`)
 /dev-plumbing docs/specs/my-feature.md
 ```
 
-- **First time in a repo:** Claude detects a repo profile. You can check it in **Settings → Repos**.
+- **First time in a repo:** Claude detects a repo profile. You can check it in **Settings → Repos**. **Detect again** there looks at the repo afresh, and keeps the profile's name, its remotes and your own settings.
 - **Import:** one subagent per plumbing type reads the plan, and the app opens on the plumbing project.
 - **Answer:** in the app, answer threads, then press **Send this thread** or **Submit all**. Claude answers each thread with a subagent and listens for more.
+- **Finalize:** once nothing blocks it, **Finalize spec** asks Claude to write the final spec from the draft and your decisions. Preview it, and see what changed since the last final, then **Accept**. The final is saved in the plumbing project and copied into the repo as `<name>.final.md`, next to the plan, with its mockups in `<name>.assets/`. The app then suggests the next command, such as `writing-plans docs/specs/my-feature.final.md`.
 - **Keep chatting:** after two minutes the listening call moves to the background, so you can keep using the Claude window.
 - **No arguments:** `/dev-plumbing` lists this repo's plumbing projects to reopen.
 - **Keep this checkout:** the plugin and the app both run from its build here. After you pull, run `pnpm build`, restart the app (`dev-plumbing stop`, then `dev-plumbing start`), and start a new Claude Code session.

@@ -1,6 +1,8 @@
 // Plays the user for scripts/smoke-claude.sh. It waits for the import, checks the drawings the importers wrote,
-// answers one question the way the browser would, then waits for Claude's reply. Exits non-zero if anything
-// doesn't happen in time, or if a visual type has items without drawings.
+// answers one question the way the browser would, and waits for Claude's reply. Then it finalizes: it applies pending
+// small edits, accepts Claude's proposals, parks whatever still blocks Finalize, starts it, waits for the finalizer's
+// final, accepts it into the scratch repo and checks the copy. Exits non-zero if anything doesn't happen in time, if a
+// visual type has items without drawings, or if the final didn't land.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -130,4 +132,105 @@ const reply = await until("Claude's reply", async () => {
   return d.thread.messages.length > before && last?.author === 'claude' && d.thread.status !== 'with_claude' ? last : null;
 }, 15);
 log(`Claude replied in ${Math.round((Date.now() - sentAt) / 1000)} s: ${reply.text.slice(0, 160)}`);
+// Finalize, clearing what blocks it the way you could in the app, so the run doesn't wait on more answers:
+// 1. a small edit waiting to be applied is applied;
+// 2. a proposal waiting for your answer is accepted, so its item stays in the final (often the thread answered above,
+//    which may hold the only diagram). A plain accept with no note is applied and resolved straight away;
+// 3. whatever still blocks is parked.
+const F = `${P}/finalize`;
+const SMALL_EDIT = 'A small edit is waiting to be applied.';
+const PROPOSAL = 'A proposal is waiting for your answer.';
+async function finalizeView() {
+  const r = await call(F);
+  if (!r.ok) throw new Error(`Reading the Finalize page failed: ${r.body.error}`);
+  return r.body;
+}
+await until('every thread to come back from Claude', async () => {
+  const r = await call(P);
+  return r.ok && r.body.summary.counts.withClaude === 0;
+}, 10);
+let view = await finalizeView();
+const list = view.checklist;
+log(`Checklist: ${list.blocking.length} blocking, ${list.defaults.length} using their default, ${list.parked.length} parked, ${list.unreviewed.length} nobody reviewed`);
+if (!list.canStart) {
+  if (list.blocking.some((e) => e.reason === SMALL_EDIT)) {
+    const pending = (await call(`${P}/changes`)).body.entries.filter((e) => e.kind === 'small-edit' && e.state === 'pending');
+    for (const e of pending) {
+      const r = await call(`${P}/changes/${e.id}/apply`, 'POST', {});
+      log(`  Applied the small edit "${e.summary}": ${r.ok ? 'ok' : r.body.error}`);
+    }
+  }
+  // Claude's recommended option with a change, or else the first option with a change.
+  for (const e of list.blocking.filter((x) => x.reason === PROPOSAL)) {
+    const d = (await call(`${P}/threads/${e.threadId}`)).body;
+    const pick = d.open?.options.find((o) => o.id === d.open.recommended && o.change) ?? d.open?.options.find((o) => o.change);
+    if (!pick) continue;
+    await call(`${P}/threads/${e.threadId}/draft`, 'PUT', { optionId: pick.id });
+    const r = await call(`${P}/submit`, 'POST', { scope: 'thread', threadId: e.threadId });
+    log(`  Accepted "${pick.label}" on "${e.title}": ${r.ok ? r.body.message : r.body.error}`);
+  }
+  view = await finalizeView();
+  const toPark = new Map(view.checklist.blocking.filter((e) => e.reason !== SMALL_EDIT).map((e) => [e.threadId, e]));
+  for (const e of toPark.values()) {
+    const r = await call(`${P}/threads/${e.threadId}/park`, 'POST', { parked: true });
+    log(`  Parked "${e.title}" (${e.reason}): ${r.ok ? 'ok' : r.body.error}`);
+  }
+  view = await finalizeView();
+  if (!view.checklist.canStart) {
+    throw new Error(`Finalize is still blocked:\n- ${view.checklist.blocking.map((e) => `${e.title}: ${e.reason}`).join('\n- ')}`);
+  }
+}
+
+const asked = await call(F, 'POST', {});
+if (!asked.ok) throw new Error(`Starting Finalize failed: ${asked.body.error}`);
+log(`Started Finalize: ${asked.body.message}`);
+const askedAt = Date.now();
+const written = await until("Claude's final", async () => {
+  const v = await finalizeView();
+  return v.request?.state === 'proposed' || v.request?.state === 'failed' ? v : null;
+}, 15);
+if (written.request.state === 'failed') throw new Error(`The finalizer gave up: ${written.request.reason}`);
+const md = written.proposal.markdown;
+const count = (re) => (md.match(re) ?? []).length;
+const sections = count(/^## /gm);
+const mermaidBlocks = count(/^```mermaid$/gm);
+const schemaDiffs = count(/^```diff$/gm);
+const mockupLinks = count(/\.assets\/[^)\s]+\.html/g);
+log(`Claude's final arrived in ${Math.round((Date.now() - askedAt) / 1000)} s: ${md.length} chars, ${sections} sections, ${mermaidBlocks} Mermaid blocks, ${schemaDiffs} schema diffs, ${mockupLinks} mockup links`);
+if (written.proposal.stale) throw new Error("Claude's final is already stale.");
+
+// Accept into the scratch repo, the clone the plan came from.
+const clone = written.clones.find((c) => c.source)?.path ?? written.clones[0]?.path;
+if (!clone) throw new Error("None of the project's clones is on this Mac.");
+const accepted = await call(`${F}/accept`, 'POST', { clone });
+if (!accepted.ok) throw new Error(`Accept failed: ${accepted.body.error}`);
+const planDir = path.posix.dirname(home.project.source.path);
+const finalRel = `${planDir}/${written.name}.final.md`;
+log(`Accepted into ${clone}: ${finalRel}`);
+const missing = [];
+const finalFile = path.join(clone, finalRel);
+if (!fs.existsSync(finalFile)) missing.push(`${finalRel} isn't in the scratch repo.`);
+else {
+  const copy = fs.readFileSync(finalFile, 'utf8');
+  const kinds = [...copy.matchAll(/^```mermaid\n(\S+)/gm)].map((m) => m[1]);
+  const byKind = [...new Set(kinds)].map((k) => `${k} ${kinds.filter((x) => x === k).length}`).join(', ');
+  log(`  Mermaid blocks in the repo copy: ${kinds.length}${byKind ? ` (${byKind})` : ''}`);
+  if (!kinds.length) missing.push('The repo copy has no Mermaid block.');
+  if (copy.includes('{{')) missing.push('The repo copy still has a {{token}}.');
+  if (copy !== md) missing.push("The repo copy isn't the final that was previewed.");
+}
+const assetsDir = path.join(clone, planDir, `${written.name}.assets`);
+const assets = fs.existsSync(assetsDir) ? fs.readdirSync(assetsDir).filter((f) => f.endsWith('.html')) : [];
+log(`  Assets: ${assets.join(', ') || 'none'}`);
+if (!assets.length) missing.push(`${planDir}/${written.name}.assets has no mockup HTML.`);
+const after = (await call(P)).body;
+log(`  Project status: ${after.project.status}`);
+if (after.project.status !== 'finalized') missing.push(`The project is ${after.project.status}, not finalized.`);
+const finalized = (await call(`/api/projects?${new URLSearchParams({ q: after.project.title, tab: 'finalized', offset: '0', limit: '10' })}`)).body;
+const listed = finalized.items.some((s) => s.repo === 'acme-app' && s.id === after.project.id);
+log(`  Listed under Finalized: ${listed ? 'yes' : 'no'}`);
+if (!listed) missing.push("The app home doesn't list the project under Finalized.");
+log(`  Next: ${accepted.body.nextCommand}`);
+if (accepted.body.nextCommand !== `writing-plans ${finalRel}`) missing.push(`The next command is "${accepted.body.nextCommand}", not "writing-plans ${finalRel}".`);
+if (missing.length) throw new Error(`Finalize didn't land:\n- ${missing.join('\n- ')}`);
 log('Smoke test passed.');

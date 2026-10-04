@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # The real thing. Claude Code runs /dev-plumbing on a small plan, in a scratch repo with a Prisma schema and a
-# Tailwind v4 kit. scripts/smoke-user.mjs checks the drawings the importers wrote, then answers one thread the
-# way you would in the browser, and a thread subagent replies. It uses a temporary dev-plumbing home and leaves
-# your real ~/.dev-plumbing alone. It makes real model calls.
-#   scripts/smoke-claude.sh                   about 10 minutes
+# Tailwind v4 kit. scripts/smoke-user.mjs checks the drawings the importers wrote, answers one thread the way you
+# would in the browser, and a thread subagent replies. Then it finalizes: it accepts Claude's proposals, parks
+# whatever still blocks Finalize, starts it, waits for the finalizer's final, accepts it into the scratch repo and
+# checks the copy. It uses a temporary dev-plumbing home and leaves your real ~/.dev-plumbing alone. It makes real
+# model calls.
+#   scripts/smoke-claude.sh                   about 20 minutes (the finalizer runs on opus)
 #   DP_SMOKE_LONG=1 scripts/smoke-claude.sh   waits 35 minutes before answering, to check the long wait
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -132,4 +134,12 @@ echo "Importers started by the main window, in order (Flows and Phases should co
 grep -h '"parent_tool_use_id":null' "$work/transcript.jsonl" | grep -o 'Import plumbing type `[a-z0-9-]*`' | awk '!seen[$0]++' | nl -w2 -s'. ' || true
 echo "Transcript lines with a refused write (\"Nothing was saved\"):"
 grep -c 'Nothing was saved' "$work/transcript.jsonl" || true
+echo "Finalizer subagents started by the main window:"
+grep -h '"parent_tool_use_id":null' "$work/transcript.jsonl" | grep -o '"name":"Agent","input":{[^}]*"subagent_type":"dev-plumbing:finalizer"' | wc -l | tr -d ' ' || true
+echo "dp_finalize refusals (\"Fix these and call dp_finalize again\"):"
+grep -c 'Fix these and call dp_finalize again' "$work/transcript.jsonl" || true
+echo "Tokens in the finalizer's last dp_finalize call, by kind:"
+grep -h '"name":"mcp__plugin_dev-plumbing_dp__dp_finalize"' "$work/transcript.jsonl" | tail -1 | grep -o '{{[a-z]*:' | sort | uniq -c || true
+echo "Mermaid the finalizer wrote by hand in its dp_finalize calls (should be 0):"
+grep -h '"name":"mcp__plugin_dev-plumbing_dp__dp_finalize"' "$work/transcript.jsonl" | grep -c '```mermaid' || true
 exit "$status"
