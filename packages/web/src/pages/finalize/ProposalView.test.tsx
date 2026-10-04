@@ -48,6 +48,8 @@ function show(over: Partial<ComponentProps<typeof ProposalView>> = {}) {
         clones={[{ path: '/Users/you/acme-app', source: true }]}
         name="restock-reminders"
         sourcePath="docs/specs/restock-reminders.md"
+        canStart
+        blockingCount={0}
         {...over}
       />
     </QueryClientProvider>,
@@ -110,12 +112,23 @@ describe('ProposalView', () => {
       .mockResolvedValue({ request: { id: 'f-2', state: 'requested', requestedAt: AT }, listening: 'waiting', message: 'Waiting for Claude to write the final.' });
     show({ proposal: proposal({ stale: true }) });
     expect(screen.getByText(STALE)).toBeTruthy();
+    expect(screen.queryByText(/block Finalize/)).toBeNull();
     const acceptButton = screen.getByRole('button', { name: 'Accept' }) as HTMLButtonElement;
     expect(acceptButton.disabled).toBe(true);
     fireEvent.click(acceptButton);
     fireEvent.click(screen.getByRole('button', { name: 'Finalize again' }));
     await waitFor(() => expect(start).toHaveBeenCalledWith('acme-app', 'restock'));
     expect(accept).not.toHaveBeenCalled();
+  });
+
+  it('turns Finalize again off on a stale final while something blocks Finalize, and says what', () => {
+    const start = vi.spyOn(api, 'startFinalize');
+    show({ proposal: proposal({ stale: true }), canStart: false, blockingCount: 2 });
+    const again = screen.getByRole('button', { name: 'Finalize again' }) as HTMLButtonElement;
+    expect(again.disabled).toBe(true);
+    expect(screen.getByText('2 items block Finalize')).toBeTruthy();
+    fireEvent.click(again);
+    expect(start).not.toHaveBeenCalled();
   });
 
   it('asks before it discards', async () => {

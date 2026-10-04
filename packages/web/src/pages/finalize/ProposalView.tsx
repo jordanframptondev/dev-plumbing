@@ -9,6 +9,7 @@ import { DiffView } from '../../components/DiffView';
 import { inputClass } from '../../components/inputClass';
 import { Segmented } from '../../components/Segmented';
 import { formatUpdated } from '../../lib/time';
+import { blockedReason } from '../ProjectHeader';
 
 const STALE = 'The draft changed since Claude wrote this. Finalize again.';
 const DISCARD = 'Discard this final? Finalize again writes a new one.';
@@ -65,7 +66,8 @@ export const MARKDOWN_COMPONENTS: Components = { pre: CodeBlock, a: DocLink };
 
 /**
  * Claude's final, waiting for you: the preview (or what changed since the last final), and the accept form.
- * Accept copies it into the chosen clone; a final written for an older draft can't be accepted.
+ * Accept copies it into the chosen clone; a final written for an older draft can't be accepted. Its Finalize again
+ * is off, with the reason, while something blocks Finalize (`canStart` and `blockingCount` are the checklist's).
  */
 export function ProposalView({
   repo,
@@ -74,6 +76,8 @@ export function ProposalView({
   clones,
   name,
   sourcePath,
+  canStart,
+  blockingCount,
 }: {
   repo: string;
   project: string;
@@ -81,6 +85,8 @@ export function ProposalView({
   clones: FinalizeView['clones'];
   name: string;
   sourcePath: string;
+  canStart: boolean;
+  blockingCount: number;
 }) {
   const qc = useQueryClient();
   const [mode, setMode] = useState<'preview' | 'changes'>('preview');
@@ -159,10 +165,11 @@ export function ProposalView({
             Accept
           </Button>
           {proposal.stale && (
-            <Button variant="primary" disabled={busy} onClick={() => again.mutate()}>
+            <Button variant="primary" disabled={!canStart || busy} onClick={() => again.mutate()}>
               Finalize again
             </Button>
           )}
+          {proposal.stale && !canStart && <span className="text-[12px] text-ink-3">{blockedReason(blockingCount)}</span>}
           <Button
             disabled={busy}
             onClick={() => {

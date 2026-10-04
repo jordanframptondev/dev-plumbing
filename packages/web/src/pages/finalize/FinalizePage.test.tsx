@@ -186,6 +186,26 @@ describe('with a final from Claude', () => {
     expect(screen.queryByRole('button', { name: 'Start finalize' })).toBeNull();
   });
 
+  it("turns off a stale final's Finalize again while something blocks Finalize", async () => {
+    show(
+      view({
+        checklist: { blocking: [CHANNELS], defaults: [], parked: [], unreviewed: [], canStart: false },
+        request: {
+          id: 'f-1',
+          state: 'proposed',
+          requestedAt: AT,
+          pickedUpAt: AT,
+          pickedUpBy: 'w-1',
+          proposal: { at: AT, draftHash: 'f'.repeat(64), file: 'docs/final.proposed.md', length: 20, assets: [] },
+        },
+        proposal: { markdown: '# Restock reminders\n', stale: true, diff: null },
+      }),
+    );
+    const again = (await screen.findByRole('button', { name: 'Finalize again' })) as HTMLButtonElement;
+    expect(again.disabled).toBe(true);
+    expect(within(screen.getByTestId('proposal')).getByText('1 item blocks Finalize')).toBeTruthy();
+  });
+
   it('shows where the last final went, with Finalize again', async () => {
     show(
       view({

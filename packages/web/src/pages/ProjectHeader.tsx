@@ -10,17 +10,29 @@ import { draftsLabel, type useSubmit } from '../lib/useSubmit';
 /** Why Finalize spec is off: "1 item blocks Finalize". */
 export const blockedReason = (n: number) => `${n} ${n === 1 ? 'item blocks' : 'items block'} Finalize`;
 
-/** Off while something blocks Finalize and none is under way. A request already made stays reachable. */
-const finalizeBlocked = (home: ProjectHome) => !home.finalize.canStart && home.finalize.state === null;
+/**
+ * Off while something blocks Finalize and none is under way. A request already made stays reachable, and so does the
+ * page once the project has a final: its Next command and what changed since live there.
+ */
+const finalizeBlocked = (home: ProjectHome) => !home.finalize.canStart && home.finalize.state === null && !home.project.docs.exportedTo;
 
-/** Finalize spec (Finalize again once the project is Finalized) opens the Finalize page, or is off with the reason. */
+/**
+ * Finalize spec (Finalize again once the project is Finalized) opens the Finalize page. While it's off, the reason
+ * next to it is a quiet link to that page, which lists what blocks it.
+ */
 function FinalizeButton({ home, repo, project }: { home: ProjectHome; repo: string; project: string }) {
   const label = home.project.status === 'finalized' ? 'Finalize again' : 'Finalize spec';
   if (finalizeBlocked(home)) {
+    const reason = blockedReason(home.finalize.blockingCount);
     return (
-      <Button disabled title={blockedReason(home.finalize.blockingCount)}>
-        {label}
-      </Button>
+      <>
+        <Button disabled title={reason}>
+          {label}
+        </Button>
+        <Link to="/p/$repo/$project/finalize" params={{ repo, project }} className="self-center text-[12px] text-ink-3">
+          {reason} ›
+        </Link>
+      </>
     );
   }
   return (
@@ -60,7 +72,6 @@ export function ProjectHeader({ home, repo, project, submitAll, submitPrimary = 
       {/* Phones hide the buttons above, so Finalize gets its own row, with the reason it's off spelled out. */}
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 md:hidden">
         <FinalizeButton home={home} repo={repo} project={project} />
-        {finalizeBlocked(home) && <span className="text-[12px] text-ink-3">{blockedReason(home.finalize.blockingCount)}</span>}
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-3 text-[12px] text-ink-2">
         {s.counts.total > 0 && (

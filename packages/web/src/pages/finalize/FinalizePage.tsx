@@ -133,7 +133,16 @@ export function FinalizeBody({ repo, project }: { repo: string; project: string 
         </p>
       )}
       {proposal && home.data && (
-        <ProposalView repo={repo} project={project} proposal={proposal} clones={v.clones} name={v.name} sourcePath={home.data.project.source.path} />
+        <ProposalView
+          repo={repo}
+          project={project}
+          proposal={proposal}
+          clones={v.clones}
+          name={v.name}
+          sourcePath={home.data.project.source.path}
+          canStart={checklist.canStart}
+          blockingCount={checklist.blocking.length}
+        />
       )}
       <div data-testid="finalize-checklist" className="mt-2">
         {checklist.blocking.length === 0 && <p className="mt-5 text-[13px] text-ink-2">Nothing blocks Finalize.</p>}

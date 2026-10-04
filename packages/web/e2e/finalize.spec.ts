@@ -36,6 +36,34 @@ test('the checklist says what blocks Finalize, what uses its default and what no
   await expect(page).toHaveURL(new RegExp(`${p.url}/th/t-questions-channels$`));
 });
 
+test('the reason Finalize spec is off opens what blocks it, and once there is a final the page is always a click away', async ({ page }) => {
+  const p = await importProject('fin-reason', 'Finalize reason', { questions: [channels, lead] });
+  const P = `/api/projects/${p.repo}/${p.project}`;
+  await page.goto(p.url);
+  await expect(page.getByRole('button', { name: 'Finalize spec', exact: true })).toBeDisabled();
+  await page.getByRole('link', { name: '1 item blocks Finalize ›' }).click();
+  await expect(page).toHaveURL(new RegExp(`${p.url}/finalize$`));
+  await expect(page.getByTestId('checklist-blocking')).toBeVisible();
+  await expect(page.getByTestId('checklist-blocking')).toContainText('Which channels?');
+
+  // Park the blocking question, finalize and accept. Unparked, it blocks Finalize again.
+  await api(`${P}/threads/t-questions-channels/park`, 'POST', { parked: true });
+  await api(`${P}/finalize`, 'POST', {});
+  expect((await asClaude('/wait', { repo: p.repo, project: p.project, windowId: 'w-e2e-fin-reason', timeoutSeconds: 0 })).kind).toBe('finalize');
+  const { request } = await api(`${P}/finalize`);
+  await asClaude('/finalize', { repo: p.repo, project: p.project, request: request.id, markdown: '# Finalize reason\n\nSend by SMS.\n' });
+  await api(`${P}/finalize/accept`, 'POST', { clone: fixtureRepo() });
+  await api(`${P}/threads/t-questions-channels/park`, 'POST', { parked: false });
+
+  await page.goto(p.url);
+  await expect(page.getByRole('link', { name: /block Finalize/ })).toHaveCount(0);
+  await page.getByRole('link', { name: 'Finalize again', exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`${p.url}/finalize$`));
+  await expect(page.getByTestId('next-command')).toHaveText('writing-plans docs/specs/fin-reason.final.md');
+  await expect(page.getByTestId('checklist-blocking')).toContainText('Which channels?');
+  await expect(page.getByRole('button', { name: 'Finalize again' })).toBeDisabled();
+});
+
 test('once nothing blocks it, Finalize waits for a Claude window, then says Claude is writing', async ({ page }) => {
   const p = await importProject('fin-start', 'Finalize start', { questions: [channels, lead] });
   const P = `/api/projects/${p.repo}/${p.project}`;
@@ -78,7 +106,7 @@ test.describe('on a phone', () => {
     const p = await importProject('fin-phone-start', 'Finalize phone start', { questions: [channels, lead] });
     await page.goto(p.url);
     await expect(page.getByRole('button', { name: 'Finalize spec', exact: true })).toBeDisabled();
-    await expect(page.getByText('1 item blocks Finalize')).toBeVisible();
+    await expect(page.getByRole('link', { name: '1 item blocks Finalize ›' })).toHaveAttribute('href', `${p.url}/finalize`);
     await api(`/api/projects/${p.repo}/${p.project}/threads/t-questions-channels/park`, 'POST', { parked: true });
     await page.getByRole('link', { name: 'Finalize spec', exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`${p.url}/finalize$`));
