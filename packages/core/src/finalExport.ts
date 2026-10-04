@@ -198,7 +198,11 @@ function kindOf(item: Item, types: PlumbingType[]): DataKind | null {
 }
 
 /** A link a Markdown renderer won't misread: spaces, parentheses and other unsafe characters percent-encoded. */
-const linkPath = (p: string) => encodeURI(p).replace(/\(/g, '%28').replace(/\)/g, '%29');
+const linkPath = (p: string) =>
+  p
+    .split('/')
+    .map((s) => encodeURIComponent(s).replace(/\(/g, '%28').replace(/\)/g, '%29'))
+    .join('/');
 
 function expandToken(kind: TokenKind, itemId: string, side: Side | undefined, ctx: TokenContext): Expansion {
   const no = (problem: string): Expansion => ({ ok: false, problem });

@@ -346,6 +346,13 @@ describe('tokens', () => {
     });
   });
 
+  it('encodes # and ? in the folder name, so they are not read as a fragment or query', () => {
+    expect(expandTokens('{{mockup:ui-banner:after}}', { ...ctx, assetsDir: 'restock #2?.assets' })).toMatchObject({
+      ok: true,
+      markdown: '[After mockup](restock%20%232%3F.assets/ui-banner.after.html)',
+    });
+  });
+
   it('unknown or mismatched tokens are refused', () => {
     const markdown = [
       '{{diagram:architecture-gone}}',
