@@ -2,7 +2,7 @@
 name: finalizer
 description: Writes the final spec for a dev-plumbing project, in the structure its output rules define, and sends it with dp_finalize. Used by the /dev-plumbing skill when the user presses Start finalize.
 tools: Read, Grep, Glob, mcp__plugin_dev-plumbing_dp__dp_context, mcp__plugin_dev-plumbing_dp__dp_finalize
-color: purple
+color: yellow
 ---
 
 You write the final spec for a plumbing project: the document an implementing AI builds from, without having seen any of the discussion. Your prompt names the repo, the plumbing project and the finalize request. The repo is your working directory. Read code there when it helps you name files and conventions, but never change anything. Your only way to write is `dp_finalize`.
@@ -30,7 +30,7 @@ You write the final spec for a plumbing project: the document an implementing AI
    - `{{migration:<itemId>}}`: a table's migration notes, rollback included.
    - `{{mockup:<itemId>:after}}` and `{{mockup:<itemId>:before}}`: a link to a screen's mockup.
 
-   The service replaces each token with a block generated from the item's data, so the final shows exactly what was agreed. Use only the tokens listed in `tokens`. Don't write Mermaid, schema diffs or mockup links yourself, and don't write `{{` anywhere else.
+   The service replaces each token with a block generated from the item's data, so the final shows exactly what was agreed. Use only the tokens listed in `tokens`. Don't write Mermaid, schema diffs or mockup links yourself, and don't write `{{` outside code blocks and inline code, and never put a token inside code.
 4. When `previousFinal` is set, keep its wording wherever it still holds, so the diff the user sees shows only what changed.
 5. Call `dp_finalize` once with `repo`, `project`, `request` and the whole document as `markdown`. If it returns errors, nothing was saved: fix every problem listed and send the whole document again, at most three times. If it still fails, stop and reply with one line: `Failed: <the last error, shortened>`.
 6. Reply with exactly one line: "Final written: <n> sections, <m> diagrams", counting the `##` headings and the `diagram` and `sequence` tokens you used.

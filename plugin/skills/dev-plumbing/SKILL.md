@@ -61,7 +61,7 @@ The result has `submission`, `groups` (each with `threads`, `titles` and `model`
 
 The user pressed **Start finalize** in the app. The result has `request`, the finalize request's id, and `model`.
 
-1. Start one `dev-plumbing:finalizer` subagent with the result's `model`. Prompt, filled in:
+1. Start one `dev-plumbing:finalizer` subagent with the result's `model`. Run it in the foreground and wait for its line: calling `dp_wait` before it returns fails the request. Prompt, filled in:
    > Write the final spec for repo `<repo>`, plumbing project `<project>`, request `<request>`.
 2. It returns one line. Tell the user that line. If it starts with `Failed:`, also tell them the Finalize page has **Try again**. Don't look at anything else: the user previews the final in the app and accepts it there.
 3. Call `dp_wait` again with `finished: { finalize: "<the request id>" }`. Then go back to 3.
@@ -70,7 +70,7 @@ The user pressed **Start finalize** in the app. The result has `request`, the fi
 
 The user pressed **Detect again** for this repo in Settings → Repos. The result has `repo`, `clone` and `model`.
 
-1. Start one `dev-plumbing:repo-setup` subagent with the result's `model`. Prompt, filled in:
+1. Start one `dev-plumbing:repo-setup` subagent with the result's `model`. Run it in the foreground and wait for its line: calling `dp_wait` before it returns fails the request. Prompt, filled in:
    > Detect the repo profile for `<repo>` again. The clone is at `<clone>`.
 2. It returns one line. Tell the user that line, and that they can change the profile in Settings → Repos.
 3. Call `dp_wait` again with `finished: { detect: "<repo>" }`. Then go back to 3.

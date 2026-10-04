@@ -88,13 +88,24 @@ describe('the plugin', () => {
       'Call `dp_finalize` once',
       'at most three times',
       'Final written:',
+      "don't write `{{` outside code blocks and inline code, and never put a token inside code.",
     ]) {
       expect(finalizer).toContain(s);
     }
+    expect(finalizer).not.toContain('anywhere else');
+    expect(parseFrontMatter(read('plugin/agents/finalizer.md')).data.color).toBe('yellow');
     const skill = parseFrontMatter(read('plugin/skills/dev-plumbing/SKILL.md')).content;
     for (const s of ['dev-plumbing:finalizer', '**kind: finalize**', '> Write the final spec for repo `<repo>`, plumbing project `<project>`, request `<request>`.', 'finished: { finalize:']) {
       expect(skill).toContain(s);
     }
+  });
+
+  it('runs the finalizer and the detection subagent in the foreground, before listening again', () => {
+    const skill = parseFrontMatter(read('plugin/skills/dev-plumbing/SKILL.md')).content;
+    const section = (from: string, to: string) => skill.slice(skill.indexOf(from), skill.indexOf(to));
+    const foreground = 'Run it in the foreground and wait for its line: calling `dp_wait` before it returns fails the request.';
+    expect(section('## 5. Write the final', '## 6.')).toContain(foreground);
+    expect(section('## 6. Detect the repo profile again', '## Rules')).toContain(foreground);
   });
 
   it("detects a repo profile again when the user asks, keeping the user's own settings", () => {
