@@ -2,6 +2,7 @@ import { createRootRoute, createRoute, createRouter } from '@tanstack/react-rout
 import { PageMessage } from './components/PageMessage';
 import { AppHome } from './pages/AppHome';
 import { DocumentView } from './pages/DocumentView';
+import { FinalizePage } from './pages/finalize/FinalizePage';
 import { InboxView } from './pages/InboxView';
 import { ProjectLayout } from './pages/ProjectLayout';
 import { Root } from './pages/Root';
@@ -25,6 +26,7 @@ const typeRoute = createRoute({
 });
 const threadRoute = createRoute({ getParentRoute: () => projectRoute, path: 'th/$thread', component: ThreadView });
 const docRoute = createRoute({ getParentRoute: () => projectRoute, path: 'd/$doc', component: DocumentView });
+const finalizeRoute = createRoute({ getParentRoute: () => projectRoute, path: 'finalize', component: FinalizePage });
 const settingsRoute = createRoute({ getParentRoute: () => rootRoute, path: '/settings', component: SettingsPage });
 const rulesRoute = createRoute({ getParentRoute: () => rootRoute, path: '/rules', component: RulesPage });
 const ruleRoute = createRoute({ getParentRoute: () => rootRoute, path: '/rules/$file', component: RuleEditorPage });
@@ -32,7 +34,7 @@ const outputRoute = createRoute({ getParentRoute: () => rootRoute, path: '/rules
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
-  projectRoute.addChildren([inboxRoute, typeRoute, threadRoute, docRoute]),
+  projectRoute.addChildren([inboxRoute, typeRoute, threadRoute, docRoute, finalizeRoute]),
   settingsRoute,
   rulesRoute,
   ruleRoute,

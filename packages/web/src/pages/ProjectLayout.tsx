@@ -19,6 +19,8 @@ export function ProjectLayout() {
   const navigate = useNavigate();
   const onInbox = Boolean(useMatch({ from: '/p/$repo/$project/', shouldThrow: false }));
   const onThread = Boolean(useMatch({ from: '/p/$repo/$project/th/$thread', shouldThrow: false }));
+  // The Finalize page has its own main action, so Submit all steps back there, as it does on a thread.
+  const onFinalize = Boolean(useMatch({ from: '/p/$repo/$project/finalize', shouldThrow: false }));
   const [mode, setMode] = useState<Mode>('view');
   const tab: Tab = mode === 'defense' ? 'defense' : mode === 'list' ? 'plumbing' : onInbox ? 'inbox' : 'plumbing';
   const changeTab = (next: Tab) => {
@@ -45,7 +47,7 @@ export function ProjectLayout() {
         <Link to="/" className="mb-1 inline-block text-[13px] text-slate md:hidden">
           ‹ Projects
         </Link>
-        <ProjectHeader home={d} repo={repo} project={project} submitAll={submitAll} submitPrimary={!onThread} />
+        <ProjectHeader home={d} repo={repo} project={project} submitAll={submitAll} submitPrimary={!onThread && !onFinalize} />
         <div className="mt-4 md:hidden">
           <Segmented<Tab>
             label="Project sections"
@@ -68,7 +70,7 @@ export function ProjectLayout() {
           <Outlet />
         </div>
       </main>
-      {!onThread && (
+      {!onThread && !onFinalize && (
         <div className="fixed inset-x-0 bottom-0 border-t-[0.5px] border-separator bg-sidebar px-4 pb-6 pt-3 backdrop-blur-xl md:hidden">
           {(submitAll.data || submitAll.error) && (
             <p role="status" data-testid="submit-notice-phone" className={`mb-2 text-[12.5px] ${submitAll.error ? 'text-seal' : 'text-ink-2'}`}>

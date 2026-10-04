@@ -5,6 +5,10 @@ import type {
   ConfigProblem,
   MockupKitInfo,
   DiscoveryProblem,
+  FinalizeRequest,
+  FinalizeView,
+  ListeningState,
+  PlumbingProject,
   ProjectHome,
   ProjectSummary,
   RepoProfile,
@@ -49,6 +53,10 @@ export type Tab = 'active' | 'finalized' | 'all';
 export type ConfigResponse = { dir: string; settings: Settings; agents: AgentsConfig; repos: RepoProfile[]; types: RuleSummary[]; outputs: string[]; problems: ConfigProblem[] };
 export type RulesResponse = { types: RuleSummary[]; broken: { file: string; error: string }[]; outputs: string[] };
 export type FileResponse = { text: string; hasDefault: boolean };
+/** Start finalize: the saved request, whether a Claude window is listening, and what to tell you. */
+export type StartFinalizeResponse = { request: FinalizeRequest; listening: ListeningState; message: string };
+/** Accept: where the final was copied, and the command to run next. */
+export type AcceptFinalResponse = { exportedTo: NonNullable<PlumbingProject['docs']['exportedTo']>; nextCommand: string };
 
 export const api = {
   config: () => request<ConfigResponse>('/api/config'),
@@ -80,4 +88,8 @@ export const api = {
   changeAction: (repo: string, id: string, changeId: string, action: 'undo' | 'apply') =>
     request<{ ok: true }>(`${proj(repo, id)}/changes/${enc(changeId)}/${action}`, send('POST', {})),
   reset: (file: string) => request<{ ok: true; loginItemError?: string }>('/api/reset', send('POST', { file })),
+  finalize: (repo: string, id: string) => request<FinalizeView>(`${proj(repo, id)}/finalize`),
+  startFinalize: (repo: string, id: string) => request<StartFinalizeResponse>(`${proj(repo, id)}/finalize`, send('POST', {})),
+  acceptFinal: (repo: string, id: string, clone: string) => request<AcceptFinalResponse>(`${proj(repo, id)}/finalize/accept`, send('POST', { clone })),
+  discardProposal: (repo: string, id: string) => request<{ ok: true }>(`${proj(repo, id)}/finalize/discard`, send('POST', {})),
 };

@@ -1,10 +1,34 @@
 import type { ProjectHome } from '@dev-plumbing/core/schemas';
 import { useMutation } from '@tanstack/react-query';
+import { Link } from '@tanstack/react-router';
 import { api } from '../api/client';
-import { Button } from '../components/Button';
+import { Button, buttonClass } from '../components/Button';
 import { ListeningMark } from '../components/ListeningMark';
 import { ProgressBar } from '../components/ProgressBar';
 import { draftsLabel, type useSubmit } from '../lib/useSubmit';
+
+/** Why Finalize spec is off: "1 item blocks Finalize". */
+export const blockedReason = (n: number) => `${n} ${n === 1 ? 'item blocks' : 'items block'} Finalize`;
+
+/** Off while something blocks Finalize and none is under way. A request already made stays reachable. */
+const finalizeBlocked = (home: ProjectHome) => !home.finalize.canStart && home.finalize.state === null;
+
+/** Finalize spec (Finalize again once the project is Finalized) opens the Finalize page, or is off with the reason. */
+function FinalizeButton({ home, repo, project }: { home: ProjectHome; repo: string; project: string }) {
+  const label = home.project.status === 'finalized' ? 'Finalize again' : 'Finalize spec';
+  if (finalizeBlocked(home)) {
+    return (
+      <Button disabled title={blockedReason(home.finalize.blockingCount)}>
+        {label}
+      </Button>
+    );
+  }
+  return (
+    <Link to="/p/$repo/$project/finalize" params={{ repo, project }} className={buttonClass()}>
+      {label}
+    </Link>
+  );
+}
 
 export function ProjectHeader({ home, repo, project, submitAll, submitPrimary = true }: { home: ProjectHome; repo: string; project: string; submitAll: ReturnType<typeof useSubmit>; submitPrimary?: boolean }) {
   const s = home.summary;
@@ -16,7 +40,7 @@ export function ProjectHeader({ home, repo, project, submitAll, submitPrimary = 
         <h1 className="min-w-0 flex-1 text-[26px] font-bold leading-8 tracking-tight">{home.project.title}</h1>
         <div className="hidden gap-2 md:flex">
           <Button disabled title="Whiteboard Defense arrives in a later update.">Whiteboard Defense</Button>
-          <Button disabled title="Finalize spec arrives in a later update.">Finalize spec</Button>
+          <FinalizeButton home={home} repo={repo} project={project} />
           <Button variant={submitPrimary ? 'primary' : 'secondary'} disabled={!s.counts.drafts || submitAll.isPending} onClick={() => submitAll.mutate({ scope: 'all' })}>
             Submit all · {draftsLabel(s.counts.drafts)}
           </Button>
@@ -32,6 +56,11 @@ export function ProjectHeader({ home, repo, project, submitAll, submitPrimary = 
           Open file
         </button>
         {open.error && <span className="text-seal">{(open.error as Error).message}</span>}
+      </div>
+      {/* Phones hide the buttons above, so Finalize gets its own row, with the reason it's off spelled out. */}
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 md:hidden">
+        <FinalizeButton home={home} repo={repo} project={project} />
+        {finalizeBlocked(home) && <span className="text-[12px] text-ink-3">{blockedReason(home.finalize.blockingCount)}</span>}
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-3 text-[12px] text-ink-2">
         {s.counts.total > 0 && (
