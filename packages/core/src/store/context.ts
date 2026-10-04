@@ -1,18 +1,30 @@
+import { availableTokens } from '../finalExport';
 import {
   dataKindOf,
   dataShapeDoc,
+  displayStatus,
   firstParagraph,
   headingsOf,
+  parseData,
   sectionFor,
+  type ClaudeMessage,
+  type CodeRef,
+  type Decision,
+  type DisplayStatus,
   type Item,
   type Message,
   type PlumbingType,
   type RepoProfile,
   type Screen,
+  type Thread,
   type ThreadStatus,
+  type YouMessage,
 } from '../schemas';
+import { finalizeChecklist } from './checklist';
 import { activeDecisions } from './decisions';
-import { docPath, readDecisions, readDocText, readItem, readItems, readProjectFile, readThread, StoreError } from './io';
+import { finalName } from './finalize';
+import { docPath, readDecisions, readDocText, readItem, readItems, readProjectFile, readThread, readThreads, StoreError } from './io';
+import { presetLabel } from './threads';
 
 export type ThreadPack = {
   project: { repo: string; id: string; title: string; summary: string };
@@ -116,5 +128,145 @@ export async function importPack(o: { dir: string; typeId: string; types: Plumbi
         }
       : null,
     existingItems: items.map((i) => ({ id: i.id, type: i.type, title: i.title })),
+  };
+}
+
+export type FinalizePack = {
+  project: { repo: string; id: string; title: string; sourcePath: string; name: string };
+  /** outputs/finalize.md: the final's structure and rules. */
+  rules: string;
+  draft: string;
+  /** Every item that goes into the final, in plumbing-type order. Parked items and items of disabled types are left out of the final, so they aren't here. */
+  items: {
+    id: string;
+    type: string;
+    typeTitle: string;
+    title: string;
+    summary: string;
+    body: string | null;
+    fields: Record<string, string>;
+    status: DisplayStatus;
+    codeRefs: CodeRef[];
+    dataSummary: string | null;
+  }[];
+  /** The active decisions, each with what was chosen, what was turned down, and Claude's reasoning from its thread. */
+  decisions: { text: string; itemId: string | null; itemTitle: string | null; chosen: string | null; rejected: string[]; why: string | null }[];
+  /** Questions nobody answered: the final uses their default. */
+  defaults: { itemId: string; title: string; defaultValue: string }[];
+  /** Items Claude raised that are still waiting for an answer, none of them blocking. */
+  openItems: { itemId: string; title: string; typeTitle: string }[];
+  conventions: string[];
+  /** The tokens the finalizer may use for diagrams, flows, schema blocks, migrations and mockup links, one per line. */
+  tokens: string[];
+  previousFinal: string | null;
+};
+
+/** Claude's reasoning for a decision is cut to this many characters. */
+const WHY_MAX = 600;
+const clip = (text: string, max: number) => (text.length <= max ? text : `${text.slice(0, max - 1)}…`);
+const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+const DIAGRAM_KIND = { system: 'System diagram', data_flow: 'Data flow diagram' } as const;
+const FLOW_KIND = { user: 'User flow', system: 'System flow', both: 'User and system flow' } as const;
+
+/** A short phrase saying what an item's drawing holds, or null when it has none, or none that parses. */
+function dataSummary(item: Item, type: PlumbingType | undefined): string | null {
+  const kind = type ? dataKindOf(type) : null;
+  if (!kind || item.data === undefined) return null;
+  if (kind === 'diagram') {
+    const d = parseData('diagram', item.data);
+    if (!d.ok) return null;
+    const groups = d.data.groups.length ? `, ${count(d.data.groups.length, 'group')}` : '';
+    return `${DIAGRAM_KIND[d.data.kind]}: ${count(d.data.nodes.length, 'box', 'boxes')}${groups}`;
+  }
+  if (kind === 'database') {
+    const t = parseData('database', item.data);
+    return t.ok ? `Table ${t.data.model} (${t.data.change}): ${count(t.data.fields.length, 'field')}` : null;
+  }
+  if (kind === 'flows') {
+    const f = parseData('flows', item.data);
+    return f.ok ? `${FLOW_KIND[f.data.kind]}: ${count(f.data.steps.length, 'step')}` : null;
+  }
+  if (kind === 'mockups') {
+    const m = parseData('mockups', item.data);
+    if (!m.ok) return null;
+    const sides = [m.data.after?.trim() ? 'After' : '', m.data.before?.trim() ? 'Before' : ''].filter(Boolean).join(' and ') || 'no markup';
+    return `Mockup for ${[m.data.location.app, m.data.location.route].filter(Boolean).join(' ')}: ${sides}`;
+  }
+  const p = parseData('timeline', item.data);
+  return p.ok ? `Phase ${p.data.order}: ${count(p.data.itemIds.length, 'item')}` : null;
+}
+
+/**
+ * A decision, read back from its thread up to the moment it was made (a thread can carry on after it):
+ * - chosen: the option or preset in your last answer;
+ * - rejected: the other options on the Claude message you answered, when you picked one;
+ * - why: Claude's last message by then, which is the resolving reply when Claude resolved it.
+ */
+function decisionDetail(d: Decision, o: { threads: Map<string, Thread>; items: Map<string, Item>; types: PlumbingType[] }): FinalizePack['decisions'][number] {
+  const thread = o.threads.get(d.threadId);
+  const item = o.items.get(thread?.itemId ?? d.itemIds[0] ?? '');
+  const said: Message[] = (thread?.messages ?? []).filter((m) => m.at <= d.at);
+  const answer = [...said].reverse().find((m): m is YouMessage => m.author === 'you');
+  const asked = answer ? [...said.slice(0, said.indexOf(answer))].reverse().find((m): m is ClaudeMessage => m.author === 'claude' && Boolean(m.options?.length)) : undefined;
+  const picked = answer?.optionId;
+  const preset = item && picked?.startsWith('preset:') ? presetLabel(o.types, item, picked) : undefined;
+  const reasoning = [...said].reverse().find((m): m is ClaudeMessage => m.author === 'claude');
+  return {
+    text: d.text,
+    itemId: item?.id ?? null,
+    itemTitle: item?.title ?? null,
+    chosen: answer?.optionLabel ?? preset ?? null,
+    rejected: picked ? (asked?.options ?? []).filter((op) => op.id !== picked).map((op) => op.label) : [],
+    why: reasoning ? clip(reasoning.text, WHY_MAX) : null,
+  };
+}
+
+/**
+ * What the finalizer receives: the output rules, the whole draft, every item that goes into the final with a summary of
+ * its drawing, the decisions with their why, the defaults that will be used, the items still open, the repo's
+ * conventions, the tokens it may place, and the previous final. `rules` is read by the service from the config folder.
+ */
+export async function finalizePack(o: { dir: string; types: PlumbingType[]; profile?: RepoProfile; rules: string }): Promise<FinalizePack> {
+  const project = await readProjectFile(o.dir);
+  const { values: allItems } = await readItems(o.dir);
+  const { values: threads } = await readThreads(o.dir);
+  const threadById = new Map(threads.map((t) => [t.id, t]));
+  const typeOf = (item: Item) => o.types.find((t) => t.id === item.type);
+  const statusOf = (item: Item): DisplayStatus => {
+    const thread = threadById.get(item.threadId);
+    return thread ? displayStatus(thread) : 'idle';
+  };
+  const order = (item: Item) => typeOf(item)?.order ?? Number.MAX_SAFE_INTEGER;
+  // Parked items and items of disabled plumbing types don't go into the final (saveProposal refuses their tokens).
+  const items = allItems
+    .filter((i) => statusOf(i) !== 'parked' && typeOf(i)?.enabled !== false)
+    .sort((a, b) => order(a) - order(b) || a.title.localeCompare(b.title));
+  const checklist = await finalizeChecklist(o.dir, o.types);
+  const blocking = new Set(checklist.blocking.map((e) => e.itemId));
+  const context = { threads: threadById, items: new Map(allItems.map((i) => [i.id, i])), types: o.types };
+  return {
+    project: { repo: project.repo, id: project.id, title: project.title, sourcePath: project.source.path, name: finalName(project.source.path) },
+    rules: o.rules,
+    draft: await readDocText(o.dir, project.docs.draft),
+    items: items.map((i) => ({
+      id: i.id,
+      type: i.type,
+      typeTitle: typeOf(i)?.title ?? i.type,
+      title: i.title,
+      summary: i.summary,
+      body: i.body ?? null,
+      fields: i.fields ?? {},
+      status: statusOf(i),
+      codeRefs: i.codeRefs ?? [],
+      dataSummary: dataSummary(i, typeOf(i)),
+    })),
+    decisions: activeDecisions(await readDecisions(o.dir)).map((d) => decisionDetail(d, context)),
+    defaults: checklist.defaults.map((e) => ({ itemId: e.itemId, title: e.title, defaultValue: e.defaultValue })),
+    openItems: items
+      .filter((i) => ['your_turn', 'draft'].includes(statusOf(i)) && !blocking.has(i.id))
+      .map((i) => ({ itemId: i.id, title: i.title, typeTitle: typeOf(i)?.title ?? i.type })),
+    conventions: o.profile?.conventions ?? [],
+    tokens: availableTokens(items, o.types),
+    previousFinal: await readDocText(o.dir, project.docs.final ?? 'docs/final.md').catch(() => null),
   };
 }
