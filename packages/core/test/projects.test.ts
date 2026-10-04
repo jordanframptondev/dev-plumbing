@@ -4,7 +4,8 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { installDefaults, loadConfig } from '../src/config';
 import { writeDemoProjects } from '../src/demo';
 import { dataKindOf, dataProblems, defaultSettings, parseData, repoProfileSchema } from '../src/schemas';
-import { readItems } from '../src/store/io';
+import { writeJsonAtomic } from '../src/atomic';
+import { readItems, readProjectFile, readThread, writeHistoryEntry, writeProjectFile, writeThread } from '../src/store/io';
 import {
   discoverProjects,
   findProjects,
@@ -276,5 +277,31 @@ describe('phase rows', () => {
     const dir = await seedProject({ pairs: [old, odd, pair('q1', { title: 'Who gets reminders?' })] });
     expect((await loadTypeItems(at(dir), types, 'phases'))?.items.map((i) => i.itemRefs)).toEqual([{}, {}]);
     expect((await loadTypeItems(at(dir), types, 'questions'))?.items.map((i) => i.itemRefs)).toEqual([{}]);
+  });
+});
+
+describe('the project home for Finalize', () => {
+  const FINAL_AT = '2026-10-02T10:00:00.000Z';
+  const finalizeOf = async (dir: string) => (await loadProjectHome({ repo: 'acme', id: 'restock', dir }, TYPES)).finalize;
+
+  it('says whether Finalize can start, how far it got, and the changes since the last final', async () => {
+    const dir = await seedProject({
+      pairs: [pair('q1', { title: 'Who gets reminders?', fields: { blocking: 'true' } }), pair('q2', { title: 'Lead time', fields: { default: '5 days' } })],
+    });
+    expect(await finalizeOf(dir)).toEqual({ canStart: false, blockingCount: 1, state: null, changesSinceFinal: 0 });
+
+    await writeThread(dir, { ...(await readThread(dir, 't-q1')), status: 'resolved' });
+    await writeJsonAtomic(path.join(dir, 'finalize.json'), { id: 'f-1', state: 'writing', requestedAt: FINAL_AT, pickedUpAt: FINAL_AT, pickedUpBy: 'w-a' });
+    expect(await finalizeOf(dir)).toEqual({ canStart: true, blockingCount: 0, state: 'writing', changesSinceFinal: 0 });
+
+    const project = await readProjectFile(dir);
+    const exportedTo = { clone: '/tmp/acme', path: 'docs/specs/restock.final.md', at: FINAL_AT, assets: [] };
+    await writeProjectFile(dir, { ...project, status: 'finalized', docs: { ...project.docs, final: 'docs/final.md', exportedTo } });
+    const change = { at: FINAL_AT, threadId: 't-q2', kind: 'accept' as const, summary: 'Lead time: 7 days', change: {}, itemsBefore: {}, itemsAfter: {} };
+    await writeHistoryEntry(dir, { ...change, id: 'c-1', appliedAt: '2026-10-02T09:00:00.000Z' });
+    await writeHistoryEntry(dir, { ...change, id: 'c-2', appliedAt: '2026-10-02T11:00:00.000Z' });
+    // A damaged finalize.json reads as no request.
+    await fs.writeFile(path.join(dir, 'finalize.json'), '{damaged');
+    expect(await finalizeOf(dir)).toEqual({ canStart: true, blockingCount: 0, state: null, changesSinceFinal: 1 });
   });
 });

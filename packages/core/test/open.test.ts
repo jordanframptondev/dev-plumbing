@@ -5,9 +5,9 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { gitInfo, NotAGitRepoError } from '../src/git';
 import { defaultSettings, repoProfileSchema } from '../src/schemas';
 import { readProjectFile } from '../src/store/io';
-import { linkIntoClone, matchProfile, openPlan, PlanError, repoProjectsFolder, resolvePlan, slugify, suggestRepoName } from '../src/store/open';
+import { linkIntoClone, matchProfile, openPlan, PlanError, recordClone, repoProjectsFolder, resolvePlan, slugify, suggestRepoName } from '../src/store/open';
 import { removeTempDirs, tempDir } from '../../../testkit/tmp';
-import { DRAFT, makeRepo } from './fixtures';
+import { DRAFT, makeRepo, seedProject } from './fixtures';
 
 afterAll(removeTempDirs);
 
@@ -124,5 +124,47 @@ describe('opening a plan', () => {
     expect(await fs.readdir(parent)).toEqual([]);
     expect(await fs.lstat(path.join(path.dirname(repo), 'x')).catch(() => null)).toBeNull();
     expect(repoProfileSchema.safeParse({ name: 'acme', match: ['github.com/acme/acme'], linkIntoClones: { enabled: true, linkName: 'dev-plumbing' } }).success).toBe(true);
+  });
+});
+
+describe('the clones a project was opened from', () => {
+  const home = '/Users/a';
+  const open = (folder: string, clone: string) =>
+    openPlan({ folder, repo: 'acme', clone, branch: 'main', plan: { rel: 'docs/specs/restock-reminders.md', text: DRAFT }, enabledTypes: [], home });
+
+  it('records the source clone on create, and each other clone once on reopen', async () => {
+    const folder = path.join(tempDir('dp-open-'), 'acme');
+    const created = await open(folder, '/Users/a/Source/acme');
+    expect((await readProjectFile(created.dir)).clones).toEqual(['~/Source/acme']);
+    const reopened = await open(folder, '/Users/a/Work/acme-2');
+    expect(reopened).toMatchObject({ id: created.id, created: false });
+    expect(await recordClone(reopened.dir, '/Users/a/Work/acme-2', home)).toEqual(['~/Source/acme', '~/Work/acme-2']);
+    expect(await recordClone(reopened.dir, '/Users/a/Source/acme', home)).toEqual(['~/Source/acme', '~/Work/acme-2']);
+    expect(await recordClone(reopened.dir, '/Users/a/Work/acme-2/', home)).toEqual(['~/Source/acme', '~/Work/acme-2']);
+    expect(await recordClone(reopened.dir, '/Volumes/ext/acme', home)).toEqual(['~/Source/acme', '~/Work/acme-2', '/Volumes/ext/acme']);
+    expect((await readProjectFile(created.dir)).clones).toEqual(['~/Source/acme', '~/Work/acme-2', '/Volumes/ext/acme']);
+  });
+
+  it('writes nothing when the clone is already known', async () => {
+    const dir = await seedProject();
+    const file = path.join(dir, 'project.json');
+    const compact = JSON.stringify(JSON.parse(await fs.readFile(file, 'utf8')));
+    await fs.writeFile(file, compact);
+    expect(await recordClone(dir, '/tmp/acme', home)).toEqual(['/tmp/acme']);
+    expect(await fs.readFile(file, 'utf8')).toBe(compact);
+  });
+
+  it('reads a project.json from before clones and asset lists, and puts the source clone first', async () => {
+    const at = '2026-10-02T10:00:00.000Z';
+    const dir = await seedProject();
+    const file = path.join(dir, 'project.json');
+    const old = JSON.parse(await fs.readFile(file, 'utf8'));
+    delete old.clones;
+    old.docs = { ...old.docs, final: 'docs/final.md', exportedTo: { clone: '/tmp/acme', path: 'docs/specs/restock.final.md', at } };
+    await fs.writeFile(file, JSON.stringify(old));
+    const project = await readProjectFile(dir);
+    expect(project.clones).toEqual([]);
+    expect(project.docs.exportedTo).toEqual({ clone: '/tmp/acme', path: 'docs/specs/restock.final.md', at, assets: [] });
+    expect(await recordClone(dir, '/tmp/acme-2', home)).toEqual(['/tmp/acme', '/tmp/acme-2']);
   });
 });

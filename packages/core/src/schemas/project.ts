@@ -10,11 +10,14 @@ export const plumbingProjectSchema = z.object({
   repo: z.string().min(1),
   title: z.string().min(1),
   source: z.object({ path: z.string(), clone: z.string(), branch: z.string(), hashAtImport: z.string() }),
+  /** Every clone the project was opened from, ~-shortened, the source clone first. Accept offers them. */
+  clones: z.array(z.string()).default([]),
   docs: z.object({
     original: z.string(),
     draft: z.string(),
     final: z.string().optional(),
-    exportedTo: z.object({ clone: z.string(), path: z.string(), at: z.string() }).optional(),
+    /** Where Accept last copied the final. `assets` are the mockup file names it wrote into `<name>.assets/`. */
+    exportedTo: z.object({ clone: z.string(), path: z.string(), at: z.string(), assets: z.array(z.string()).default([]) }).optional(),
   }),
   status: z.enum(['importing', 'active', 'finalized']),
   emptyTypes: z.array(z.object({ type: z.string(), reason: z.string() })).default([]),

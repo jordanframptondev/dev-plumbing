@@ -2,9 +2,11 @@ import fs from 'node:fs/promises';
 import type { Dirent } from 'node:fs';
 import path from 'node:path';
 import { expandHome } from '../paths';
+import { changesSinceFinal, checklistFrom } from './checklist';
 import { activeDecisions } from './decisions';
+import { readFinalize } from './finalize';
 import { IMPORT_DID_NOT_FINISH } from './importItems';
-import { docPath, readDecisions, readItems, readJsonFile, readThreads } from './io';
+import { docPath, readDecisions, readHistory, readItems, readJsonFile, readThreads } from './io';
 import { openOptions } from './threads';
 import type { DataChecker } from './checks';
 import {
@@ -235,7 +237,15 @@ export async function loadProjectHome(ref: ProjectRef, types: PlumbingType[]): P
     draft: await docExists(project.docs.draft),
     final: await docExists(project.docs.final),
   };
-  return { summary, project, types: typeEntries, inbox, documents };
+  const history = await readHistory(ref.dir);
+  const checklist = checklistFrom({ items, threads, history, types });
+  const finalize = {
+    canStart: checklist.canStart,
+    blockingCount: checklist.blocking.length,
+    state: (await readFinalize(ref.dir))?.state ?? null,
+    changesSinceFinal: changesSinceFinal(history, project.docs.exportedTo?.at),
+  };
+  return { summary, project, types: typeEntries, inbox, documents, finalize };
 }
 
 const byTitle = (a: TypeItemRow, b: TypeItemRow) => a.title.localeCompare(b.title);

@@ -67,6 +67,7 @@ export const projectFiles = (dir: string) => ({
   submission: (id: string) => path.join(dir, 'submissions', `${id}.json`),
   history: path.join(dir, 'history'),
   historyEntry: (id: string) => path.join(dir, 'history', `${id}.json`),
+  finalize: path.join(dir, 'finalize.json'),
 });
 
 let seq = 0;

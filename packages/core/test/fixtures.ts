@@ -82,6 +82,7 @@ export async function seedProject(seed: Seed = {}): Promise<string> {
     repo: 'acme',
     title: 'Restock reminders',
     source: { path: 'docs/specs/restock.md', clone: '/tmp/acme', branch: 'main', hashAtImport: 'x' },
+    clones: ['/tmp/acme'],
     docs: { original: 'docs/original.md', draft: 'docs/draft.md' },
     status: 'active',
     emptyTypes: [],

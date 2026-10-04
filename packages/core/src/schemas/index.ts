@@ -10,3 +10,4 @@ export * from './loop';
 export * from './patch';
 export * from './markdown';
 export * from './data';
+export * from './finalize';

@@ -2,6 +2,7 @@ import type { ChangeState, Decision, Option, ThreadDraft } from './loop';
 import type { Item, PlumbingProject, Thread } from './project';
 import type { Screen } from './plumbingType';
 import type { Anchor, DataKind } from './data';
+import type { FinalizeState } from './finalize';
 
 export type ConfigProblem = { file: string; key?: string; message: string };
 export type RuleSummary = { file: string; id: string; title: string; order: number; screen: Screen; enabled: boolean };
@@ -94,6 +95,11 @@ export type ProjectHome = {
   inbox: InboxEntry[];
   documents: { original: boolean; draft: boolean; final: boolean };
   listening?: ListeningState;
+  /**
+   * For the header's Finalize spec button. `state` is the finalize request's, or null when none is under way.
+   * `changesSinceFinal` counts the changes applied since the last Accept (0 with no final).
+   */
+  finalize: { canStart: boolean; blockingCount: number; state: FinalizeState | null; changesSinceFinal: number };
 };
 
 export type OpenOptions = { messageId: string; options: Option[]; recommended?: string };

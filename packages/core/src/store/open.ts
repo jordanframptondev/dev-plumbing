@@ -5,7 +5,7 @@ import path from 'node:path';
 import { writeFileAtomic } from '../atomic';
 import { expandHome } from '../paths';
 import { normalizeRemote, plumbingProjectSchema, titleFromMarkdown, type PlumbingProject, type RepoProfile, type Settings } from '../schemas';
-import { InputError, readJsonFile, writeProjectFile } from './io';
+import { InputError, readJsonFile, readProjectFile, writeProjectFile } from './io';
 
 export class PlanError extends InputError {}
 
@@ -110,6 +110,7 @@ export async function openPlan(o: {
     repo: o.repo,
     title: titleFromMarkdown(o.plan.text) ?? base,
     source: { path: o.plan.rel, clone: tildify(o.clone, o.home), branch: o.branch, hashAtImport: createHash('sha256').update(o.plan.text).digest('hex') },
+    clones: [tildify(o.clone, o.home)],
     docs: { original: 'docs/original.md', draft: 'docs/draft.md' },
     status: o.enabledTypes.length ? 'importing' : 'active',
     emptyTypes: [],
@@ -119,6 +120,20 @@ export async function openPlan(o: {
   };
   await writeProjectFile(dir, project);
   return { id, dir, created: true };
+}
+
+/**
+ * Remembers a clone the project was opened from, so Accept can offer it. Each clone once, ~-shortened, the source
+ * clone first. Writes nothing when the clone is already known. The service calls it for every open (a new plan, the
+ * same plan from another clone, or a project picked by id), under the project's lock. Returns the clones.
+ */
+export async function recordClone(dir: string, clone: string, home?: string): Promise<string[]> {
+  const project = await readProjectFile(dir);
+  const short = (p: string) => tildify(expandHome(p, home), home);
+  const clones = [...new Set([project.source.clone, ...project.clones, clone].map(short))];
+  if (clones.length === project.clones.length && clones.every((c, i) => c === project.clones[i])) return clones;
+  await writeProjectFile(dir, { ...project, clones });
+  return clones;
 }
 
 /**
