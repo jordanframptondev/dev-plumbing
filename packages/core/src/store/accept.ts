@@ -22,6 +22,15 @@ const ASSET_NAME = /^[a-z0-9][a-z0-9-]*\.(after|before)\.html$/;
 const quiet = () => undefined;
 /** What's at p, without following a link, or null when nothing is. */
 const lstat = (p: string) => fs.lstat(p).catch(() => null);
+/** A file's contents, or null when there is no such file. Any other failure to read it stops Accept before it writes. */
+async function readOrNull(file: string, label: string): Promise<Buffer | null> {
+  try {
+    return await fs.readFile(file);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw new InputError(`${label} couldn't be read (${error instanceof Error ? error.message : String(error)}). Fix that, then accept again.`);
+  }
+}
 /** p is root, or inside it. */
 const within = (root: string, p: string) => {
   const rel = path.relative(root, p);
@@ -150,21 +159,26 @@ export async function acceptFinal(o: {
   const assets = await mockupAssets({ dir: o.dir, assets: proposal.assets, types: o.types, profile: o.profile });
   for (const a of assets) await checkTarget(o.clone, path.join(place.assetsDir, a.name), `${place.assetsRel}/${a.name}`, 'file');
   const stale = await staleAssets({ previous: project.docs.exportedTo, root, place, keep: assets, home: o.home });
-  const earlier = await fs.readFile(docPath(o.dir, FINAL)).catch(() => null);
+  const earlier = await readOrNull(docPath(o.dir, FINAL), FINAL);
   const stamp = at.replace(/[:.]/g, '-');
   let archive = docPath(o.dir, `finals/${stamp}.md`);
   for (let n = 2; await lstat(archive); n++) archive = docPath(o.dir, `finals/${stamp}-${n}.md`);
   const madeAssetsDir = assets.length > 0 && !(await lstat(place.assetsDir));
   const exportedTo: ExportedTo = { clone: tildify(root, o.home), path: place.finalRel, at, assets: assets.map((a) => a.name) };
 
-  // What each file held before Accept wrote or removed it (null: it didn't exist), so a failure can put it back.
+  // What each file held before Accept wrote or removed it (null: it didn't exist), read now so an unreadable file stops Accept
+  // before the first write. The journal lets a failure put each one back.
+  const label = (file: string) => (within(o.dir, file) ? path.relative(o.dir, file) : path.relative(root, file)).split(path.sep).join('/');
+  const befores = new Map<string, Buffer | null>();
+  const targets = [docPath(o.dir, FINAL), place.finalFile, ...assets.map((a) => path.join(place.assetsDir, a.name)), ...stale.map((n) => path.join(place.assetsDir, n))];
+  for (const file of targets) befores.set(file, await readOrNull(file, label(file)));
   const journal: { file: string; before: Buffer | null }[] = [];
   const put = async (file: string, data: string | Buffer) => {
-    journal.push({ file, before: await fs.readFile(file).catch(() => null) });
+    journal.push({ file, before: file === archive ? null : (befores.get(file) ?? null) });
     await writeFileAtomic(file, data);
   };
   const remove = async (file: string) => {
-    journal.push({ file, before: await fs.readFile(file) });
+    journal.push({ file, before: befores.get(file) ?? null });
     await fs.rm(file);
   };
   try {
@@ -175,12 +189,31 @@ export async function acceptFinal(o: {
     for (const name of stale) await remove(path.join(place.assetsDir, name));
     await writeProjectFile(o.dir, { ...project, docs: { ...project.docs, final: FINAL, exportedTo }, status: 'finalized', updatedAt: at });
   } catch (error) {
-    for (const { file, before } of journal.reverse()) await (before === null ? fs.rm(file, { force: true }) : writeFileAtomic(file, before)).catch(quiet);
-    // Folders Accept made for nothing go too. rmdir only removes an empty folder, so earlier finals keep theirs.
-    await fs.rmdir(path.dirname(archive)).catch(quiet);
-    if (madeAssetsDir) await fs.rmdir(place.assetsDir).catch(quiet);
+    // Put each file back, newest first. Once one can't be, nothing created earlier is removed: the archive above all, since
+    // it may be the only copy of the earlier final.
+    const left: string[] = [];
+    for (const { file, before } of journal.reverse()) {
+      if (before === null && left.length > 0) {
+        if (await lstat(file)) left.push(label(file));
+        continue;
+      }
+      try {
+        await (before === null ? fs.rm(file, { force: true }) : writeFileAtomic(file, before));
+      } catch {
+        left.push(label(file));
+      }
+    }
     const reason = error instanceof Error ? error.message : String(error);
-    throw new ConflictError(`Accept didn't finish (${reason}). What it had written was put back, and the project isn't finalized. Try again.`);
+    if (left.length === 0) {
+      // Folders Accept made for nothing go too. rmdir only removes an empty folder, so earlier finals keep theirs.
+      await fs.rmdir(path.dirname(archive)).catch(quiet);
+      if (madeAssetsDir) await fs.rmdir(place.assetsDir).catch(quiet);
+      throw new ConflictError(`Accept didn't finish (${reason}). What it had written was put back, and the project isn't finalized. Try again.`);
+    }
+    const kept = earlier && (await lstat(archive)) ? ` The previous final is kept in ${label(archive)}.` : '';
+    throw new ConflictError(
+      `Accept didn't finish (${reason}), and some files couldn't be put back: ${[...new Set(left.reverse())].join(', ')}.${kept} The project isn't finalized. Check those files, then try again.`,
+    );
   }
   // The final is saved. If the finished proposal can't be removed, the Finalize page still offers it, which is harmless.
   await discardProposal(o.dir).catch(quiet);
