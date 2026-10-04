@@ -65,7 +65,7 @@ describe('finalize requests', () => {
     expect(await refusal(requestFinalize(dir, { types }))).toEqual({ type: 'ConflictError', message: 'Finalize is already under way.' });
 
     const writing = await pickUpFinalize(dir, 'w-a', T1);
-    expect(writing).toEqual({ ...request, state: 'writing', pickedUpAt: T1.toISOString(), pickedUpBy: 'w-a' });
+    expect(writing).toEqual({ ...request, state: 'writing', pickedUpAt: T1.toISOString(), pickedUpBy: 'w-a', inputsHash: await finalInputsHash(dir) });
     expect(await pickUpFinalize(dir, 'w-b', T1)).toBeNull();
     expect(await refusal(requestFinalize(dir, { types }))).toEqual({ type: 'ConflictError', message: 'Finalize is already under way.' });
 
@@ -180,6 +180,7 @@ describe('finalize requests', () => {
       state: 'failed',
       pickedUpAt: T1.toISOString(),
       pickedUpBy: 'w-a',
+      inputsHash: expect.stringMatching(/^[0-9a-f]{64}$/),
       failedAt: T2.toISOString(),
       reason: "The finalizer didn't send a final.",
     });
@@ -247,6 +248,16 @@ describe('final names and fingerprints', () => {
     await writeItem(dir, { ...item, data: { ...DIAGRAM, nodes: [...DIAGRAM.nodes, { id: 'mail', label: 'Mailer', status: 'new' }] } });
     expect(await fs.readFile(path.join(dir, 'docs', 'draft.md'), 'utf8')).toBe(DRAFT);
     expect(await finalInputsHash(dir)).not.toBe(proposal?.draftHash);
+  });
+
+  it('a proposal is stale when an item changed after the finalizer picked the request up', async () => {
+    const dir = await seed();
+    const request = await requestFinalize(dir, { types });
+    await pickUpFinalize(dir, 'w-a');
+    const item = await readItem(dir, 'architecture-system');
+    await writeItem(dir, { ...item, data: { ...DIAGRAM, nodes: [...DIAGRAM.nodes, { id: 'mail', label: 'Mailer', status: 'new' }] } });
+    const { proposal } = await saveProposal(dir, { requestId: request.id, markdown: FINAL, types, name: 'restock' });
+    expect(proposal?.draftHash).not.toBe(await finalInputsHash(dir));
   });
 
   it('a new decision changes the final inputs too', async () => {

@@ -80,7 +80,7 @@ export async function requestFinalize(dir: string, o: { types: PlumbingType[]; n
 export async function pickUpFinalize(dir: string, windowId: string, now: Date = new Date()): Promise<FinalizeRequest | null> {
   const current = await readFinalize(dir);
   if (current?.state !== 'requested') return null;
-  const next: FinalizeRequest = { ...current, state: 'writing', pickedUpAt: now.toISOString(), pickedUpBy: windowId };
+  const next: FinalizeRequest = { ...current, state: 'writing', pickedUpAt: now.toISOString(), pickedUpBy: windowId, inputsHash: await finalInputsHash(dir) };
   await writeFinalize(dir, next);
   return next;
 }
@@ -122,7 +122,7 @@ export async function saveProposal(
   const next: FinalizeRequest = {
     ...current,
     state: 'proposed',
-    proposal: { at: now.toISOString(), draftHash: await finalInputsHash(dir), file: PROPOSAL_FILE, length: expanded.markdown.length, assets: expanded.assets },
+    proposal: { at: now.toISOString(), draftHash: current.inputsHash ?? (await finalInputsHash(dir)), file: PROPOSAL_FILE, length: expanded.markdown.length, assets: expanded.assets },
   };
   await writeDocText(dir, PROPOSAL_FILE, expanded.markdown);
   try {
@@ -148,7 +148,7 @@ export async function finishFinalize(dir: string, o: { requestId: string; window
 export async function requeueFinalize(dir: string, isAlive: (windowId: string) => boolean, now: Date = new Date()): Promise<boolean> {
   const current = await readFinalize(dir);
   if (current?.state !== 'writing' || (current.pickedUpBy && isAlive(current.pickedUpBy))) return false;
-  await writeFinalize(dir, { ...current, state: 'requested', pickedUpAt: undefined, pickedUpBy: undefined, requeuedAt: now.toISOString() });
+  await writeFinalize(dir, { ...current, state: 'requested', pickedUpAt: undefined, pickedUpBy: undefined, inputsHash: undefined, requeuedAt: now.toISOString() });
   return true;
 }
 

@@ -11,6 +11,8 @@ export type FinalizeRequest = {
   /** The listening window that took it, through dp_wait. */
   pickedUpAt?: string;
   pickedUpBy?: string;
+  /** finalInputsHash when a window picked the request up: what the finalizer read. */
+  inputsHash?: string;
   /** When a window that went away gave it back. */
   requeuedAt?: string;
   /**
@@ -29,6 +31,7 @@ export const finalizeRequestSchema: z.ZodType<FinalizeRequest> = z.object({
   requestedAt: z.string(),
   pickedUpAt: z.string().optional(),
   pickedUpBy: z.string().optional(),
+  inputsHash: z.string().optional(),
   requeuedAt: z.string().optional(),
   proposal: z
     .object({
