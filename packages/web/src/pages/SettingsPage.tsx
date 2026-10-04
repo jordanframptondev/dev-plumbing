@@ -8,10 +8,12 @@ import { Button } from '../components/Button';
 import { inputClass } from '../components/inputClass';
 import { Segmented } from '../components/Segmented';
 import { Switch } from '../components/Switch';
+import { formatUpdated } from '../lib/time';
 import { useConfig } from '../lib/useConfig';
 
 const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const RESTART = 'Restart the service to use the new port: dev-plumbing stop, then dev-plumbing start.';
+const DETECT_NOTE = 'Detection runs the next time a Claude window for this repo listens, or you run /dev-plumbing in a clone.';
 
 type Notice = { kind: 'ok' | 'error'; text: string };
 
@@ -43,8 +45,14 @@ export function SettingsPage() {
         <h2 id="repos-title" className="text-[20px] font-semibold">
           Repos
         </h2>
-        <p className="mt-1 text-[12.5px] text-ink-3">A repo profile is created the first time you run /dev-plumbing in a repo. Edit it here as JSON.</p>
-        {config.repos.length === 0 ? <p className="mt-3 text-[13px] text-ink-3">No repo profiles yet.</p> : config.repos.map((r) => <RepoEditor key={r.name} repo={r} />)}
+        <p className="mt-1 text-[12.5px] text-ink-3">
+          A repo profile is created the first time you run /dev-plumbing in a repo. Edit it here as JSON, or use Detect again to have Claude look at the repo again.
+        </p>
+        {config.repos.length === 0 ? (
+          <p className="mt-3 text-[13px] text-ink-3">No repo profiles yet.</p>
+        ) : (
+          config.repos.map((r) => <RepoEditor key={r.name} repo={r} detectPending={config.detect.pending.includes(r.name)} lastDetected={config.detect.last[r.name] ?? null} />)
+        )}
       </section>
     </div>
   );
@@ -202,7 +210,7 @@ function FieldRow({ field, value, error, onChange }: { field: FieldSpec; value: 
   );
 }
 
-function RepoEditor({ repo }: { repo: RepoProfile }) {
+function RepoEditor({ repo, detectPending, lastDetected }: { repo: RepoProfile; detectPending: boolean; lastDetected: string | null }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [text, setText] = useState(JSON.stringify(repo, null, 2));
@@ -224,8 +232,13 @@ function RepoEditor({ repo }: { repo: RepoProfile }) {
     },
     onError: (e) => setError((e as Error).message),
   });
+  const detect = useMutation({
+    mutationFn: () => api.detectRepo(repo.name),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['config'] }),
+  });
+  const detection = [lastDetected ? `Last detected ${formatUpdated(lastDetected)}` : null, detectPending ? 'Detection requested' : null].filter(Boolean).join(' · ');
   return (
-    <div className="mt-3 overflow-hidden rounded-[10px] border-[0.5px] border-separator bg-cell">
+    <div data-testid="repo-profile" className="mt-3 overflow-hidden rounded-[10px] border-[0.5px] border-separator bg-cell">
       <div className="flex items-center gap-3 px-4 py-3">
         <div className="min-w-0 flex-1">
           <div className="text-[14px] font-semibold">{repo.name}</div>
@@ -233,11 +246,35 @@ function RepoEditor({ repo }: { repo: RepoProfile }) {
             {repo.match.join(', ')}
             {repo.projectsFolder ? ` → ${repo.projectsFolder}` : ''}
           </div>
+          {detection && <div className="text-[11.5px] text-ink-3">{detection}</div>}
         </div>
-        <Button size="sm" onClick={() => setOpen((v) => !v)}>
+        <Button size="sm" data-testid="detect-repo" disabled={detect.isPending} onClick={() => detect.mutate()}>
+          Detect again
+        </Button>
+        <Button
+          size="sm"
+          onClick={() => {
+            // Start from the profile as it is now: detection may have changed it since this page loaded.
+            if (!open) {
+              setText(JSON.stringify(repo, null, 2));
+              setError(null);
+            }
+            setOpen((v) => !v);
+          }}
+        >
           {open ? 'Close' : 'Edit'}
         </Button>
       </div>
+      {detectPending && (
+        <p role="status" className="border-t-[0.5px] border-separator px-4 py-2.5 text-[12px] text-ink-2">
+          {DETECT_NOTE}
+        </p>
+      )}
+      {detect.error && (
+        <p role="alert" className="border-t-[0.5px] border-separator px-4 py-2.5 text-[12px] text-seal">
+          {failureMessage(detect.error)}
+        </p>
+      )}
       {open && (
         <div className="border-t-[0.5px] border-separator p-3">
           <textarea aria-label={`${repo.name} profile`} value={text} onChange={(e) => setText(e.target.value)} rows={14} spellCheck={false} className={`${inputClass} font-mono text-[12px]`} />

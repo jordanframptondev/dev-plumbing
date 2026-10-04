@@ -50,7 +50,17 @@ export type DraftInput = { optionId?: string; note?: string; text?: string };
 export type SubmitBody = { scope: 'all' } | { scope: 'thread'; threadId: string };
 
 export type Tab = 'active' | 'finalized' | 'all';
-export type ConfigResponse = { dir: string; settings: Settings; agents: AgentsConfig; repos: RepoProfile[]; types: RuleSummary[]; outputs: string[]; problems: ConfigProblem[] };
+export type ConfigResponse = {
+  dir: string;
+  settings: Settings;
+  agents: AgentsConfig;
+  repos: RepoProfile[];
+  types: RuleSummary[];
+  outputs: string[];
+  problems: ConfigProblem[];
+  /** Detect again: the repos waiting for it, and when each was last detected (ISO). */
+  detect: { pending: string[]; last: Record<string, string> };
+};
 export type RulesResponse = { types: RuleSummary[]; broken: { file: string; error: string }[]; outputs: string[] };
 export type FileResponse = { text: string; hasDefault: boolean };
 /** Start finalize: the saved request, whether a Claude window is listening, and what to tell you. */
@@ -69,6 +79,7 @@ export const api = {
   saveSettings: (value: unknown) => request<{ value: Settings; restartRequired: boolean; loginItemError?: string }>('/api/settings', send('PUT', value)),
   saveAgents: (value: unknown) => request<{ value: AgentsConfig }>('/api/agents', send('PUT', value)),
   saveRepo: (name: string, value: unknown) => request<{ value: RepoProfile }>(`/api/repos/${enc(name)}`, send('PUT', value)),
+  detectRepo: (name: string) => request<{ ok: true }>(`/api/repos/${enc(name)}/detect`, send('POST', {})),
   rules: () => request<RulesResponse>('/api/rules'),
   rule: (file: string) => request<FileResponse>(`/api/rules/${enc(file)}`),
   saveRule: (file: string, text: string) => request<{ ok: true }>(`/api/rules/${enc(file)}`, send('PUT', { text })),
