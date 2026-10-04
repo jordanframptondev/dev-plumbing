@@ -5,7 +5,9 @@ import { ServiceError, type ServiceClient } from './client';
 
 /** Under the plugin's 12-hour per-call limit, so a long wait ends on our terms. */
 export const MAX_WAIT_MS = 11.5 * 60 * 60 * 1000;
-export const TOOL_NAMES = ['dp_open', 'dp_repo_profile', 'dp_write_items', 'dp_wait', 'dp_context', 'dp_reply'] as const;
+export const TOOL_NAMES = ['dp_open', 'dp_repo_profile', 'dp_write_items', 'dp_wait', 'dp_context', 'dp_reply', 'dp_finalize'] as const;
+/** dp_wait results that hand the window work. Anything else (a timeout) means keep listening. */
+export const WORK_KINDS: ReadonlySet<string> = new Set(['submission', 'finalize', 'detect-profile']);
 
 type Result = { content: { type: 'text'; text: string }[]; isError?: boolean };
 const ok = (value: unknown): Result => ({ content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] });
@@ -76,8 +78,8 @@ export function createDpServer(o: { client: ServiceClient; cwd: string; windowId
   server.registerTool(
     'dp_context',
     {
-      description: 'Get the context pack for one thread (threadId), or for importing one plumbing type (importType).',
-      inputSchema: { ...project, threadId: z.string().optional(), importType: z.string().optional() },
+      description: 'Get the context pack for one thread (threadId), for importing one plumbing type (importType), or for writing the final spec (finalize: true).',
+      inputSchema: { ...project, threadId: z.string().optional(), importType: z.string().optional(), finalize: z.boolean().optional() },
     },
     async (args) => call('/context', args),
   );
@@ -93,16 +95,33 @@ export function createDpServer(o: { client: ServiceClient; cwd: string; windowId
   );
 
   server.registerTool(
+    'dp_finalize',
+    {
+      description:
+        "Send the whole final spec you wrote for a finalize request. Put the context pack's tokens where diagrams, flows, schema diffs, migrations and mockup links go: the service replaces each one with a block generated from the item's data. The document is checked as a whole. If anything is wrong, nothing is saved and the error lists every problem: fix them all and call dp_finalize again with the whole document.",
+      inputSchema: {
+        ...project,
+        request: z.string().min(1).describe('The finalize request id, from your prompt'),
+        // No length limits here: saveProposal checks them, and its messages are the ones the finalizer should read.
+        markdown: z.string().describe('The whole final document, in Markdown'),
+      },
+    },
+    async (args) => call('/finalize', args),
+  );
+
+  server.registerTool(
     'dp_wait',
     {
       description:
-        "Listen for the user's answers. Waits until they press Send this thread or Submit all, sending progress while it waits, then returns the threads to answer in groups (one thread subagent per group) with the model to use. When you call it again, pass finished with the previous submission id and any conflicts you found. If it returns still-waiting, call it again. If it returns replaced, a newer dp_wait for this project took over: stop.",
+        "Listen for the user. Waits until they press Send this thread, Submit all or Start finalize in the app, or Detect again in Settings, sending progress while it waits. Then returns one piece of work: kind submission (the threads to answer in groups, one thread subagent per group, with the model to use), kind finalize (a finalize request for one finalizer subagent) or kind detect-profile (a repo whose profile the repo-setup subagent detects again). When you call it again, pass finished with what you just did: { submission, conflicts } after a submission, { finalize: <request id> } after a finalize (finished.finalize), or { detect: <repo> } after a detect-profile (finished.detect). If it returns still-waiting, call it again. If it returns replaced, a newer dp_wait for this project took over: stop.",
       inputSchema: {
         ...project,
         finished: z
           .object({
-            submission: z.string().min(1),
+            submission: z.string().min(1).optional(),
             conflicts: z.array(z.object({ threads: z.array(z.string()).min(1), text: z.string().min(1) })).optional(),
+            finalize: z.string().min(1).optional().describe('The finalize request you just handled'),
+            detect: z.string().min(1).optional().describe('The repo whose profile you just detected again'),
           })
           .optional(),
       },
@@ -129,7 +148,7 @@ export function createDpServer(o: { client: ServiceClient; cwd: string; windowId
             const r = await o.client.call<{ kind: string }>('/wait', { repo: args.repo, project: args.project, windowId: o.windowId, ...(finished ? { finished } : {}) }, signal);
             finished = undefined;
             failures = 0;
-            if (r.kind === 'submission') return ok(r);
+            if (WORK_KINDS.has(r.kind)) return ok(r);
           } catch (e) {
             const stop = stopped();
             if (stop) return stop;

@@ -22,7 +22,12 @@ describe('the plugin', () => {
   });
 
   it('gives each subagent only read tools and its own dp tools', () => {
-    const expected: Record<string, string[]> = { 'repo-setup': ['dp_repo_profile'], importer: ['dp_context', 'dp_write_items'], thread: ['dp_context', 'dp_reply'] };
+    const expected: Record<string, string[]> = {
+      'repo-setup': ['dp_repo_profile'],
+      importer: ['dp_context', 'dp_write_items'],
+      thread: ['dp_context', 'dp_reply'],
+      finalizer: ['dp_context', 'dp_finalize'],
+    };
     for (const [name, dp] of Object.entries(expected)) {
       const agent = parseFrontMatter(read(`plugin/agents/${name}.md`));
       expect(agent.data.name).toBe(name);
@@ -62,5 +67,33 @@ describe('the plugin', () => {
     const thread = parseFrontMatter(read('plugin/agents/thread.md')).content;
     for (const s of ['patch: { data }', 'type.dataShape', 'anchor.itemId', 'anchor.label', 'anchor.ref', 'the whole item is in `anchored`']) expect(thread).toContain(s);
     expect(thread).not.toContain('t-<anchor.itemId>');
+  });
+
+  it('has a finalizer that writes the final through dp_finalize, placing tokens instead of drawing', () => {
+    const finalizer = parseFrontMatter(read('plugin/agents/finalizer.md')).content;
+    for (const s of [
+      'finalize: true',
+      '`rules`',
+      '`tokens`',
+      '`previousFinal`',
+      "**Parked items aren't in the pack.**",
+      'Parked: left out of the final',
+      '**Never draw.**',
+      '{{diagram:<itemId>}}',
+      '{{sequence:<itemId>}}',
+      '{{steps:<itemId>}}',
+      '{{schema:<itemId>}}',
+      '{{migration:<itemId>}}',
+      '{{mockup:<itemId>:after}}',
+      'Call `dp_finalize` once',
+      'at most three times',
+      'Final written:',
+    ]) {
+      expect(finalizer).toContain(s);
+    }
+    const skill = parseFrontMatter(read('plugin/skills/dev-plumbing/SKILL.md')).content;
+    for (const s of ['dev-plumbing:finalizer', '**kind: finalize**', '> Write the final spec for repo `<repo>`, plumbing project `<project>`, request `<request>`.', 'finished: { finalize:']) {
+      expect(skill).toContain(s);
+    }
   });
 });

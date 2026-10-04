@@ -88,3 +88,22 @@ it('carries a whole round trip from Claude Code to the app and back', async () =
   expect(reply.isError).toBeFalsy();
   expect((await http(`${P}/threads/t-questions-channels`)).thread.status).toBe('resolved');
 }, 60_000);
+
+it('hands a finalize to the window and takes the final back', async () => {
+  // Continues from the round trip above: its one question is resolved, so nothing blocks Finalize.
+  const P = '/api/projects/acme-app/restock-reminders';
+  const start = await http(`${P}/finalize`, { method: 'POST' });
+  expect(start.request).toMatchObject({ state: 'requested' });
+  const wait = json(await mcp.callTool({ name: 'dp_wait', arguments: { repo: 'acme-app', project: 'restock-reminders' } }));
+  expect(wait).toMatchObject({ kind: 'finalize', request: start.request.id, model: 'opus' });
+  const pack = json(await mcp.callTool({ name: 'dp_context', arguments: { repo: 'acme-app', project: 'restock-reminders', finalize: true } }));
+  expect(pack.rules).toMatch(/^# Finalize spec rules/);
+  const sent = await mcp.callTool({
+    name: 'dp_finalize',
+    arguments: { repo: 'acme-app', project: 'restock-reminders', request: start.request.id, markdown: '# Restock reminders\n\nReminders go by SMS and email.\n' },
+  });
+  expect(sent.isError).toBeFalsy();
+  const view = await http(`${P}/finalize`);
+  expect(view.request.state).toBe('proposed');
+  expect(view.proposal.markdown).toContain('Reminders go by SMS and email.');
+}, 60_000);

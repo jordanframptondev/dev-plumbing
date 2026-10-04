@@ -30,10 +30,12 @@ async function connect(server: McpServer): Promise<Client> {
 const textOf = (r: unknown) => ((r as { content: { text: string }[] }).content[0]?.text ?? '');
 
 describe('the dp tools', () => {
-  it('offers exactly the six dp tools', async () => {
+  it('offers exactly the seven dp tools', async () => {
     const { client } = fakeService({});
     const mcp = await connect(createDpServer({ client, cwd: '/repo', windowId: 'w-1' }));
-    expect((await mcp.listTools()).tools.map((t) => t.name).sort()).toEqual([...TOOL_NAMES].sort());
+    const names = ['dp_context', 'dp_finalize', 'dp_open', 'dp_reply', 'dp_repo_profile', 'dp_wait', 'dp_write_items'];
+    expect([...TOOL_NAMES].sort()).toEqual(names);
+    expect((await mcp.listTools()).tools.map((t) => t.name).sort()).toEqual(names);
   });
 
   it('adds the window and the project folder to what Claude sends', async () => {
@@ -150,5 +152,35 @@ describe('the dp tools', () => {
     expect(r.isError).toBe(true);
     expect(textOf(r)).toBe('restarting');
     expect(polls).toBe(5);
+  });
+
+  it("serves the finalizer's pack and sends its final", async () => {
+    const { client, calls } = fakeService({ '/context': () => ({ rules: '# Finalize spec rules' }), '/finalize': () => ({ ok: true, request: 'f-1' }) });
+    const mcp = await connect(createDpServer({ client, cwd: '/repo', windowId: 'w-1' }));
+    const pack = await mcp.callTool({ name: 'dp_context', arguments: { repo: 'acme', project: 'restock-reminders', finalize: true } });
+    expect(JSON.parse(textOf(pack))).toEqual({ rules: '# Finalize spec rules' });
+    const sent = await mcp.callTool({ name: 'dp_finalize', arguments: { repo: 'acme', project: 'restock-reminders', request: 'f-1', markdown: '# Restock reminders\n' } });
+    expect(sent.isError).toBeFalsy();
+    expect(calls).toEqual([
+      { path: '/context', body: { repo: 'acme', project: 'restock-reminders', finalize: true } },
+      { path: '/finalize', body: { repo: 'acme', project: 'restock-reminders', request: 'f-1', markdown: '# Restock reminders\n' } },
+    ]);
+  });
+
+  it('returns finalize and detect-profile work, and passes back what was finished', async () => {
+    const results: unknown[] = [
+      { kind: 'timeout' },
+      { kind: 'finalize', request: 'f-1', model: 'opus' },
+      { kind: 'detect-profile', repo: 'acme', clone: '/repo', model: 'sonnet' },
+      { kind: 'submission', submission: 's-1' },
+    ];
+    const { client, calls } = fakeService({ '/wait': () => results.shift() });
+    const mcp = await connect(createDpServer({ client, cwd: '/repo', windowId: 'w-1', retryMs: 1 }));
+    const wait = async (finished?: Record<string, string>) =>
+      JSON.parse(textOf(await mcp.callTool({ name: 'dp_wait', arguments: { repo: 'acme', project: 'p', ...(finished ? { finished } : {}) } })));
+    expect(await wait()).toEqual({ kind: 'finalize', request: 'f-1', model: 'opus' });
+    expect(await wait({ finalize: 'f-1' })).toEqual({ kind: 'detect-profile', repo: 'acme', clone: '/repo', model: 'sonnet' });
+    expect(await wait({ detect: 'acme' })).toMatchObject({ kind: 'submission' });
+    expect(calls.map((c) => c.body.finished ?? null)).toEqual([null, null, { finalize: 'f-1' }, { detect: 'acme' }]);
   });
 });

@@ -75,4 +75,10 @@ describe('shipped defaults', () => {
     expect(read('plumbing/phases.md')).toContain('Each phase lists its items by id.');
     expect(read('plumbing/flows.md')).toContain('Point user-flow steps at their UI mockups.');
   });
+
+  it('tells the finalizer to place tokens, never draw', () => {
+    const rules = read('outputs/finalize.md');
+    expect(rules).toContain('Use the tokens from the context pack for diagrams, flows, schema diffs, migrations and mockup links; never draw them by hand.');
+    expect(rules).not.toContain("Don't draw diagrams by hand.");
+  });
 });
