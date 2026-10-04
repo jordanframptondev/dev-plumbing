@@ -16,7 +16,7 @@ import {
 import { changeProblems } from './validate';
 
 /** JSON with object keys sorted, so two equal items compare equal whatever order their keys were written in. */
-const stable = (value: unknown): string =>
+export const stable = (value: unknown): string =>
   JSON.stringify(value, (_key, v: unknown) =>
     v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b))) : v,
   );

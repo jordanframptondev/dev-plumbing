@@ -11,7 +11,14 @@ export type FinalizeRequest = {
   /** The listening window that took it, through dp_wait. */
   pickedUpAt?: string;
   pickedUpBy?: string;
-  proposal?: { at: string; draftHash: string; file: 'docs/final.proposed.md'; length: number };
+  /** When a window that went away gave it back. */
+  requeuedAt?: string;
+  /**
+   * The finalizer's document, expanded, in `file`. `draftHash` is finalInputsHash of what it was written from (the
+   * draft, the items and the decisions); `assets` are the mockups its links point at, which Accept copies into
+   * `<name>.assets/`.
+   */
+  proposal?: { at: string; draftHash: string; file: 'docs/final.proposed.md'; length: number; assets: { itemId: string; side: 'after' | 'before' }[] };
   failedAt?: string;
   reason?: string;
 };
@@ -22,8 +29,15 @@ export const finalizeRequestSchema: z.ZodType<FinalizeRequest> = z.object({
   requestedAt: z.string(),
   pickedUpAt: z.string().optional(),
   pickedUpBy: z.string().optional(),
+  requeuedAt: z.string().optional(),
   proposal: z
-    .object({ at: z.string(), draftHash: z.string(), file: z.literal('docs/final.proposed.md'), length: z.number().int().min(0) })
+    .object({
+      at: z.string(),
+      draftHash: z.string(),
+      file: z.literal('docs/final.proposed.md'),
+      length: z.number().int().min(0),
+      assets: z.array(z.object({ itemId: z.string().min(1), side: z.enum(['after', 'before']) })),
+    })
     .optional(),
   failedAt: z.string().optional(),
   reason: z.string().optional(),
