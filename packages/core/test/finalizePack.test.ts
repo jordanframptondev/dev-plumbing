@@ -6,6 +6,7 @@ import { repoProfileSchema, type ClaudeMessage, type Item, type Message, type Pl
 import { finalizePack } from '../src/store/context';
 import { addDecision } from '../src/store/decisions';
 import { readItems } from '../src/store/io';
+import { setParked } from '../src/store/threads';
 import { removeTempDirs } from '../../../testkit/tmp';
 import { DRAFT, listType, pair, seedProject, TYPES } from './fixtures';
 
@@ -150,6 +151,28 @@ describe("the finalizer's context pack", () => {
       { text: 'Jobs run in the worker', itemId: 'architecture-system', itemTitle: 'System view', chosen: null, rejected: [], why: null },
     ]);
     expect(pack.decisions[1].why).toHaveLength(600);
+  });
+
+  it('leaves out decisions about items left out of the final, and keeps those about no item', async () => {
+    const dir = await seed();
+    await addDecision(dir, { text: 'The card shows the date', threadId: 't-ui-card', itemIds: ['ui-card'], now: new Date('2026-10-01T15:00:00.000Z') });
+    await addDecision(dir, { text: 'Ship before the sale', threadId: 't-nowhere', itemIds: [], now: new Date('2026-10-01T16:00:00.000Z') });
+    // You parked the channel question after it was decided. Its decision is still active, but the item is left out.
+    await setParked(dir, 't-q-channel', true);
+    const pack = await finalizePack({ dir, types, profile, rules: RULES });
+    expect(pack.decisions.map((d) => [d.text, d.itemId])).toEqual([
+      ['Burst risk accepted', 'c-burst'],
+      ['Jobs run in the worker', 'architecture-system'],
+      ['The card shows the date', 'ui-card'],
+      ['Ship before the sale', null],
+    ]);
+    // With UI changes turned off, the card's decision is left out too.
+    const off = types.map((t) => (t.id === 'ui' ? { ...t, enabled: false } : t));
+    expect((await finalizePack({ dir, types: off, profile, rules: RULES })).decisions.map((d) => d.text)).toEqual([
+      'Burst risk accepted',
+      'Jobs run in the worker',
+      'Ship before the sale',
+    ]);
   });
 
   it('lists the defaults that will be used, the open items, and only the tokens for items in the final', async () => {

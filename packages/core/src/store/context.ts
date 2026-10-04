@@ -244,6 +244,8 @@ export async function finalizePack(o: { dir: string; types: PlumbingType[]; prof
   const checklist = await finalizeChecklist(o.dir, o.types);
   const blocking = new Set(checklist.blocking.map((e) => e.itemId));
   const context = { threads: threadById, items: new Map(allItems.map((i) => [i.id, i])), types: o.types };
+  // A decision about an item left out of the final is left out with it. One about no item at all stays.
+  const inPack = new Set(items.map((i) => i.id));
   return {
     project: { repo: project.repo, id: project.id, title: project.title, sourcePath: project.source.path, name: finalName(project.source.path) },
     rules: o.rules,
@@ -260,7 +262,9 @@ export async function finalizePack(o: { dir: string; types: PlumbingType[]; prof
       codeRefs: i.codeRefs ?? [],
       dataSummary: dataSummary(i, typeOf(i)),
     })),
-    decisions: activeDecisions(await readDecisions(o.dir)).map((d) => decisionDetail(d, context)),
+    decisions: activeDecisions(await readDecisions(o.dir))
+      .map((d) => decisionDetail(d, context))
+      .filter((d) => d.itemId === null || inPack.has(d.itemId)),
     defaults: checklist.defaults.map((e) => ({ itemId: e.itemId, title: e.title, defaultValue: e.defaultValue })),
     openItems: items
       .filter((i) => ['your_turn', 'draft'].includes(statusOf(i)) && !blocking.has(i.id))

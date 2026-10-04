@@ -393,6 +393,60 @@ describe('tokens', () => {
     });
   });
 
+  it('leaves {{ inside a code fence as it is, such as a GitHub Actions expression', () => {
+    const markdown = [
+      '## Deploy',
+      '',
+      '```yaml',
+      'env:',
+      '  TOKEN: ${{ secrets.TOKEN }}',
+      '  NAME: ${{ github.ref_name }}',
+      '```',
+      '',
+      'Nothing else.',
+      '',
+    ].join('\n');
+    expect(expandTokens(markdown, ctx)).toEqual({ ok: true, markdown, assets: [] });
+  });
+
+  it('leaves {{ inside inline code as it is', () => {
+    const markdown = 'The email says `Hi {{name}},` and the SMS ``{{ `first` }}``.\n';
+    expect(expandTokens(markdown, ctx)).toEqual({ ok: true, markdown, assets: [] });
+  });
+
+  it('leaves a Handlebars template in a ~~~ fence as it is, and expands the tokens outside it', () => {
+    const template = ['~~~handlebars', '{{#each reminders}}', '  <li>{{this.title}}</li>', '{{/each}}', '~~~'].join('\n');
+    const r = expandTokens(`${template}\n\n{{diagram:architecture-system}}\n`, ctx);
+    expect(r).toEqual({ ok: true, markdown: `${template}\n\n${diagramMermaid(DIAGRAM)}\n`, assets: [] });
+  });
+
+  it('a fence ends only at a fence of the same character, at least as long', () => {
+    const fenced = ['````md', '```yaml', 'a: ${{ b }}', '```', '~~~~', '{{ still code }}', '````'].join('\n');
+    expect(expandTokens(`${fenced}\n`, ctx)).toEqual({ ok: true, markdown: `${fenced}\n`, assets: [] });
+    expect(expandTokens(`${fenced}\nAfter it, {{ stray\n`, ctx)).toEqual({ ok: false, problems: ['Unknown token: {{ stray.'] });
+  });
+
+  it('refuses a real token inside code, so nothing inside code is expanded', () => {
+    const markdown = ['```md', '{{diagram:architecture-system}}', '```', '', 'Link it as `{{mockup:ui-account:after}}`.', '', '{{diagram:architecture-gone}}', ''].join('\n');
+    expect(expandTokens(markdown, ctx)).toEqual({
+      ok: false,
+      problems: [
+        '{{diagram:architecture-system}}: put tokens outside code blocks.',
+        '{{mockup:ui-account:after}}: put tokens outside code blocks.',
+        '{{diagram:architecture-gone}}: there\'s no item "architecture-gone".',
+      ],
+    });
+  });
+
+  it('expands a block token in a document with CRLF line ends', () => {
+    const markdown = '# Final\r\n\r\n{{diagram:architecture-system}}\r\n\r\n```\r\n{{ kept }}\r\n```\r\n';
+    expect(expandTokens(markdown, ctx)).toEqual({
+      ok: true,
+      markdown: `# Final\r\n\r\n${diagramMermaid(DIAGRAM)}\r\n\r\n\`\`\`\r\n{{ kept }}\r\n\`\`\`\r\n`,
+      assets: [],
+    });
+  });
+
   it("doesn't depend on the shared pattern's position", () => {
     TOKEN_PATTERN.lastIndex = 10;
     expect(expandTokens('{{steps:flows-checkout}}', ctx)).toMatchObject({ ok: true, markdown: '1. Opens checkout\n2. Pays\n   - System: Charges the card.' });

@@ -26,18 +26,21 @@ export function draftHash(text: string): string {
 
 /**
  * The fingerprint of everything a final is built from: the draft, every item (its data draws the diagrams, schema
- * blocks and mockups) and the active decisions. A proposal records it as `draftHash`, so a final can't be accepted
- * once any of them changed, even by an accept that only redrew an item's data.
+ * blocks and mockups), which items are parked (they're left out of the final) and the active decisions. A proposal
+ * records it as `draftHash`, so a final can't be accepted once any of them changed, even by an accept that only
+ * redrew an item's data.
  */
 export async function finalInputsHash(dir: string): Promise<string> {
   const project = await readProjectFile(dir);
   const draft = await readDocText(dir, project.docs.draft);
+  const [{ values }, { values: threads }] = await Promise.all([readItems(dir), readThreads(dir)]);
   // flags ("May need another look") are review marks, not content: clearing one mustn't make a proposal stale.
-  const items = (await readItems(dir)).values
-    .sort((a, b) => a.id.localeCompare(b.id))
-    .map(({ flags: _flags, ...content }) => content);
+  const items = values.sort((a, b) => a.id.localeCompare(b.id)).map(({ flags: _flags, ...content }) => content);
+  // As in saveProposal: an item is parked when its thread is.
+  const statusByThread = new Map(threads.map((t) => [t.id, displayStatus(t)]));
+  const parked = items.filter((i) => statusByThread.get(i.threadId) === 'parked').map((i) => i.id);
   const decisions = activeDecisions(await readDecisions(dir)).map((d) => ({ text: d.text, threadId: d.threadId }));
-  return draftHash(stable({ draft, items, decisions }));
+  return draftHash(stable({ draft, items, parked, decisions }));
 }
 
 /** The plan file's name without extension, used for <name>.final.md and <name>.assets. */

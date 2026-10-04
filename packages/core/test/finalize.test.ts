@@ -16,7 +16,8 @@ import {
   requeueFinalize,
   saveProposal,
 } from '../src/store/finalize';
-import { readItem, writeItem } from '../src/store/io';
+import { readItem, writeDocText, writeItem } from '../src/store/io';
+import { setParked } from '../src/store/threads';
 import { removeTempDirs } from '../../../testkit/tmp';
 import { DRAFT, listType, pair, seedProject, TYPES } from './fixtures';
 
@@ -258,6 +259,30 @@ describe('final names and fingerprints', () => {
     await writeItem(dir, { ...item, data: { ...DIAGRAM, nodes: [...DIAGRAM.nodes, { id: 'mail', label: 'Mailer', status: 'new' }] } });
     const { proposal } = await saveProposal(dir, { requestId: request.id, markdown: FINAL, types, name: 'restock' });
     expect(proposal?.draftHash).not.toBe(await finalInputsHash(dir));
+  });
+
+  it('a change to the draft alone changes the final inputs', async () => {
+    const dir = await seed();
+    const before = await finalInputsHash(dir);
+    await writeDocText(dir, 'docs/draft.md', `${DRAFT}\nOne more line.\n`);
+    expect(await finalInputsHash(dir)).not.toBe(before);
+  });
+
+  it('parking an item after the finalizer picked the request up makes the proposal stale, and unparking makes it fresh', async () => {
+    // A question that doesn't block Finalize, still open, so it goes into the final until you park it.
+    const diagram = pair('architecture-system', { type: 'architecture', title: 'System overview', status: 'resolved' });
+    diagram.item.data = DIAGRAM;
+    const mockup = pair('ui-account', { type: 'ui', title: 'Account page', status: 'resolved' });
+    mockup.item.data = MOCKUP;
+    const dir = await seedProject({ pairs: [diagram, mockup, pair('q2', { title: 'Which channel?' })] });
+    const request = await requestFinalize(dir, { types });
+    await pickUpFinalize(dir, 'w-a');
+    const { proposal } = await saveProposal(dir, { requestId: request.id, markdown: FINAL, types, name: 'restock' });
+    expect(await finalInputsHash(dir)).toBe(proposal?.draftHash);
+    await setParked(dir, 't-q2', true);
+    expect(await finalInputsHash(dir)).not.toBe(proposal?.draftHash);
+    await setParked(dir, 't-q2', false);
+    expect(await finalInputsHash(dir)).toBe(proposal?.draftHash);
   });
 
   it('a new decision changes the final inputs too', async () => {

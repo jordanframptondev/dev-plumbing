@@ -240,7 +240,64 @@ function expandToken(kind: TokenKind, itemId: string, side: Side | undefined, ct
 /** Indents every line after the first, except empty ones, so a block keeps its place in a list. */
 const indentLines = (text: string, indent: string) => (indent ? text.replace(/\n(?!\n|$)/g, `\n${indent}`) : text);
 
-/** Replaces every token. Problems name each bad token; any problem means no output. */
+/** An opening code fence: up to 3 spaces, then 3 or more backticks or tildes. A backtick fence's info has no backtick. */
+const FENCE_OPEN = /^ {0,3}(`{3,}(?!.*`)|~{3,})/;
+/** A closing fence: up to 3 spaces, the fence, and nothing after it but spaces. */
+const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
+
+/**
+ * Where the code is, as [start, end) ranges of `markdown`: fenced code blocks, fence lines included, and inline code
+ * spans, delimited by matching backtick runs on one line. A fence ends at a line with the same fence character, at
+ * least as long, or at the end of the document.
+ */
+function codeRanges(markdown: string): [number, number][] {
+  const ranges: [number, number][] = [];
+  let fence: { char: string; length: number; start: number } | null = null;
+  for (let start = 0; start < markdown.length; ) {
+    const newline = markdown.indexOf('\n', start);
+    const end = newline === -1 ? markdown.length : newline + 1;
+    const line = markdown.slice(start, end).replace(/\r?\n$/, '');
+    if (fence) {
+      const close = FENCE_CLOSE.exec(line)?.[1];
+      if (close?.[0] === fence.char && close.length >= fence.length) {
+        ranges.push([fence.start, end]);
+        fence = null;
+      }
+    } else {
+      const open = FENCE_OPEN.exec(line)?.[1];
+      if (open) {
+        fence = { char: open[0], length: open.length, start };
+      } else {
+        const runs = [...line.matchAll(/`+/g)].map((m) => ({ at: m.index ?? 0, length: m[0].length }));
+        for (let i = 0; i < runs.length; i++) {
+          const close = runs.findIndex((r, j) => j > i && r.length === runs[i].length);
+          if (close === -1) continue;
+          ranges.push([start + runs[i].at, start + runs[close].at + runs[close].length]);
+          i = close;
+        }
+      }
+    }
+    start = end;
+  }
+  if (fence) ranges.push([fence.start, markdown.length]);
+  return ranges;
+}
+
+/** The markdown with everything inside code blanked out, line ends kept, so the leftover check skips code. */
+function blankCode(markdown: string, ranges: [number, number][]): string {
+  let out = '';
+  let last = 0;
+  for (const [start, end] of ranges) {
+    out += markdown.slice(last, start) + markdown.slice(start, end).replace(/[^\r\n]/g, ' ');
+    last = end;
+  }
+  return out + markdown.slice(last);
+}
+
+/**
+ * Replaces every token. Problems name each bad token; any problem means no output. Code (fenced blocks and inline
+ * code) is left as it is: a `{{` there is fine, but a token there is refused, so nothing inside code is expanded.
+ */
 export function expandTokens(
   markdown: string,
   ctx: TokenContext,
@@ -250,16 +307,22 @@ export function expandTokens(
     if (!problems.includes(text)) problems.push(text);
   };
   const assets: { itemId: string; side: Side }[] = [];
+  const code = codeRanges(markdown);
+  const plain = blankCode(markdown, code);
   let out = '';
-  // The finalizer's own text, with each token replaced by a space, for the leftover check.
+  // The finalizer's own text outside code, with each token replaced by a space, for the leftover check.
   let own = '';
   let last = 0;
   for (const m of markdown.matchAll(new RegExp(TOKEN_PATTERN.source, 'g'))) {
     const token = m[0];
     const kind = m[1] as TokenKind;
     const at = m.index ?? 0;
+    if (code.some(([start, end]) => at >= start && at < end)) {
+      problem(`${token}: put tokens outside code blocks.`);
+      continue;
+    }
     out += markdown.slice(last, at);
-    own += `${markdown.slice(last, at)} `;
+    own += `${plain.slice(last, at)} `;
     last = at + token.length;
     const r = expandToken(kind, m[2], m[3] as Side | undefined, ctx);
     if (!r.ok) {
@@ -282,7 +345,7 @@ export function expandTokens(
     if (asset && !assets.some((a) => a.itemId === asset.itemId && a.side === asset.side)) assets.push(asset);
   }
   out += markdown.slice(last);
-  own += markdown.slice(last);
+  own += plain.slice(last);
   for (const left of own.matchAll(LEFTOVER)) problem(`Unknown token: ${left[0]}.`);
   return problems.length ? { ok: false, problems } : { ok: true, markdown: out, assets };
 }
