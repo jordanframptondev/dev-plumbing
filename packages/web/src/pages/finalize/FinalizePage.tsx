@@ -4,6 +4,7 @@ import { Link, useParams } from '@tanstack/react-router';
 import { api } from '../../api/client';
 import { Button } from '../../components/Button';
 import { StatusMark } from '../../components/StatusMark';
+import { FinalDone, ProposalView } from './ProposalView';
 
 const LIST = 'overflow-hidden rounded-[10px] border-[0.5px] border-separator bg-cell [&>*+*]:border-t-[0.5px] [&>*+*]:border-separator';
 const WAITING = 'Waiting for Claude to write the final.';
@@ -94,11 +95,14 @@ export function FinalizeBody({ repo, project }: { repo: string; project: string 
   const canAsk = !v.request || failed || (v.request.state === 'proposed' && !v.proposal);
   const underWay = v.request?.state === 'requested' || v.request?.state === 'writing';
   const label = failed ? 'Try again' : v.final ? 'Finalize again' : 'Start finalize';
+  // Claude's final, once it has written one. Its own main action is Accept.
+  const proposal = v.request?.state === 'proposed' ? v.proposal : null;
 
   return (
     <div className="max-w-[80ch]" data-testid="finalize">
       <h2 className="text-[20px] font-semibold">Finalize spec</h2>
       <p className="mt-1 text-[12.5px] text-ink-3">Claude writes the final spec from the draft and what you decided. You preview it before anything is saved.</p>
+      {v.final && !proposal && <FinalDone final={v.final} changesSinceFinal={v.changesSinceFinal} />}
       {status && (
         <p role="status" data-testid="finalize-status" className={`mt-4 text-[13px] ${failed ? 'text-seal' : 'text-ink-2'}`}>
           {status}
@@ -127,6 +131,9 @@ export function FinalizeBody({ repo, project }: { repo: string; project: string 
         <p role="alert" className="mt-2 whitespace-pre-line text-[12.5px] text-seal">
           {(start.error as Error).message}
         </p>
+      )}
+      {proposal && home.data && (
+        <ProposalView repo={repo} project={project} proposal={proposal} clones={v.clones} name={v.name} sourcePath={home.data.project.source.path} />
       )}
       <div data-testid="finalize-checklist" className="mt-2">
         {checklist.blocking.length === 0 && <p className="mt-5 text-[13px] text-ink-2">Nothing blocks Finalize.</p>}

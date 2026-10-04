@@ -164,3 +164,40 @@ describe('the Finalize page', () => {
     await waitFor(() => expect(discard).toHaveBeenCalledWith('acme-app', 'restock'));
   });
 });
+
+describe('with a final from Claude', () => {
+  it("shows Claude's final to review in place of Start finalize", async () => {
+    show(
+      view({
+        request: {
+          id: 'f-1',
+          state: 'proposed',
+          requestedAt: AT,
+          pickedUpAt: AT,
+          pickedUpBy: 'w-1',
+          proposal: { at: AT, draftHash: 'f'.repeat(64), file: 'docs/final.proposed.md', length: 63, assets: [] },
+        },
+        proposal: { markdown: '# Restock reminders\n\nRemind customers before an item runs out.\n', stale: false, diff: null },
+      }),
+    );
+    expect((await screen.findByTestId('proposal-preview')).textContent).toContain('Remind customers before an item runs out.');
+    expect(screen.getByTestId('accept-target').textContent).toBe('/Users/you/acme-app/docs/specs/restock-reminders.final.md');
+    expect(screen.queryByTestId('finalize-status')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Start finalize' })).toBeNull();
+  });
+
+  it('shows where the last final went, with Finalize again', async () => {
+    show(
+      view({
+        final: {
+          exportedTo: { clone: '~/Source/acme-app', path: 'docs/specs/restock-reminders.final.md', at: AT, assets: [] },
+          nextCommand: 'writing-plans docs/specs/restock-reminders.final.md',
+        },
+        changesSinceFinal: 1,
+      }),
+    );
+    expect((await screen.findByTestId('final-done')).textContent).toContain('1 change since the last final.');
+    expect(screen.getByTestId('next-command').textContent).toBe('writing-plans docs/specs/restock-reminders.final.md');
+    expect(screen.getByRole('button', { name: 'Finalize again' })).toBeTruthy();
+  });
+});

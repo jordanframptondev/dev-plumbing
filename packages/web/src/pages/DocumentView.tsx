@@ -5,7 +5,9 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { api } from '../api/client';
 import { Segmented } from '../components/Segmented';
+import { formatUpdated } from '../lib/time';
 import { ChangesView } from './ChangesView';
+import { exportedPath, MARKDOWN_COMPONENTS } from './finalize/ProposalView';
 
 export function DocumentView() {
   const { repo, project, doc } = useParams({ from: '/p/$repo/$project/d/$doc' });
@@ -16,6 +18,9 @@ export function DocumentView() {
 function DocumentBody({ repo, project, doc }: { repo: string; project: string; doc: string }) {
   const [mode, setMode] = useState<'document' | 'changes'>('document');
   const { data, error } = useQuery({ queryKey: ['doc', repo, project, doc], queryFn: () => api.document(repo, project, doc) });
+  // Already loaded by the project layout: it says where the final was copied.
+  const home = useQuery({ queryKey: ['projectHome', repo, project], queryFn: () => api.projectHome(repo, project) });
+  const exported = doc === 'final' ? home.data?.project.docs.exportedTo : undefined;
   const switcher =
     doc === 'draft' ? (
       <div className="mb-4 max-w-xs">
@@ -46,8 +51,16 @@ function DocumentBody({ repo, project, doc }: { repo: string; project: string; d
   return (
     <>
       {switcher}
+      {exported && (
+        <p data-testid="final-exported" className="mb-3 text-[12px] text-ink-3">
+          Copied to{' '}
+          <span className="break-all font-mono text-ink-2">{exportedPath(exported)}</span> · {formatUpdated(exported.at)}
+        </p>
+      )}
       <article className="doc max-w-[72ch]" data-testid="document">
-        <Markdown remarkPlugins={[remarkGfm]}>{data.text}</Markdown>
+        <Markdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
+          {data.text}
+        </Markdown>
       </article>
     </>
   );
