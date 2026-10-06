@@ -8,6 +8,7 @@ import { readFinalize } from './finalize';
 import { IMPORT_DID_NOT_FINISH } from './importItems';
 import { docPath, readDecisions, readHistory, readItems, readJsonFile, readThreads } from './io';
 import { openOptions } from './threads';
+import { changedDraft } from './update';
 import { currentVersion, projectVersions } from './versions';
 import type { DataChecker } from './checks';
 import {
@@ -241,11 +242,14 @@ export async function loadProjectHome(ref: ProjectRef, types: PlumbingType[]): P
   };
   const history = await readHistory(ref.dir);
   const checklist = checklistFrom({ items, threads, history, types });
+  const finalAt = project.docs.exportedTo?.at;
   const finalize = {
     canStart: checklist.canStart,
     blockingCount: checklist.blocking.length,
     state: (await readFinalize(ref.dir))?.state ?? null,
-    changesSinceFinal: changesSinceFinal(history, project.docs.exportedTo?.at),
+    changesSinceFinal: changesSinceFinal(history, finalAt),
+    // A version that came in after the last final and changed the draft makes that final out of date too.
+    planVersionSinceFinal: finalAt ? (projectVersions(project).filter((v) => v.at > finalAt && changedDraft(v)).at(-1)?.n ?? null) : null,
   };
   const version = { current: currentVersion(project).n, count: projectVersions(project).length };
   return { summary, project, types: typeEntries, inbox, documents, version, finalize };
@@ -326,6 +330,7 @@ export async function loadTypeItems(
       createdBy: i.createdBy,
       checks: checks[n] ?? null,
       itemRefs: itemRefsOf(i.data),
+      removedIn: i.removedIn ?? null,
     };
   });
   return { type, items: kind === 'timeline' ? byPhaseOrder(rows) : rows.sort(byTitle) };

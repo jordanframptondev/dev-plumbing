@@ -84,7 +84,16 @@ describe('Finalize over HTTP', () => {
   it('shows the checklist, refuses to start while something blocks, and then starts', async () => {
     const t = await setup();
     const view = (await t.send('GET', `${P}/finalize`)).body;
-    expect(view).toMatchObject({ request: null, proposal: null, final: null, name: 'restock-reminders', listening: null, changesSinceFinal: 0, clones: [{ path: t.repo, source: true }] });
+    expect(view).toMatchObject({
+      request: null,
+      proposal: null,
+      final: null,
+      name: 'restock-reminders',
+      listening: null,
+      changesSinceFinal: 0,
+      planVersionSinceFinal: null,
+      clones: [{ path: t.repo, source: true }],
+    });
     expect(view.checklist.canStart).toBe(false);
     expect(view.checklist.blocking).toContainEqual(expect.objectContaining({ itemId: 'questions-who', threadId: 't-questions-who', reason: 'Blocking question, not resolved.' }));
     expect(view.checklist.defaults).toContainEqual(expect.objectContaining({ itemId: 'questions-days', defaultValue: '3 days' }));

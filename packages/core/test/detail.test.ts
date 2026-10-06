@@ -64,6 +64,16 @@ describe('thread detail', () => {
     expect(q1?.open?.options).toHaveLength(2);
     expect(r?.items.find((i) => i.id === 'q2')?.decision).toBe('Both channels');
   });
+
+  it('says which plan version removed an item', async () => {
+    const gone = pair('q2', { status: 'parked' });
+    const dir = await seedProject({ pairs: [pair('q1'), { item: { ...gone.item, removedIn: 2 }, thread: gone.thread }] });
+    const r = await loadTypeItems({ repo: 'acme', id: 'restock', dir }, TYPES, 'questions');
+    expect(r?.items.map((i) => [i.id, i.removedIn])).toEqual([
+      ['q1', null],
+      ['q2', 2],
+    ]);
+  });
 });
 
 describe('drawings on screens and threads', () => {

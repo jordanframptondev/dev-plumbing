@@ -39,6 +39,7 @@ function view(over: Partial<FinalizeView> = {}): FinalizeView {
     name: 'restock-reminders',
     listening: null,
     changesSinceFinal: 0,
+    planVersionSinceFinal: null,
     ...over,
   };
 }

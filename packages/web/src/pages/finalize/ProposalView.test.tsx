@@ -154,7 +154,7 @@ describe('FinalDone', () => {
   it('says where the final went and how much changed since, and copies the next command', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
-    render(<FinalDone final={{ exportedTo: EXPORTED, nextCommand: NEXT }} changesSinceFinal={2} />);
+    render(<FinalDone final={{ exportedTo: EXPORTED, nextCommand: NEXT }} changesSinceFinal={2} planVersionSinceFinal={null} />);
     const done = screen.getByTestId('final-done');
     expect(done.textContent).toContain('Finalized');
     expect(done.textContent).toContain('Copied to ~/Source/acme-app/docs/specs/restock-reminders.final.md');
@@ -167,8 +167,14 @@ describe('FinalDone', () => {
   });
 
   it('says when nothing changed since the last final', () => {
-    render(<FinalDone final={{ exportedTo: EXPORTED, nextCommand: NEXT }} changesSinceFinal={0} />);
+    render(<FinalDone final={{ exportedTo: EXPORTED, nextCommand: NEXT }} changesSinceFinal={0} planVersionSinceFinal={null} />);
     expect(screen.getByTestId('final-done').textContent).toContain('No changes since the last final.');
+    expect(screen.queryByTestId('plan-version-since-final')).toBeNull();
+  });
+
+  it('says when a newer version of the plan came in since the last final', () => {
+    render(<FinalDone final={{ exportedTo: EXPORTED, nextCommand: NEXT }} changesSinceFinal={0} planVersionSinceFinal={2} />);
+    expect(screen.getByTestId('plan-version-since-final').textContent).toBe("The plan's v2 came in since the last final.");
   });
 });
 

@@ -88,6 +88,7 @@ export function finalizeRoutes(ctx: AppContext, rt: Runtime): Hono {
       name: finalName(project.source.path),
       listening: rt.listeners.state(projectKey(ref.repo, ref.id)),
       changesSinceFinal: home.finalize.changesSinceFinal,
+      planVersionSinceFinal: home.finalize.planVersionSinceFinal,
     };
     return c.json(view);
   }));

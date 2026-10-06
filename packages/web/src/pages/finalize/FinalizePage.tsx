@@ -102,7 +102,7 @@ export function FinalizeBody({ repo, project }: { repo: string; project: string 
     <div className="max-w-[80ch]" data-testid="finalize">
       <h2 className="text-[20px] font-semibold">Finalize spec</h2>
       <p className="mt-1 text-[12.5px] text-ink-3">Claude writes the final spec from the draft and what you decided. You preview it before anything is saved.</p>
-      {v.final && !proposal && <FinalDone final={v.final} changesSinceFinal={v.changesSinceFinal} />}
+      {v.final && !proposal && <FinalDone final={v.final} changesSinceFinal={v.changesSinceFinal} planVersionSinceFinal={v.planVersionSinceFinal} />}
       {status && (
         <p role="status" data-testid="finalize-status" className={`mt-4 text-[13px] ${failed ? 'text-seal' : 'text-ink-2'}`}>
           {status}

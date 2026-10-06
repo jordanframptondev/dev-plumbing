@@ -78,6 +78,13 @@ describe('OtherItems', () => {
     expect(screen.getByText('Other items')).toBeTruthy();
   });
 
+  it('says which version of the plan removed an item', () => {
+    render(<OtherItems rows={[row({ status: 'parked', removedIn: 2 }), row({ id: 'architecture-later', threadId: 't-architecture-later', title: 'Later' })]} repo="acme-app" project="restock" />);
+    const [removed, kept] = screen.getAllByTestId('other-item');
+    expect(removed!.textContent).toContain('Jobs, notifications and tables. · removed from the plan in v2');
+    expect(kept!.textContent).not.toContain('removed from the plan');
+  });
+
   it('renders nothing for no rows', () => {
     const { container } = render(<OtherItems rows={[]} repo="acme-app" project="restock" />);
     expect(container.innerHTML).toBe('');

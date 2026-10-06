@@ -25,6 +25,7 @@ export function row(over: Partial<TypeItemRow> = {}): TypeItemRow {
     createdBy: 'import',
     checks: null,
     itemRefs: {},
+    removedIn: null,
     ...over,
   };
 }

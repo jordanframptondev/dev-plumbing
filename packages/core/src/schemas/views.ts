@@ -99,9 +99,10 @@ export type ProjectHome = {
   listening?: ListeningState;
   /**
    * For the header's Finalize spec button. `state` is the finalize request's, or null when none is under way.
-   * `changesSinceFinal` counts the changes applied since the last Accept (0 with no final).
+   * `changesSinceFinal` counts the changes applied since the last Accept (0 with no final). `planVersionSinceFinal` is
+   * the newest plan version that came in after the last Accept and changed the draft, or null.
    */
-  finalize: { canStart: boolean; blockingCount: number; state: FinalizeState | null; changesSinceFinal: number };
+  finalize: { canStart: boolean; blockingCount: number; state: FinalizeState | null; changesSinceFinal: number; planVersionSinceFinal: number | null };
 };
 
 /** One version in the Versions list (GET …/versions, newest first). `current` marks the one the working files hold. */
@@ -120,6 +121,8 @@ export type TypeItemRow = {
   checks: DataChecks | null;
   /** Timeline types: each item in data.itemIds that exists, for the phase's links. {} for other types. */
   itemRefs: Record<string, { title: string; threadId: string; typeTitle: string }>;
+  /** The plan version whose update removed the item's part of the plan, or null while it's still in the plan. */
+  removedIn: number | null;
 };
 
 /** A projects folder that couldn't be read while listing plumbing projects. */
@@ -189,4 +192,6 @@ export type FinalizeView = {
   name: string;
   listening: ListeningState;
   changesSinceFinal: number;
+  /** The newest plan version that came in after the last final and changed the draft, or null. */
+  planVersionSinceFinal: number | null;
 };

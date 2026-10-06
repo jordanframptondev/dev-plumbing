@@ -288,11 +288,11 @@ describe('the project home for Finalize', () => {
     const dir = await seedProject({
       pairs: [pair('q1', { title: 'Who gets reminders?', fields: { blocking: 'true' } }), pair('q2', { title: 'Lead time', fields: { default: '5 days' } })],
     });
-    expect(await finalizeOf(dir)).toEqual({ canStart: false, blockingCount: 1, state: null, changesSinceFinal: 0 });
+    expect(await finalizeOf(dir)).toEqual({ canStart: false, blockingCount: 1, state: null, changesSinceFinal: 0, planVersionSinceFinal: null });
 
     await writeThread(dir, { ...(await readThread(dir, 't-q1')), status: 'resolved' });
     await writeJsonAtomic(path.join(dir, 'finalize.json'), { id: 'f-1', state: 'writing', requestedAt: FINAL_AT, pickedUpAt: FINAL_AT, pickedUpBy: 'w-a' });
-    expect(await finalizeOf(dir)).toEqual({ canStart: true, blockingCount: 0, state: 'writing', changesSinceFinal: 0 });
+    expect(await finalizeOf(dir)).toEqual({ canStart: true, blockingCount: 0, state: 'writing', changesSinceFinal: 0, planVersionSinceFinal: null });
 
     const project = await readProjectFile(dir);
     const exportedTo = { clone: '/tmp/acme', path: 'docs/specs/restock.final.md', at: FINAL_AT, assets: [] };
@@ -302,7 +302,25 @@ describe('the project home for Finalize', () => {
     await writeHistoryEntry(dir, { ...change, id: 'c-2', appliedAt: '2026-10-02T11:00:00.000Z' });
     // A damaged finalize.json reads as no request.
     await fs.writeFile(path.join(dir, 'finalize.json'), '{damaged');
-    expect(await finalizeOf(dir)).toEqual({ canStart: true, blockingCount: 0, state: null, changesSinceFinal: 1 });
+    expect(await finalizeOf(dir)).toEqual({ canStart: true, blockingCount: 0, state: null, changesSinceFinal: 1, planVersionSinceFinal: null });
+  });
+
+  it('says which version of the plan came in since the last final, when it changed the draft', async () => {
+    const dir = await seedProject();
+    const exportedTo = { clone: '/tmp/acme', path: 'docs/specs/restock.final.md', at: FINAL_AT, assets: [] };
+    const v = { hash: 'x', clone: '/tmp/acme', branch: 'main', commit: null };
+    const versions = [
+      { ...v, n: 1, at: '2026-10-01T09:00:00.000Z' },
+      { ...v, n: 2, at: '2026-10-02T09:00:00.000Z', merge: { clean: 3, conflicts: 0 } },
+      // After the final: one that left the draft as it was, then one that changed it.
+      { ...v, n: 3, at: '2026-10-03T09:00:00.000Z', merge: { clean: 0, conflicts: 0 } },
+      { ...v, n: 4, at: '2026-10-04T09:00:00.000Z', merge: { clean: 0, conflicts: 1 } },
+    ];
+    const project = await readProjectFile(dir);
+    await writeProjectFile(dir, { ...project, versions: versions.slice(0, 3), docs: { ...project.docs, final: 'docs/final.md', exportedTo } });
+    expect((await finalizeOf(dir)).planVersionSinceFinal).toBeNull();
+    await writeProjectFile(dir, { ...(await readProjectFile(dir)), versions });
+    expect((await finalizeOf(dir)).planVersionSinceFinal).toBe(4);
   });
 });
 

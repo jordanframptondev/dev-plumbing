@@ -72,6 +72,16 @@ function PhaseDetail({ row, repo, project }: { row: TypeItemRow; repo: string; p
   );
 }
 
+/** An item whose part of the plan an update removed. It's parked (or flagged, if Claude had it then), never deleted. */
+function RemovedFromPlan({ version }: { version: number }) {
+  return (
+    <span className="min-w-0 text-[12px] text-ink-3" data-testid="removed-from-plan">
+      {' · removed from the plan in v'}
+      {version}
+    </span>
+  );
+}
+
 function ListRow({
   row,
   type,
@@ -99,6 +109,7 @@ function ListRow({
       >
         <span className="text-ink-3">▸</span>
         <span className="font-medium">{row.title}</span>
+        {row.removedIn !== null && <RemovedFromPlan version={row.removedIn} />}
         {row.decision && <span className="min-w-0 truncate text-ink-2">→ {row.decision}</span>}
         <span className="ml-auto shrink-0">
           <StatusMark status={row.status} />
@@ -119,6 +130,7 @@ function ListRow({
       <p className="mt-0.5 text-[12px] text-ink-3">
         {row.summary}
         {row.flagged ? <span className="text-amber"> · may need another look</span> : null}
+        {row.removedIn !== null && <RemovedFromPlan version={row.removedIn} />}
       </p>
       {type.timeline && <PhaseDetail row={row} repo={repo} project={project} />}
       {row.latest && (

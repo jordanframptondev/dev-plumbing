@@ -190,7 +190,7 @@ export function ProposalView({
 }
 
 /** After Accept: where the final went, how much has changed since, and the command to run next. */
-export function FinalDone({ final, changesSinceFinal: n }: { final: Final; changesSinceFinal: number }) {
+export function FinalDone({ final, changesSinceFinal: n, planVersionSinceFinal }: { final: Final; changesSinceFinal: number; planVersionSinceFinal: number | null }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -212,6 +212,11 @@ export function FinalDone({ final, changesSinceFinal: n }: { final: Final; chang
         <span className="break-all font-mono">{exportedPath(final.exportedTo)}</span> · {formatUpdated(final.exportedTo.at)}
       </p>
       <p className="mt-0.5 text-[12px] text-ink-3">{n === 0 ? 'No changes' : n === 1 ? '1 change' : `${n} changes`} since the last final.</p>
+      {planVersionSinceFinal !== null && (
+        <p className="mt-0.5 text-[12px] text-ink-3" data-testid="plan-version-since-final">
+          The plan's v{planVersionSinceFinal} came in since the last final.
+        </p>
+      )}
       <h3 className="mt-4 text-[12px] font-semibold text-ink-3">Next</h3>
       <div className="mt-1 flex flex-wrap items-center gap-2">
         <code data-testid="next-command" className="min-w-0 break-all font-mono text-[12.5px] text-ink">

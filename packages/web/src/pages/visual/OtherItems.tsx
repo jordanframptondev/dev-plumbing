@@ -18,7 +18,12 @@ export function OtherItems({ rows, repo, project, title }: { rows: TypeItemRow[]
                 {r.title}
               </>
             }
-            meta={r.summary}
+            meta={
+              <>
+                {r.summary}
+                {r.removedIn !== null && <span data-testid="removed-from-plan"> · removed from the plan in v{r.removedIn}</span>}
+              </>
+            }
           />
         </Link>
       ))}

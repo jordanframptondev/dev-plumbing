@@ -27,6 +27,7 @@ function row(id: string, title: string, data: unknown): TypeItemRow {
     createdBy: 'import',
     checks: null,
     itemRefs: {},
+    removedIn: null,
   };
 }
 
