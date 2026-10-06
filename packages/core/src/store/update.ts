@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
@@ -57,26 +58,59 @@ export function changedDraft(v: PlanVersion): boolean {
 }
 
 // The update's journal. Before it writes anything else, an update writes docs/versions/v<n>/update.json (n is the
-// version it replaces) with every path it's going to create. Once project.json is written, the journal is deleted.
-// A journal still there means an update stopped part-way: the next planChange or updatePlan puts it back.
+// version it replaces) with every path it's going to create, and the sha256 of the text it writes as docs/draft.md and
+// docs/original.md. Once project.json is written, the journal is deleted. A journal still there means an update
+// stopped part-way: the next planChange or updatePlan puts it back.
 const JOURNAL = 'update.json';
-const journalSchema = z.object({ to: z.number().int().min(2), created: z.array(z.string()) });
+const journalSchema = z.object({
+  to: z.number().int().min(2),
+  created: z.array(z.string()),
+  /** What the update writes as each working file, so putting it back only ever replaces the update's own text. */
+  wrote: z.object({ draft: z.string(), original: z.string() }),
+});
 type Journal = z.infer<typeof journalSchema>;
 const journalRel = (n: number) => `docs/versions/v${n}/${JOURNAL}`;
 
+/** A file's bytes, or null when there's no such file. Any other error is thrown, since it says nothing about the file. */
+async function bytesIfThere(file: string): Promise<Buffer | null> {
+  try {
+    return await fs.readFile(file);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+}
+/** sha256 hex of the bytes: planHash of the text they hold. */
+const sha256 = (data: Uint8Array) => createHash('sha256').update(data).digest('hex');
+
 /**
- * Takes back an update to v<to> that didn't finish, using its journal in docs/versions/v<n>/: docs/draft.md and
- * docs/original.md are put back from the snapshot, the files it created are removed, and so are the snapshot and the
- * journal. Returns the files it couldn't put back; then the snapshot and the journal stay, for the next try.
+ * Takes back an update to v<to> that didn't finish, using its journal in docs/versions/v<n>/.
+ * - docs/original.md and docs/draft.md go back to what they were: `before` (the update's own copy, when it's the one
+ *   putting itself back) or else the snapshot. Only a file that is what the update wrote is replaced. One that changed
+ *   since is left as it is.
+ * - The files it created are removed, and so are the snapshot and the journal.
+ * Returns the files it couldn't put back; then the snapshot and the journal stay, for the next try.
  */
-async function rollBack(dir: string, docs: PlumbingProject['docs'], n: number, journal: Journal): Promise<string[]> {
+async function rollBack(dir: string, docs: PlumbingProject['docs'], n: number, journal: Journal, before?: { original: Buffer; draft: Buffer }): Promise<string[]> {
   const left: string[] = [];
   for (const which of ['original', 'draft'] as const) {
-    const saved = await fs.readFile(docPath(dir, versionDocRel(n, which))).catch(() => null);
-    const working = docPath(dir, docs[which]);
-    // No snapshot of it means the update stopped before it got that far, so the working file was never replaced.
-    if (!saved || saved.equals(await fs.readFile(working).catch(() => Buffer.alloc(0)))) continue;
-    await writeFileAtomic(working, saved).catch(() => left.push(docs[which]));
+    const rel = docs[which];
+    try {
+      const working = docPath(dir, rel);
+      const current = await bytesIfThere(working);
+      const saved = before?.[which] ?? (await bytesIfThere(docPath(dir, versionDocRel(n, which))));
+      // No snapshot of it means the update stopped before it got that far, so the working file was never replaced.
+      if (!saved || current?.equals(saved)) continue;
+      // Changed since the update wrote it (an accepted change, an edit by hand): putting it back would lose that.
+      if (current && sha256(current) !== journal.wrote[which]) {
+        left.push(`${rel} (changed since the update, so it was left as it is)`);
+        continue;
+      }
+      await writeFileAtomic(working, saved);
+    } catch {
+      // A file that can't be read or written can't be put back yet.
+      left.push(rel);
+    }
   }
   for (const rel of [...journal.created].reverse()) {
     const file = docPath(dir, rel);
@@ -200,9 +234,10 @@ export async function updateRefusal(dir: string): Promise<string | null> {
  * - each conflict becomes a Plan changes item whose thread is with Claude, queued as one submission;
  * - docs/original.md becomes the repo's text;
  * - project.json records the version and starts a re-import of every importable type.
- * Refused, writing nothing, while updateRefusal says so, when the plan hasn't changed, and when git can't merge
- * (InputError). A journal on disk lists what it creates, and project.json is written last: if anything fails, what
- * was written is put back, now or at the next try. `home` is the home folder for `~` paths.
+ * Refused, writing nothing, while updateRefusal says so, when the plan hasn't changed, when docs/versions/v<n> already
+ * has a snapshot, and when git can't merge (InputError). A journal on disk lists what it creates, and project.json is
+ * written last: if anything fails, what was written is put back, now or at the next try, but never over a working
+ * file that changed since. `home` is the home folder for `~` paths.
  */
 export async function updatePlan(
   dir: string,
@@ -216,18 +251,23 @@ export async function updatePlan(
   const project = await readProjectFile(dir);
   const current = currentVersion(project);
   if (planHash(o.repoText) === current.hash) throw new ConflictError(`The plan hasn't changed since v${current.n}.`);
+  // A snapshot already in docs/versions/v<n> isn't this update's. snapshotVersion would refuse to overwrite it, and
+  // putting the update back must never restore from it or remove it, so the update doesn't start.
+  const present = await fs.readdir(docPath(dir, `docs/versions/v${current.n}`)).catch((): string[] => []);
+  if (present.includes('original.md') || present.includes('draft.md')) throw new ConflictError(`Version ${current.n} is already saved in docs/versions/v${current.n}.`);
   const n = current.n + 1;
   const fresh = o.fresh === true;
 
-  // The working files as they are now, so the merge has them and a failure can tell what changed.
+  // The working files as they are now, byte for byte: the merge reads them, and a failure puts them back from here.
   const draftFile = docPath(dir, project.docs.draft);
   const originalFile = docPath(dir, project.docs.original);
-  const text = (file: string, rel: string) =>
-    fs.readFile(file, 'utf8').catch(() => {
+  const bytes = (file: string, rel: string) =>
+    fs.readFile(file).catch(() => {
       throw new StoreError(`${rel} can't be read.`);
     });
-  const draftBefore = await text(draftFile, project.docs.draft);
-  const originalBefore = await text(originalFile, project.docs.original);
+  const before = { draft: await bytes(draftFile, project.docs.draft), original: await bytes(originalFile, project.docs.original) };
+  const draftBefore = before.draft.toString('utf8');
+  const originalBefore = before.original.toString('utf8');
 
   let merged: MergeResult;
   try {
@@ -294,7 +334,7 @@ export async function updatePlan(
   const importPending = importableTypes(o.types).map((t) => t.id);
   // A finalized project stays Finalized only when the update left its draft as it was.
   const from = project.status === 'finalized' && !changedDraft(version) ? 'finalized' : 'active';
-  const { reimporting: _earlier, ...rest } = project;
+  const { reimporting: _earlier, importBy: _importer, ...rest } = project;
   const next: PlumbingProject = {
     ...rest,
     title: titleFromMarkdown(o.repoText) ?? project.title,
@@ -315,7 +355,7 @@ export async function updatePlan(
   for (const c of conflicts) created.push(rel(files.item(c.item.id)), rel(files.thread(c.thread.id)));
   if (submission) created.push(rel(files.submission(submission.id)));
   created.push(mergedRel);
-  const journal: Journal = { to: n, created };
+  const journal: Journal = { to: n, created, wrote: { draft: planHash(merged.text), original: planHash(o.repoText) } };
   try {
     await writeJsonAtomic(docPath(dir, journalRel(current.n)), journal);
     // 1. The version snapshot: the plan, the draft and the items.
@@ -334,8 +374,9 @@ export async function updatePlan(
     await writeProjectFile(dir, next);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    // If writing the journal is what failed, nothing else was written yet.
-    const left = (await lstat(docPath(dir, journalRel(current.n)))) ? await rollBack(dir, project.docs, current.n, journal) : [];
+    // If writing the journal is what failed, nothing else was written yet. The working files go back from the copies
+    // read above, not the snapshot, so a snapshot that can't be read now doesn't stop them.
+    const left = (await lstat(docPath(dir, journalRel(current.n)))) ? await rollBack(dir, project.docs, current.n, journal, before) : [];
     if (left.length === 0) {
       await fs.rmdir(docPath(dir, `docs/versions/v${current.n}`)).catch(quiet);
       await fs.rmdir(docPath(dir, 'docs/versions')).catch(quiet);

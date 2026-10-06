@@ -26,6 +26,18 @@ vi.mock('../src/merge', async (importOriginal) => {
   };
 });
 
+// Reading a file a test names fails with EMFILE while it's in `reading.fail`, as it does when the service has too many
+// files open: an error that says nothing about whether the file is there.
+const reading = vi.hoisted(() => ({ fail: new Set<string>() }));
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises') & { default: typeof import('node:fs/promises') }>();
+  const readFile = ((file: unknown, ...rest: unknown[]) =>
+    typeof file === 'string' && reading.fail.has(file)
+      ? Promise.reject(Object.assign(new Error(`EMFILE: too many open files, open '${file}'`), { code: 'EMFILE' }))
+      : (actual.readFile as (...args: unknown[]) => Promise<unknown>)(file, ...rest)) as typeof actual.readFile;
+  return { ...actual, readFile, default: { ...actual.default, readFile } };
+});
+
 import { PLAN_CHANGES_TYPE } from '../src/planChanges';
 import type { PlumbingProject } from '../src/schemas';
 import { pickUpFinalize, requestFinalize } from '../src/store/finalize';
@@ -134,7 +146,8 @@ describe('a change to the plan', () => {
 
 describe('bringing a new version in', () => {
   it('saves v1, merges both sides into the draft, and starts the re-import', async () => {
-    const dir = await seed({ pairs: [pair('q1')] });
+    // A window from the first import is still on record: the re-import is handed out afresh.
+    const dir = await seed({ pairs: [pair('q1')], project: { importBy: 'w-first' } });
     expect(await update(dir, CLEAN)).toEqual({ version: 2, clean: 2, conflicts: 0, fresh: false, conflictThreadIds: [], importTypes: IMPORTABLE });
     expect(await read(dir, 'docs/versions/v1/original.md')).toBe(DRAFT);
     expect(await read(dir, 'docs/versions/v1/draft.md')).toBe(OURS);
@@ -158,6 +171,7 @@ describe('bringing a new version in', () => {
       reimporting: { version: 2, from: 'active' },
       updatedAt: T.toISOString(),
     });
+    expect(project.importBy).toBeUndefined();
     expect((await readItems(dir)).values.map((i) => i.id)).toEqual(['q1']);
     expect(await readSubmissions(dir)).toEqual([]);
   });
@@ -366,6 +380,40 @@ describe('when an update is refused or fails', () => {
     expect(await snapshot(dir)).toEqual(before);
   });
 
+  it("refuses, writing nothing, when the version it would save is already saved", async () => {
+    // A copy that isn't this update's: putting the update back must never restore from it, or remove it.
+    const dir = await seed();
+    await fs.mkdir(path.join(dir, 'docs', 'versions', 'v1'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'docs', 'versions', 'v1', 'draft.md'), 'An older copy of the draft.\n');
+    await refused(dir, 'Version 1 is already saved in docs/versions/v1.');
+  });
+
+  it.each([
+    'docs/versions/v1/update.json',
+    'docs/versions/v1/original.md',
+    'docs/versions/v1/draft.md',
+    'docs/versions/v1/items/q1.json',
+    'items/plan-changes-v2-1.json',
+    'threads/t-plan-changes-v2-1.json',
+    'docs/versions/v2/merged.md',
+    'docs/draft.md',
+    'docs/original.md',
+    'project.json',
+  ])('puts the project back as it was when writing %s fails', async (rel) => {
+    const dir = await seed({ pairs: [pair('q1')] });
+    const before = await snapshot(dir);
+    failing.counts.clear();
+    failing.calls = new Set([`${path.join(dir, rel)}#1`]);
+    const error = await failure(update(dir, CONFLICTING));
+    failing.calls = new Set();
+    expect(error).toBeInstanceOf(ConflictError);
+    expect((error as Error).message).toBe(
+      "The update didn't finish (No space left on device). What it had written was put back, so the project is as it was. Run /dev-plumbing to try again.",
+    );
+    expect(await snapshot(dir)).toEqual(before);
+    expect((await update(dir, CONFLICTING)).version).toBe(2);
+  });
+
   it('an update never loses your draft', async () => {
     const dir = await seed();
     const before = await snapshot(dir);
@@ -411,6 +459,70 @@ describe('when an update is refused or fails', () => {
     expect((await update(dir, CONFLICTING)).version).toBe(2);
   });
 
+  it("puts your draft back from the update's own copy when the saved one can't be read", async () => {
+    const dir = await seed();
+    const before = await snapshot(dir);
+    failing.counts.clear();
+    failing.calls = new Set([`${path.join(dir, 'project.json')}#1`]);
+    reading.fail = new Set(['original.md', 'draft.md'].map((f) => path.join(dir, 'docs', 'versions', 'v1', f)));
+    const error = await failure(update(dir, CONFLICTING));
+    failing.calls = new Set();
+    reading.fail = new Set();
+    expect(error).toBeInstanceOf(ConflictError);
+    expect((error as Error).message).toBe(
+      "The update didn't finish (No space left on device). What it had written was put back, so the project is as it was. Run /dev-plumbing to try again.",
+    );
+    expect(await read(dir, 'docs/draft.md')).toBe(OURS);
+    expect(await snapshot(dir)).toEqual(before);
+  });
+
+  it("keeps v1's copy of your draft until it can be read, when an update has to be put back later", async () => {
+    const dir = await seed();
+    const before = await snapshot(dir);
+    failing.counts.clear();
+    failing.calls = new Set([`${path.join(dir, 'project.json')}#1`, `${path.join(dir, 'docs', 'draft.md')}#2`]);
+    await failure(update(dir, CONFLICTING));
+    failing.calls = new Set();
+    const merged = await read(dir, 'docs/draft.md');
+    // v1's copy of your draft can't be read for now: nothing is put back from it, and nothing is removed.
+    reading.fail = new Set([path.join(dir, 'docs', 'versions', 'v1', 'draft.md')]);
+    const error = await failure(planChange(dir, CONFLICTING));
+    reading.fail = new Set();
+    expect(error).toBeInstanceOf(ConflictError);
+    expect((error as Error).message).toBe(
+      "An earlier update to v2 didn't finish, and some files couldn't be put back yet: docs/draft.md. Run /dev-plumbing again to finish putting them back.",
+    );
+    expect(await read(dir, 'docs/draft.md')).toBe(merged);
+    expect(await read(dir, 'docs/versions/v1/draft.md')).toBe(OURS);
+    expect(await fs.readdir(path.join(dir, 'docs', 'versions', 'v1'))).toContain('update.json');
+    // Once it can be read, the next look puts it back.
+    expect(await planChange(dir, CONFLICTING)).toMatchObject({ from: 1, to: 2 });
+    expect(await snapshot(dir)).toEqual(before);
+  });
+
+  it('leaves a draft you changed after an update stopped as it is, keeping the copy from before the update', async () => {
+    const dir = await seed();
+    failing.counts.clear();
+    failing.calls = new Set([`${path.join(dir, 'project.json')}#1`, `${path.join(dir, 'docs', 'draft.md')}#2`]);
+    await failure(update(dir, CONFLICTING));
+    failing.calls = new Set();
+    // Before the next /dev-plumbing, the draft changes: an accepted change, or an edit by hand.
+    const edited = `${await read(dir, 'docs/draft.md')}\n## Rollout\n\nShip to one store first.\n`;
+    await fs.writeFile(path.join(dir, 'docs', 'draft.md'), edited);
+    const error = await failure(planChange(dir, CONFLICTING));
+    expect(error).toBeInstanceOf(ConflictError);
+    expect((error as Error).message).toBe(
+      "An earlier update to v2 didn't finish, and some files couldn't be put back yet: docs/draft.md (changed since the update, so it was left as it is). Run /dev-plumbing again to finish putting them back.",
+    );
+    expect(await read(dir, 'docs/draft.md')).toBe(edited);
+    expect(await read(dir, 'docs/versions/v1/draft.md')).toBe(OURS);
+    expect(await read(dir, 'docs/original.md')).toBe(DRAFT);
+    expect(await fs.readdir(path.join(dir, 'docs', 'versions', 'v1'))).toContain('update.json');
+    // An update is refused the same way, and still leaves the draft alone.
+    await expect(update(dir, CONFLICTING)).rejects.toThrow(ConflictError);
+    expect(await read(dir, 'docs/draft.md')).toBe(edited);
+  });
+
   it('puts back an update that stopped part-way, the next time it looks at the plan', async () => {
     const dir = await seed({ pairs: [pair('q1')] });
     const before = await snapshot(dir);
@@ -420,7 +532,8 @@ describe('when an update is refused or fails', () => {
       await fs.writeFile(path.join(dir, rel), text);
     };
     const created = ['docs/versions/v2', 'submissions', 'items/plan-changes-v2-1.json', 'threads/t-plan-changes-v2-1.json', 'submissions/s-1.json', 'docs/versions/v2/merged.md'];
-    await write('docs/versions/v1/update.json', JSON.stringify({ to: 2, created }));
+    const wrote = { draft: planHash('The merged draft.\n'), original: planHash(CONFLICTING) };
+    await write('docs/versions/v1/update.json', JSON.stringify({ to: 2, created, wrote }));
     await snapshotVersion(dir, 1);
     for (const rel of created.slice(2)) await write(rel, '{}');
     await write('docs/draft.md', 'The merged draft.\n');
@@ -433,7 +546,8 @@ describe('when an update is refused or fails', () => {
     const dir = await seed();
     await update(dir, CONFLICTING);
     const after = await snapshot(dir);
-    await fs.writeFile(path.join(dir, 'docs', 'versions', 'v1', 'update.json'), JSON.stringify({ to: 2, created: ['items/plan-changes-v2-1.json'] }));
+    const wrote = { draft: planHash(await read(dir, 'docs/draft.md')), original: planHash(CONFLICTING) };
+    await fs.writeFile(path.join(dir, 'docs', 'versions', 'v1', 'update.json'), JSON.stringify({ to: 2, created: ['items/plan-changes-v2-1.json'], wrote }));
     expect(await planChange(dir, CONFLICTING)).toBeNull();
     expect(await snapshot(dir)).toEqual(after);
   });
