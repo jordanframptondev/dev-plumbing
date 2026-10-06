@@ -93,6 +93,12 @@ export const api = {
     request<{ ok: true }>(`${proj(repo, id)}/threads/${enc(threadId)}/draft`, send('PUT', draft ?? { clear: true })),
   park: (repo: string, id: string, threadId: string, parked: boolean) =>
     request<{ ok: true }>(`${proj(repo, id)}/threads/${enc(threadId)}/park`, send('POST', { parked })),
+  /** Marks an item reviewed, or clears the mark. Its only effect is taking the item off "Nobody has reviewed these". */
+  setReviewed: (repo: string, id: string, itemId: string, reviewed: boolean) =>
+    request<{ ok: true }>(`${proj(repo, id)}/items/${enc(itemId)}/reviewed`, send('POST', { reviewed })),
+  /** Mark all as reviewed: 1 to 500 item ids. `marked` is how many weren't marked before. */
+  markReviewed: (repo: string, id: string, itemIds: string[]) =>
+    request<{ ok: true; marked: number }>(`${proj(repo, id)}/reviewed`, send('POST', { itemIds })),
   submit: (repo: string, id: string, body: SubmitBody) => request<SubmitResponse>(`${proj(repo, id)}/submit`, send('POST', body)),
   addItem: (repo: string, id: string, body: { type: string; title: string; text: string; fields?: Record<string, string>; anchor?: Anchor }) =>
     request<SubmitResponse & { threadId: string }>(`${proj(repo, id)}/items`, send('POST', body)),

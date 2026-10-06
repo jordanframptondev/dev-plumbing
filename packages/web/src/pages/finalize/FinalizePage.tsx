@@ -1,6 +1,7 @@
 import type { ChecklistEntry, DisplayStatus, FinalizeChecklist, FinalizeView } from '@dev-plumbing/core/schemas';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from '@tanstack/react-router';
+import { Fragment, useState } from 'react';
 import { api } from '../../api/client';
 import { Button } from '../../components/Button';
 import { StatusMark } from '../../components/StatusMark';
@@ -33,32 +34,76 @@ function statusLine(v: FinalizeView): string | null {
   return null;
 }
 
-function ChecklistGroup({ group, entries, statusOf, repo, project }: { group: Group; entries: Entry[]; statusOf: (threadId: string) => DisplayStatus; repo: string; project: string }) {
+/** The reviewed marks on "Nobody has reviewed these": a checkbox on each row, and Mark all as reviewed. */
+type Review = { ticked: ReadonlySet<string>; busy: boolean; error: Error | null; onTick: (itemId: string, reviewed: boolean) => void; onAll: () => void };
+
+function ChecklistGroup({
+  group,
+  entries,
+  statusOf,
+  repo,
+  project,
+  review,
+}: {
+  group: Group;
+  entries: Entry[];
+  statusOf: (threadId: string) => DisplayStatus;
+  repo: string;
+  project: string;
+  review?: Review;
+}) {
   if (entries.length === 0) return null;
+  const link = (e: Entry, className: string) => (
+    <Link to="/p/$repo/$project/th/$thread" params={{ repo, project, thread: e.threadId }} className={`flex items-center gap-2.5 py-2.5 pr-3 hover:bg-selection ${className}`}>
+      <StatusMark status={statusOf(e.threadId)} />
+      <div className="min-w-0 flex-1">
+        <div className="break-words text-[13px] font-medium">
+          <span className="mr-1.5 text-[10.5px] font-semibold text-ink-3">{e.typeTitle}</span>
+          {e.title}
+        </div>
+        <div className="text-[11.5px] text-ink-3">{e.defaultValue !== undefined ? `Default: ${e.defaultValue}` : e.reason}</div>
+      </div>
+      <span className="text-ink-3">›</span>
+    </Link>
+  );
   return (
     <section className="mt-5" data-testid={group.testId}>
-      <h3 className={`mb-1.5 ml-0.5 text-[12px] font-semibold ${group.tone}`}>{group.title}</h3>
-      <div className={LIST}>
-        {entries.map((e) => (
-          // A thread can be listed twice, with two reasons.
-          <Link
-            key={`${e.threadId}:${e.reason}`}
-            to="/p/$repo/$project/th/$thread"
-            params={{ repo, project, thread: e.threadId }}
-            className="flex items-center gap-2.5 px-3 py-2.5 hover:bg-selection"
-          >
-            <StatusMark status={statusOf(e.threadId)} />
-            <div className="min-w-0 flex-1">
-              <div className="break-words text-[13px] font-medium">
-                <span className="mr-1.5 text-[10.5px] font-semibold text-ink-3">{e.typeTitle}</span>
-                {e.title}
-              </div>
-              <div className="text-[11.5px] text-ink-3">{e.defaultValue !== undefined ? `Default: ${e.defaultValue}` : e.reason}</div>
-            </div>
-            <span className="text-ink-3">›</span>
-          </Link>
-        ))}
+      <div className="mb-1.5 ml-0.5 flex flex-wrap items-baseline justify-between gap-x-3">
+        <h3 className={`text-[12px] font-semibold ${group.tone}`}>{group.title}</h3>
+        {review && (
+          <button type="button" className="text-[12px] text-slate disabled:opacity-40" disabled={review.busy} onClick={review.onAll}>
+            Mark all as reviewed
+          </button>
+        )}
       </div>
+      <div className={LIST}>
+        {entries.map((e) =>
+          // A thread can be listed twice, with two reasons.
+          review ? (
+            // The checkbox sits outside the row's link, so ticking it doesn't open the thread.
+            <div key={`${e.threadId}:${e.reason}`} className="flex items-stretch">
+              <label className="flex shrink-0 cursor-pointer items-center pl-3 pr-2.5">
+                <input
+                  type="checkbox"
+                  aria-label={`Mark ${e.title} as reviewed`}
+                  checked={review.ticked.has(e.itemId)}
+                  disabled={review.busy}
+                  onChange={(ev) => review.onTick(e.itemId, ev.target.checked)}
+                  className="size-3.5 accent-slate"
+                />
+              </label>
+              {link(e, 'min-w-0 flex-1')}
+            </div>
+          ) : (
+            <Fragment key={`${e.threadId}:${e.reason}`}>{link(e, 'pl-3')}</Fragment>
+          ),
+        )}
+      </div>
+      {review?.error && (
+        <p role="alert" className="mt-2 text-[12.5px] text-seal">
+          {review.error.message}
+        </p>
+      )}
     </section>
   );
 }
@@ -82,6 +127,29 @@ export function FinalizeBody({ repo, project }: { repo: string; project: string 
   const cancel = useMutation({
     mutationFn: () => api.discardProposal(repo, project),
     onSettled: () => void qc.invalidateQueries({ predicate: (k) => k.queryKey[1] === repo && k.queryKey[2] === project }),
+  });
+  // Rows you tick stay ticked until the checklist comes back: without them once they're marked, unticked if it failed.
+  const [ticked, setTicked] = useState<ReadonlySet<string>>(() => new Set());
+  const tick = (itemIds: string[], on: boolean) =>
+    setTicked((s) => {
+      const next = new Set(s);
+      for (const id of itemIds) {
+        if (on) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  const reloaded = (itemIds: string[]) => qc.invalidateQueries({ predicate: (k) => k.queryKey[1] === repo && k.queryKey[2] === project }).then(() => tick(itemIds, false));
+  const review = useMutation({
+    mutationFn: (v: { itemId: string; reviewed: boolean }) => api.setReviewed(repo, project, v.itemId, v.reviewed),
+    onSettled: (_r, _e, v) => reloaded([v.itemId]),
+  });
+  const markAll = useMutation({
+    mutationFn: async (itemIds: string[]) => {
+      // The service takes up to 500 at a time.
+      for (let i = 0; i < itemIds.length; i += 500) await api.markReviewed(repo, project, itemIds.slice(i, i + 500));
+    },
+    onSettled: (_r, _e, itemIds) => reloaded(itemIds),
   });
   if (q.error) return <p className="text-[13px] text-seal">{(q.error as Error).message}</p>;
   if (!q.data) return <p className="text-[13px] text-ink-3">Loading…</p>;
@@ -147,8 +215,38 @@ export function FinalizeBody({ repo, project }: { repo: string; project: string 
       <div data-testid="finalize-checklist" className="mt-2">
         {checklist.blocking.length === 0 && <p className="mt-5 text-[13px] text-ink-2">Nothing blocks Finalize.</p>}
         {GROUPS.map((g) => (
-          <ChecklistGroup key={g.key} group={g} entries={checklist[g.key]} statusOf={statusOf} repo={repo} project={project} />
+          <ChecklistGroup
+            key={g.key}
+            group={g}
+            entries={checklist[g.key]}
+            statusOf={statusOf}
+            repo={repo}
+            project={project}
+            review={
+              g.key === 'unreviewed'
+                ? {
+                    ticked,
+                    busy: markAll.isPending,
+                    error: (review.error ?? markAll.error) as Error | null,
+                    onTick: (itemId, reviewed) => {
+                      tick([itemId], reviewed);
+                      review.mutate({ itemId, reviewed });
+                    },
+                    onAll: () => {
+                      const ids = [...new Set(checklist.unreviewed.map((e) => e.itemId))];
+                      tick(ids, true);
+                      markAll.mutate(ids);
+                    },
+                  }
+                : undefined
+            }
+          />
         ))}
+        {checklist.reviewed > 0 && (
+          <p data-testid="reviewed-count" className="ml-0.5 mt-3 text-[12px] text-ink-3">
+            {checklist.reviewed} marked as reviewed
+          </p>
+        )}
       </div>
     </div>
   );

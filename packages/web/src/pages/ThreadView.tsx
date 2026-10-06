@@ -8,6 +8,7 @@ import { Button } from '../components/Button';
 import { StatusMark } from '../components/StatusMark';
 import { ItemCard } from './ItemCard';
 import { MessageList } from './MessageList';
+import { ReviewedMark } from './ReviewedMark';
 
 const STATUS_TEXT: Record<DisplayStatus, string> = {
   your_turn: 'Your turn',
@@ -48,6 +49,7 @@ function ThreadBody() {
         <span className="text-[12px] text-ink-2" data-testid="thread-status">
           {STATUS_TEXT[status]}
         </span>
+        <ReviewedMark repo={repo} project={project} itemId={d.item.id} status={status} reviewedAt={d.item.reviewedAt} />
       </div>
       <MessageList detail={d} repo={repo} project={project} />
       {notice && (

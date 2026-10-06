@@ -166,6 +166,84 @@ describe('the Finalize page', () => {
   });
 });
 
+describe('marking items reviewed', () => {
+  const SLOW = entry({ itemId: 'concerns-slow', threadId: 't-concerns-slow', title: 'Slow query', typeTitle: 'Concerns', reason: 'Nobody has answered here.' });
+  const listed = (over: Partial<FinalizeView['checklist']> = {}) =>
+    view({ checklist: { blocking: [CHANNELS], defaults: [], parked: [], unreviewed: [TWICE, SLOW], reviewed: 0, canStart: false, ...over } });
+
+  it('gives each unreviewed row a checkbox outside its link, which marks the item', async () => {
+    const finalize = show(listed());
+    let done: (r: { ok: true }) => void = () => undefined;
+    const set = vi.spyOn(api, 'setReviewed').mockReturnValue(new Promise((resolve) => (done = resolve)));
+    const unreviewed = await screen.findByTestId('checklist-unreviewed');
+    const box = within(unreviewed).getByRole('checkbox', { name: 'Mark The job might run twice as reviewed' }) as HTMLInputElement;
+    expect(within(unreviewed).getByRole('checkbox', { name: 'Mark Slow query as reviewed' })).toBeTruthy();
+    expect(box.checked).toBe(false);
+    expect(box.closest('a')).toBeNull();
+    // The row still links to its thread.
+    expect(within(unreviewed).getByRole('link', { name: /The job might run twice/ }).getAttribute('href')).toBe('/p/acme-app/restock/th/t-concerns-twice');
+    fireEvent.click(box);
+    await waitFor(() => expect(set).toHaveBeenCalledWith('acme-app', 'restock', 'concerns-twice', true));
+    // Ticked while the mark is on its way.
+    expect(box.checked).toBe(true);
+    expect(navigate).not.toHaveBeenCalled();
+    // Then the page asks again, and the row leaves the list.
+    done({ ok: true });
+    await waitFor(() => expect(finalize).toHaveBeenCalledTimes(2));
+  });
+
+  it('Mark all as reviewed marks every item in the group', async () => {
+    const finalize = show(listed());
+    const all = vi.spyOn(api, 'markReviewed').mockResolvedValue({ ok: true, marked: 2 });
+    const unreviewed = await screen.findByTestId('checklist-unreviewed');
+    const button = within(unreviewed).getByRole('button', { name: 'Mark all as reviewed' });
+    expect(button.className).not.toContain('bg-button');
+    fireEvent.click(button);
+    await waitFor(() => expect(all).toHaveBeenCalledWith('acme-app', 'restock', ['concerns-twice', 'concerns-slow']));
+    await waitFor(() => expect(finalize).toHaveBeenCalledTimes(2));
+  });
+
+  it('offers the checkboxes and Mark all only on the unreviewed list', async () => {
+    show(view({ checklist: { blocking: [CHANNELS], defaults: [{ ...LEAD, defaultValue: '3 days' }], parked: [SNOOZE], unreviewed: [TWICE], reviewed: 0, canStart: false } }));
+    await screen.findByTestId('checklist-unreviewed');
+    expect(screen.getAllByRole('checkbox')).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: 'Mark all as reviewed' })).toHaveLength(1);
+    for (const id of ['checklist-blocking', 'checklist-defaults', 'checklist-parked']) expect(within(screen.getByTestId(id)).queryByRole('checkbox')).toBeNull();
+    // Start finalize stays the page's one primary button.
+    expect(screen.getAllByRole('button').filter((b) => b.className.includes('bg-button'))).toHaveLength(1);
+  });
+
+  it('says how many items are marked as reviewed', async () => {
+    const cases: [number, string | null][] = [
+      [0, null],
+      [1, '1 marked as reviewed'],
+      [4, '4 marked as reviewed'],
+    ];
+    for (const [reviewed, text] of cases) {
+      show(listed({ reviewed }));
+      await screen.findByTestId('finalize-checklist');
+      const line = screen.queryByTestId('reviewed-count');
+      expect(line?.textContent ?? null).toBe(text);
+      if (line) expect(line.className).toContain('text-ink-3');
+      cleanup();
+      vi.restoreAllMocks();
+    }
+    // Shown even when every unreviewed item is marked and the list is gone.
+    show(listed({ unreviewed: [], reviewed: 2 }));
+    expect((await screen.findByTestId('reviewed-count')).textContent).toBe('2 marked as reviewed');
+    expect(screen.queryByTestId('checklist-unreviewed')).toBeNull();
+  });
+
+  it("unticks the row and says why when it couldn't mark it", async () => {
+    show(listed());
+    vi.spyOn(api, 'setReviewed').mockRejectedValue(new ApiError(404, "Item concerns-twice doesn't exist.", null));
+    const box = (await screen.findByRole('checkbox', { name: 'Mark The job might run twice as reviewed' })) as HTMLInputElement;
+    fireEvent.click(box);
+    expect((await screen.findByRole('alert')).textContent).toBe("Item concerns-twice doesn't exist.");
+    expect(box.checked).toBe(false);
+  });
+});
+
 describe('with a final from Claude', () => {
   it("shows Claude's final to review in place of Start finalize", async () => {
     show(
