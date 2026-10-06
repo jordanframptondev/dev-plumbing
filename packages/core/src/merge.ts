@@ -39,7 +39,7 @@ function mergeError(e: ExecFailure): MergeError {
 }
 
 /** git merge-file's output, on three temp files that are always removed. Exit codes 1–127 count conflicts. */
-async function mergeFile(ours: string, base: string, theirs: string): Promise<string> {
+async function mergeFile(ours: string, base: string, theirs: string): Promise<{ stdout: string; code: number }> {
   // Absolute, so a relative TMPDIR still finds the files from git's cwd.
   const dir = await fs.mkdtemp(path.join(path.resolve(os.tmpdir()), 'dp-merge-'));
   try {
@@ -47,10 +47,10 @@ async function mergeFile(ours: string, base: string, theirs: string): Promise<st
     await Promise.all([fs.writeFile(files[0], ours), fs.writeFile(files[1], base), fs.writeFile(files[2], theirs)]);
     const args = ['merge-file', '-p', '--diff3', '--marker-size=31', '-L', 'draft', '-L', 'original', '-L', 'repo', ...files];
     try {
-      return (await run('git', args, { cwd: dir, timeout: 20_000, maxBuffer: 16 * 1024 * 1024 })).stdout;
+      return { stdout: (await run('git', args, { cwd: dir, timeout: 20_000, maxBuffer: 16 * 1024 * 1024 })).stdout, code: 0 };
     } catch (error) {
       const e = error as ExecFailure;
-      if (typeof e.code === 'number' && e.code >= 1 && e.code <= 127 && typeof e.stdout === 'string') return e.stdout;
+      if (typeof e.code === 'number' && e.code >= 1 && e.code <= 127 && typeof e.stdout === 'string') return { stdout: e.stdout, code: e.code };
       throw mergeError(e);
     }
   } finally {
@@ -110,7 +110,11 @@ export async function mergePlan(o: { base: string; ours: string; theirs: string 
   const base = withNewline(lf(o.base));
   const ours = withNewline(lf(o.ours));
   const theirs = lf(o.theirs);
-  const merged = resolveToOurs(await mergeFile(ours, base, withNewline(theirs)));
+  const output = await mergeFile(ours, base, withNewline(theirs));
+  const merged = resolveToOurs(output.stdout);
+  // git's exit code counts the conflicts (capped at 127), so output that disagrees isn't a merge and must not replace the draft.
+  const agrees = output.code === 127 ? merged.found.length >= 127 : merged.found.length === output.code;
+  if (!agrees) throw new MergeError(`git merge-file reported ${output.code} conflicts, but its output had ${merged.found.length}.`);
   // The text ends with a newline when the repo's plan does.
   const text = theirs.endsWith('\n') || !merged.text.endsWith('\n') ? merged.text : merged.text.slice(0, -1);
   const headings = headingsOf(text);

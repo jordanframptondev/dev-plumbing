@@ -189,6 +189,13 @@ describe('merging the repo plan into the draft', () => {
       process.env.PATH = tmp;
       await expect(mergePlan({ base: PLAN, ours, theirs })).rejects.toThrow("The merge needs git, and git wasn't found on this Mac.");
       expect(await fs.readdir(tmp)).toEqual([]);
+      // A git that exits 1 without printing a merge must not turn into an empty draft.
+      await fs.writeFile(path.join(fake, 'git'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+      process.env.PATH = fake;
+      const silent = await mergePlan({ base: PLAN, ours, theirs }).catch((e: unknown) => e);
+      expect(silent).toBeInstanceOf(MergeError);
+      expect((silent as Error).message).toBe('git merge-file reported 1 conflicts, but its output had 0.');
+      expect(await fs.readdir(tmp)).toEqual([]);
     } finally {
       process.env.TMPDIR = env.TMPDIR;
       process.env.PATH = env.PATH;
