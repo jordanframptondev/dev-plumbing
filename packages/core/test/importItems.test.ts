@@ -332,6 +332,19 @@ describe('re-import', () => {
     expect(await files(dir, ...pairFiles('questions-who'))).toEqual(before);
   });
 
+  it('reads an empty field as no field, and links in any order as the same links', async () => {
+    const who = imported('who', { fields: { blocking: 'true', default: '' }, links: ['questions-when', 'questions-why'] });
+    const when = imported('when', { fields: { blocking: 'false' } });
+    const dir = await reimporting([who, when, imported('why')]);
+    const before = await files(dir, ...pairFiles('questions-who'), ...pairFiles('questions-when'));
+    const r = await send(dir, [
+      { key: 'who', fields: { blocking: 'true' }, links: ['questions-why', 'when'] },
+      { key: 'when', fields: { blocking: 'false', default: '' } },
+    ]);
+    expect(r.itemIds).toEqual(['questions-who', 'questions-when']);
+    expect(await files(dir, ...pairFiles('questions-who'), ...pairFiles('questions-when'))).toEqual(before);
+  });
+
   it('a changed body with no data keeps the drawing, and flags the item', async () => {
     const map = drawn('architecture-map', 'architecture', reminderMap);
     const dir = await reimporting([{ ...map, item: { ...map.item, key: 'map', body: 'The job runs daily.' } }], { pending: ['architecture'] });

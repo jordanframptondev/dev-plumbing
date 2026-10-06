@@ -46,6 +46,11 @@ const lstat = (p: string) => fs.lstat(p).catch(() => null);
 const lf = (text: string) => text.replace(/\r\n/g, '\n');
 /** The text with every run of whitespace as one space, to tell a change of formatting from a change of words. */
 const squash = (text: string) => text.replace(/\s+/g, ' ').trim();
+/** Whether every line of `part` is a whole line of `text`, ignoring spaces at the ends of lines. */
+function hasLines(text: string, part: string): boolean {
+  const lines = new Set(text.split('\n').map((line) => line.trimEnd()));
+  return part.split('\n').every((line) => lines.has(line.trimEnd()));
+}
 /** The number of lines in a diff segment's text. */
 const lineCount = (text: string) => (text ? text.split('\n').length - (text.endsWith('\n') ? 1 : 0) : 0);
 
@@ -292,6 +297,8 @@ export async function updateRefusal(dir: string): Promise<string | null> {
  *   draft starts again from the repo's text;
  * - the draft as merged is kept in docs/versions/v<n+1>/merged.md;
  * - each conflict becomes a Plan changes item whose thread is with Claude, queued as one submission;
+ * - an older Plan changes thread still open is parked when a new conflict under the same heading has every line of its
+ *   passage, and every one is parked with `fresh`;
  * - docs/original.md becomes the repo's text;
  * - project.json records the version and starts a re-import of every importable type.
  * Refused, writing nothing, while updateRefusal says so, when the plan hasn't changed, when docs/versions/v<n> already
@@ -312,8 +319,12 @@ export async function updatePlan(
   const current = currentVersion(project);
   if (planHash(o.repoText) === current.hash) throw new ConflictError(`The plan hasn't changed since v${current.n}.`);
   // A snapshot already in docs/versions/v<n> isn't this update's. snapshotVersion would refuse to overwrite it, and
-  // putting the update back must never restore from it or remove it, so the update doesn't start.
-  const present = await fs.readdir(docPath(dir, `docs/versions/v${current.n}`)).catch((): string[] => []);
+  // putting the update back must never restore from it or remove it, so the update doesn't start. Only a missing
+  // folder means there's none: any other error says nothing about what's in it.
+  const present = await fs.readdir(docPath(dir, `docs/versions/v${current.n}`)).catch((error: unknown): string[] => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  });
   if (present.includes('original.md') || present.includes('draft.md')) throw new ConflictError(`Version ${current.n} is already saved in docs/versions/v${current.n}.`);
   const n = current.n + 1;
   const fresh = o.fresh === true;
@@ -338,13 +349,15 @@ export async function updatePlan(
     throw error;
   }
 
-  // Older Plan changes items still open, whose passage a new conflict covers, are superseded by it.
+  // Older Plan changes items still open are superseded: each by a new conflict that covers its passage, or all of them
+  // by a fresh start, which replaces the draft they're about.
   const { values: items } = await readItems(dir);
   const { values: threads } = await readThreads(dir);
   const statusOf = new Map(threads.map((t) => [t.id, t.status]));
-  const older = items.filter((i) => i.type === PLAN_CHANGES && i.conflict?.ours.trim() && !['resolved', 'parked'].includes(statusOf.get(i.threadId) ?? 'parked'));
-  /** Older item id → the title of the new item that supersedes it. */
-  const superseded = new Map<string, string>();
+  const open = items.filter((i) => i.type === PLAN_CHANGES && !['resolved', 'parked'].includes(statusOf.get(i.threadId) ?? 'parked'));
+  const older = open.filter((i) => i.conflict?.ours.trim());
+  /** Older item id → the line its thread is parked with. */
+  const superseded = new Map<string, string>(fresh ? open.map((i) => [i.id, `Superseded by the plan's v${n}, which started the draft afresh.`]) : []);
 
   // One Plan changes item per conflict, in document order, each with a thread that starts with Claude.
   const taken = new Set(items.map((i) => i.id));
@@ -353,8 +366,10 @@ export async function updatePlan(
     const id = uniqueId(`${PLAN_CHANGES}-v${n}-${k}`, taken);
     const heading = c.heading && c.heading.length <= 200 ? c.heading : null;
     const title = c.heading ?? `Change ${k}`;
-    const covers = older.filter((x) => !superseded.has(x.id) && c.ours.includes(x.conflict!.ours.trim()));
-    for (const x of covers) superseded.set(x.id, title);
+    // It covers an older one under the same heading (its title, or its anchor's heading) with every line of its passage.
+    const sameHeading = (x: Item) => x.title === title || (heading !== null && x.mdAnchor?.heading === heading);
+    const covers = older.filter((x) => !superseded.has(x.id) && sameHeading(x) && hasLines(c.ours, x.conflict!.ours.trim()));
+    for (const x of covers) superseded.set(x.id, `Superseded by the plan's v${n}: ${title}.`);
     return {
       item: {
         id,
@@ -416,8 +431,10 @@ export async function updatePlan(
   if (submission) created.push(rel(files.submission(submission.id)));
   created.push(mergedRel);
   const journal: Journal = { to: n, created, wrote: { draft: planHash(merged.text), original: planHash(o.repoText) } };
+  let journaled = false;
   try {
     await writeJsonAtomic(docPath(dir, journalRel(current.n)), journal);
+    journaled = true;
     // 1. The version snapshot: the plan, the draft and the items.
     await snapshotVersion(dir, current.n);
     // 2. The conflicts' items, threads and submission, and the draft as merged.
@@ -437,7 +454,7 @@ export async function updatePlan(
     // If writing the journal is what failed, nothing else was written yet. The working files go back from the copies
     // read above, not the snapshot, so a snapshot that can't be read now doesn't stop them.
     let left: string[] = [];
-    if (await lstat(docPath(dir, journalRel(current.n)))) {
+    if (journaled) {
       const { failed, changed } = await putBack(dir, project.docs, current.n, journal, before);
       // A working file something else changed while the update ran stays as it is. The snapshot and the journal stay
       // too, so the next look sets them aside (recoverUnfinishedUpdate).
@@ -452,12 +469,12 @@ export async function updatePlan(
     throw new ConflictError(`The update didn't finish (${reason}), and some files couldn't be put back yet: ${left.join(', ')}. Run /dev-plumbing again to finish putting them back.`);
   }
   await fs.rm(docPath(dir, journalRel(current.n)), { force: true }).catch(quiet);
-  // Older Plan changes threads the new conflicts cover are parked, pointing at the new one. The update has happened by
-  // now, so if one of these can't be written, that thread just stays open.
-  for (const [id, title] of superseded) {
+  // Superseded Plan changes threads are parked, saying what superseded them. The update has happened by now, so if one
+  // of these can't be written, that thread just stays open.
+  for (const [id, text] of superseded) {
     const thread = threads.find((t) => t.itemId === id);
     if (!thread) continue;
-    const line: Message = { id: newId('m', now), at, author: 'system', text: `Superseded by the plan's v${n}: ${title}.` };
+    const line: Message = { id: newId('m', now), at, author: 'system', text };
     await writeThread(dir, { ...thread, status: 'parked', messages: [...thread.messages, line] }).catch(quiet);
   }
   return { version: n, clean: version.merge!.clean, conflicts: merged.conflicts.length, fresh, conflictThreadIds, importTypes: importPending };

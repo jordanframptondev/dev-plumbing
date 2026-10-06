@@ -26,22 +26,27 @@ vi.mock('../src/merge', async (importOriginal) => {
   };
 });
 
-// Reading a file a test names fails with EMFILE while it's in `reading.fail`, as it does when the service has too many
-// files open: an error that says nothing about whether the file is there.
+// Reading a file, listing a folder or looking at a path a test names fails with EMFILE while it's in `reading.fail`,
+// as it does when the service has too many files open: an error that says nothing about whether the file is there.
 const reading = vi.hoisted(() => ({ fail: new Set<string>() }));
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises') & { default: typeof import('node:fs/promises') }>();
-  const readFile = ((file: unknown, ...rest: unknown[]) =>
-    typeof file === 'string' && reading.fail.has(file)
-      ? Promise.reject(Object.assign(new Error(`EMFILE: too many open files, open '${file}'`), { code: 'EMFILE' }))
-      : (actual.readFile as (...args: unknown[]) => Promise<unknown>)(file, ...rest)) as typeof actual.readFile;
-  return { ...actual, readFile, default: { ...actual.default, readFile } };
+  const failing = <F>(fn: F, call: string): F =>
+    ((file: unknown, ...rest: unknown[]) =>
+      typeof file === 'string' && reading.fail.has(file)
+        ? Promise.reject(Object.assign(new Error(`EMFILE: too many open files, ${call} '${file}'`), { code: 'EMFILE' }))
+        : (fn as (...args: unknown[]) => Promise<unknown>)(file, ...rest)) as F;
+  const readFile = failing(actual.readFile, 'open');
+  const readdir = failing(actual.readdir, 'scandir');
+  const lstat = failing(actual.lstat, 'lstat');
+  return { ...actual, readFile, readdir, lstat, default: { ...actual.default, readFile, readdir, lstat } };
 });
 
 import { PLAN_CHANGES_TYPE } from '../src/planChanges';
 import type { PlumbingProject } from '../src/schemas';
 import { pickUpFinalize, requestFinalize } from '../src/store/finalize';
-import { ConflictError, InputError, readItem, readItems, readProjectFile, readSubmissions, readThread, readThreads, writeProjectFile } from '../src/store/io';
+import { finalizeChecklist } from '../src/store/checklist';
+import { ConflictError, InputError, readItem, readItems, readProjectFile, readSubmissions, readThread, readThreads, writeItem, writeProjectFile, writeThread } from '../src/store/io';
 import { finishSubmission, pendingSubmissions, pickUp } from '../src/store/queue';
 import { planChange, recoverUnfinishedUpdate, updatePlan } from '../src/store/update';
 import { planHash, snapshotVersion } from '../src/store/versions';
@@ -320,6 +325,73 @@ describe('bringing a new version in', () => {
     expect((await readThread(dir, 't-plan-changes-v3-1')).status).toBe('with_claude');
   });
 
+  /**
+   * A project that brought `v2` in from `plan` (v1), its draft `draft`, leaving one Plan changes thread for you, with
+   * the re-import done. Then your draft is edited with `edit`, ready for v3.
+   */
+  async function atV2(o: { plan: string; draft: string; v2: string; edit?: (draft: string) => string }): Promise<string> {
+    const dir = await seed({ original: o.plan, draft: o.draft });
+    expect(await update(dir, o.v2)).toMatchObject({ version: 2, conflicts: 1 });
+    const [queued] = await pendingSubmissions(dir);
+    await pickUp(dir, queued.id, 'w-a', T);
+    await finishSubmission(dir, queued.id, [], T);
+    await writeProjectFile(dir, { ...(await readProjectFile(dir)), status: 'active', importPending: [], reimporting: undefined });
+    if (o.edit) await fs.writeFile(path.join(dir, 'docs', 'draft.md'), o.edit(await read(dir, 'docs/draft.md')));
+    return dir;
+  }
+  const T3 = new Date('2026-10-06T10:00:00.000Z');
+  const WITH_OPEN_POINTS = `${DRAFT}\n## Open points\n\n- Channels?\n`;
+
+  it('leaves an older Plan changes thread open when a newer conflict under another heading has its text in a line', async () => {
+    // v2: your "- TBD" and the repo's new text disagree under Open points.
+    const v2 = WITH_OPEN_POINTS.replace('- Channels?', '- Channels: SMS or email?');
+    const dir = await atV2({
+      plan: WITH_OPEN_POINTS,
+      draft: WITH_OPEN_POINTS.replace('- Channels?', '- TBD'),
+      v2,
+      edit: (draft) => draft.replace('sends a reminder.', 'sends an email reminder.\n- TBD for this job.'),
+    });
+    expect((await readItem(dir, 'plan-changes-v2-1')).conflict?.ours).toBe('- TBD');
+    // v3: a conflict under Approach, whose text has "- TBD for this job." in it.
+    expect(await update(dir, v2.replace('sends a reminder.', 'sends a text message.'), { now: T3 })).toMatchObject({ version: 3, conflicts: 1 });
+    expect(await readItem(dir, 'plan-changes-v3-1')).toMatchObject({ title: 'Approach', conflict: { ours: expect.stringContaining('- TBD for this job.') } });
+    expect((await readItem(dir, 'plan-changes-v3-1')).links).toBeUndefined();
+    // The Open points disagreement is still yours to settle, and still blocks Finalize.
+    const older = await readThread(dir, 't-plan-changes-v2-1');
+    expect(older.status).toBe('your_turn');
+    expect(older.messages.some((m) => m.text?.startsWith('Superseded'))).toBe(false);
+    expect((await finalizeChecklist(dir, types)).blocking.map((e) => e.itemId)).toContain('plan-changes-v2-1');
+  });
+
+  it('leaves an older Plan changes thread open when a newer conflict under the same heading has its text only inside a line', async () => {
+    const plan = DRAFT.replace('sends a reminder.', 'sends a reminder.\n- Channels?');
+    const v2 = plan.replace('- Channels?', '- Channels: SMS or email?');
+    // Your "- TBD" disagrees with v2 under Approach. Then you rewrite that line, and v3 changes it again.
+    const dir = await atV2({ plan, draft: plan.replace('- Channels?', '- TBD'), v2, edit: (draft) => draft.replace('- TBD', '- TBD for this job.') });
+    expect(await update(dir, v2.replace('- Channels: SMS or email?', '- Channels: SMS.'), { now: T3 })).toMatchObject({ version: 3, conflicts: 1 });
+    expect(await readItem(dir, 'plan-changes-v3-1')).toMatchObject({ title: 'Approach', conflict: { ours: '- TBD for this job.' } });
+    expect((await readThread(dir, 't-plan-changes-v2-1')).status).toBe('your_turn');
+  });
+
+  it('parks every older open Plan changes thread when the draft starts afresh from the new version', async () => {
+    const dir = await atV2({ plan: DRAFT, draft: OURS, v2: CONFLICTING });
+    // One you settled stays settled.
+    const settled = pair('plan-changes-v1-9', { type: 'plan-changes', title: 'Data', status: 'resolved' });
+    await writeItem(dir, { ...settled.item, key: 'v1-9', conflict: { ours: 'Log.', base: 'Log it.', theirs: 'Log them.' } });
+    await writeThread(dir, settled.thread);
+    expect(await update(dir, CONFLICTING.replace('sends a text message.', 'sends a push message.'), { fresh: true, now: T3 })).toMatchObject({
+      version: 3,
+      fresh: true,
+      conflicts: 0,
+    });
+    const older = await readThread(dir, 't-plan-changes-v2-1');
+    expect(older.status).toBe('parked');
+    expect(older.messages.at(-1)).toMatchObject({ author: 'system', at: T3.toISOString(), text: "Superseded by the plan's v3, which started the draft afresh." });
+    expect(await readThread(dir, 't-plan-changes-v1-9')).toEqual(settled.thread);
+    // Nothing is left to settle, so it no longer blocks Finalize.
+    expect((await finalizeChecklist(dir, types)).blocking).toEqual([]);
+  });
+
   it("gives back a conflict thread Claude didn't get to, with no answer to restore", async () => {
     const dir = await seed();
     const { conflictThreadIds } = await update(dir, CONFLICTING);
@@ -377,6 +449,32 @@ describe('when an update is refused or fails', () => {
     merging.fail = null;
     expect(error).toBeInstanceOf(InputError);
     expect((error as Error).message).toBe("Couldn't merge the new plan: git merge-file timed out");
+    expect(await snapshot(dir)).toEqual(before);
+  });
+
+  it("refuses, writing nothing, when it can't tell whether the version it would save is already saved", async () => {
+    const dir = await seed();
+    const before = await snapshot(dir);
+    reading.fail = new Set([path.join(dir, 'docs', 'versions', 'v1')]);
+    const error = await failure(update(dir, CONFLICTING));
+    reading.fail = new Set();
+    expect((error as NodeJS.ErrnoException).code).toBe('EMFILE');
+    expect(await snapshot(dir)).toEqual(before);
+  });
+
+  it("puts everything back when a write fails, even if it can't look at the journal it wrote", async () => {
+    const dir = await seed({ pairs: [pair('q1')] });
+    const before = await snapshot(dir);
+    failing.counts.clear();
+    failing.calls = new Set([`${path.join(dir, 'project.json')}#1`]);
+    reading.fail = new Set([path.join(dir, 'docs', 'versions', 'v1', 'update.json')]);
+    const error = await failure(update(dir, CONFLICTING));
+    failing.calls = new Set();
+    reading.fail = new Set();
+    expect(error).toBeInstanceOf(ConflictError);
+    expect((error as Error).message).toBe(
+      "The update didn't finish (No space left on device). What it had written was put back, so the project is as it was. Run /dev-plumbing to try again.",
+    );
     expect(await snapshot(dir)).toEqual(before);
   });
 

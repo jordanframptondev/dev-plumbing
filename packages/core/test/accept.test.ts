@@ -6,7 +6,7 @@ import { repoProfileSchema, type PlumbingType } from '../src/schemas';
 import { acceptFinal } from '../src/store/accept';
 import { recordChange } from '../src/store/changes';
 import { finalName, pickUpFinalize, readFinalize, requestFinalize, saveProposal } from '../src/store/finalize';
-import { ConflictError, InputError, readProjectFile } from '../src/store/io';
+import { ConflictError, InputError, readProjectFile, writeProjectFile } from '../src/store/io';
 import { tildify } from '../src/store/open';
 import { removeTempDirs, tempDir } from '../../../testkit/tmp';
 import { DRAFT, listType, makeRepo, pair, seedProject, TYPES } from './fixtures';
@@ -206,6 +206,21 @@ describe('accepting the final', () => {
     const error = await failure(acceptFinal({ dir, clone, profile, types, now: T2 }));
     expect(error).toBeInstanceOf(ConflictError);
     expect((error as Error).message).toBe('The draft changed since Claude wrote this. Finalize again.');
+    expect(await snapshot(dir, clone)).toEqual(before);
+    expect((await readFinalize(dir))?.state).toBe('proposed');
+  });
+
+  it('waits for a re-import to finish, writing nothing', async () => {
+    const { dir, clone } = await setup();
+    await propose(dir, FIRST);
+    // A new version of the plan came in after Claude wrote the final, with the draft as it was, and the importers are
+    // still running: what they change may make the final stale.
+    const project = await readProjectFile(dir);
+    await writeProjectFile(dir, { ...project, status: 'importing', importPending: ['questions'], reimporting: { version: 2, from: 'active' }, importBy: 'w-1' });
+    const before = await snapshot(dir, clone);
+    const error = await failure(acceptFinal({ dir, clone, profile, types, now: T2 }));
+    expect(error).toBeInstanceOf(ConflictError);
+    expect((error as Error).message).toBe('Wait for the import to finish, then accept.');
     expect(await snapshot(dir, clone)).toEqual(before);
     expect((await readFinalize(dir))?.state).toBe('proposed');
   });

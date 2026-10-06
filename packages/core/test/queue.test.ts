@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from 'vitest';
-import { readItem, readSubmission, readThread, writeSubmission, writeThread } from '../src/store/io';
+import { readItem, readSubmission, readThread, writeItem, writeSubmission, writeThread } from '../src/store/io';
 import { finishSubmission, finishWindowSubmissions, groupThreads, pendingSubmissions, pickUp, requeueUnfinished } from '../src/store/queue';
 import { removeTempDirs } from '../../../testkit/tmp';
 import { pair, seedProject } from './fixtures';
@@ -36,6 +36,22 @@ describe('the queue', () => {
     expect((await readThread(dir, 't-q2')).messages.at(-1)?.text).toBe('Done.');
     expect((await readSubmission(dir, 's-1')).finishedAt).toBeDefined();
     expect(await finishSubmission(dir, 's-1', [])).toEqual({ returned: [] });
+  });
+
+  it("parks a thread Claude didn't answer when an update took its item out of the plan meanwhile", async () => {
+    const dir = await seedProject({ pairs: [sentPair('q1'), sentPair('q2')] });
+    // v2 removed q1's part of the plan while Claude had it, so the re-import flagged it rather than parking it.
+    await writeItem(dir, { ...(await readItem(dir, 'q1')), removedIn: 2, flags: [{ reason: 'Removed from the plan in v2.', fromThreadId: 't-q1', at: AT }] });
+    await writeSubmission(dir, submission('s-1', ['t-q1', 't-q2'], { pickedUpAt: AT, pickedUpBy: 'w-a' }));
+    expect(await finishSubmission(dir, 's-1', [])).toEqual({ returned: ['t-q1', 't-q2'] });
+    const parked = await readThread(dir, 't-q1');
+    expect(parked.status).toBe('parked');
+    // Your answer is kept in the box, for when you unpark it.
+    expect(parked.draft).toMatchObject({ optionId: 'custom', text: 'Answer q1' });
+    expect(parked.messages.map((m) => m.text)).toEqual(['Which?', 'Answer q1', 'Parked, because it was removed from the plan in v2.']);
+    expect((await readItem(dir, 'q1')).removedIn).toBe(2);
+    // A thread whose item is still in the plan comes back to you as before.
+    expect((await readThread(dir, 't-q2')).status).toBe('your_turn');
   });
 
   it('flags conflicts the main window found on every thread involved', async () => {

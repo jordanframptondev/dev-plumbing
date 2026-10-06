@@ -121,6 +121,8 @@ describe('config folder', () => {
     expect(Object.keys(PLAN_CHANGES_TYPE.sections)).toEqual(['What to look for', 'Rules', 'Done when']);
     expect(PLAN_CHANGES_TYPE.sections.Rules).toContain('When the thread has no message from the person yet, reply with three options, each with a `change`');
     expect(PLAN_CHANGES_TYPE.sections.Rules).toContain('`keep`, "Keep my draft": `change: { md: [] }`.');
+    // A merged version that changes nothing isn't offered: Keep my draft says the same.
+    expect(PLAN_CHANGES_TYPE.sections.Rules).toContain('If the merged version is the draft as it is, leave `merged` out and recommend Keep my draft.');
     expect(importableTypes(c.types).map((t) => t.id)).not.toContain('plan-changes');
     // Yours wins, and no rules file is built in, whatever its header says.
     await write('plumbing/plan-changes.md', '---\nid: plan-changes\ntitle: Repo changes\norder: 12\nscreen: list\nemptyMessage: None.\nbuiltIn: true\n---\n\n## Rules\n- Keep it short.\n');

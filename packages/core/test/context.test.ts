@@ -54,13 +54,18 @@ describe('context packs', () => {
     const mine = pair('questions-mine', { title: 'Mine' });
     const map = pair('architecture-map', { type: 'architecture', title: 'Reminder job' });
     const conflict = pair('plan-changes-v2-1', { type: 'plan-changes', title: 'Data' });
+    // This version's conflicts, out of order on disk (v3-10 sorts before v3-2 by id), one with no heading above it.
+    const now1 = pair('plan-changes-v3-2', { type: 'plan-changes', title: 'Data' });
+    const now2 = pair('plan-changes-v3-10', { type: 'plan-changes', title: 'Change 10' });
     const dir = await seedProject({
       pairs: [
         { ...who, item: { ...who.item, key: 'who', body: 'Everyone, or only active subscribers?', mdAnchor: { heading: 'Data', lines: [9, 11] } } },
         { ...gone, item: { ...gone.item, key: 'gone', removedIn: 2 } },
         { ...mine, item: { ...mine.item, createdBy: 'you' } },
         { ...map, item: { ...map.item, key: 'map', data: { kind: 'system', groups: [], nodes: [], edges: [] } } },
-        { ...conflict, item: { ...conflict.item, key: 'v2-1' } },
+        { ...conflict, item: { ...conflict.item, key: 'v2-1', mdAnchor: { heading: 'Data' }, conflict: { ours: 'Log reminders.', base: 'Log.', theirs: 'Log by day.' } } },
+        { ...now1, item: { ...now1.item, key: 'v3-2', mdAnchor: { heading: 'Data' }, conflict: { ours: 'Log reminders in a table.', base: 'Log.', theirs: 'Log reminders in a table, by day.' } } },
+        { ...now2, item: { ...now2.item, key: 'v3-10', conflict: { ours: 'Remind customers by email.', base: 'Remind customers.', theirs: 'Remind customers by SMS.' } } },
       ],
       project: { status: 'importing', importPending: ['questions', 'architecture'], versions: [version(1), version(2), version(3)], reimporting: { version: 3, from: 'active' } },
     });
@@ -86,6 +91,11 @@ describe('context packs', () => {
         '+',
         '+ Send by SMS.',
       ].join('\n'),
+      // The passages this version's update left to settle in Plan changes, in document order. v2's belong to an earlier update.
+      conflicts: [
+        { heading: 'Data', ours: 'Log reminders in a table.', theirs: 'Log reminders in a table, by day.' },
+        { heading: null, ours: 'Remind customers by email.', theirs: 'Remind customers by SMS.' },
+      ],
       existing: [
         { key: 'gone', id: 'questions-gone', title: 'SMS later?', summary: 'A summary.', body: null, fields: {}, mdAnchor: null, hasData: false, data: null, removed: true },
         {

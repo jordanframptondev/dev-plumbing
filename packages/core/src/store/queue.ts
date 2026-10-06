@@ -23,7 +23,9 @@ const draftFrom = (m: YouMessage, at: string): ThreadDraft => ({
 /**
  * Ends a submission. Threads Claude didn't answer go back to Your turn with your answer restored as a
  * draft. A thread with no answer from you (one the service queued, like a Plan changes thread) just comes back to
- * you. Conflicts the main window found are noted on every thread involved and flag their items.
+ * you. A thread whose item an update took out of the plan meanwhile is parked instead, with your answer kept as its
+ * draft, so the item stays out of the final. Conflicts the main window found are noted on every thread involved and
+ * flag their items.
  */
 export async function finishSubmission(dir: string, id: string, conflicts: { threads: string[]; text: string }[], now: Date = new Date()): Promise<{ returned: string[] }> {
   const s = await readSubmission(dir, id);
@@ -35,16 +37,19 @@ export async function finishSubmission(dir: string, id: string, conflicts: { thr
     const thread = await readThread(dir, threadId).catch(() => null);
     if (thread?.status !== 'with_claude') continue;
     const you = [...thread.messages].reverse().find((m): m is YouMessage => m.author === 'you');
+    const removedIn = (await readItem(dir, thread.itemId).catch(() => null))?.removedIn;
     await writeThread(dir, {
       ...thread,
-      status: 'your_turn',
+      status: removedIn !== undefined ? 'parked' : 'your_turn',
       ...(you ? { draft: draftFrom(you, at) } : {}),
       messages: [
         ...thread.messages,
         line(
-          you
-            ? "Claude didn't get to this one. Your answer is back in the box: send it again when you're ready."
-            : "Claude didn't get to this one. Pick Keep my draft or Take the repo's version, or say what you want, and send it.",
+          removedIn !== undefined
+            ? `Parked, because it was removed from the plan in v${removedIn}.`
+            : you
+              ? "Claude didn't get to this one. Your answer is back in the box: send it again when you're ready."
+              : "Claude didn't get to this one. Pick Keep my draft or Take the repo's version, or say what you want, and send it.",
         ),
       ],
     });

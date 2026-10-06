@@ -129,9 +129,10 @@ async function staleAssets(o: { previous: ExportedTo | undefined; root: string; 
  * Accept: saves the previewed proposal as docs/final.md, keeping any earlier final in finals/, and copies it into the
  * clone as <name>.final.md, with its mockups in <name>.assets/, next to the plan. The project becomes Finalized.
  *
- * Every check runs before the first write: the proposal is for the current draft and items, the clone is a clone of this repo,
- * and nothing Accept writes is, or goes through, a link. If a write fails part-way, everything written so far is put
- * back and project.json isn't touched, so the project is never marked finalized without its final.
+ * Every check runs before the first write: no import is running, the proposal is for the current draft and items, the
+ * clone is a clone of this repo, and nothing Accept writes is, or goes through, a link. If a write fails part-way,
+ * everything written so far is put back and project.json isn't touched, so the project is never marked finalized
+ * without its final.
  * `home` is the home folder for `~` paths (the service passes ctx.home), so exportedTo.clone has the same form as
  * project.clones.
  */
@@ -146,6 +147,8 @@ export async function acceptFinal(o: {
   const at = (o.now ?? new Date()).toISOString();
   const project = await readProjectFile(o.dir);
   if (o.profile.name !== project.repo) throw new InputError(`The ${o.profile.name} repo profile isn't this project's repo, ${project.repo}.`);
+  // A re-import may still change items the final was written from, so a proposal can't be accepted until it's done.
+  if (project.status === 'importing') throw new ConflictError('Wait for the import to finish, then accept.');
 
   const request = await readFinalize(o.dir);
   const proposal = request?.state === 'proposed' ? request.proposal : undefined;

@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { diagramMermaid } from '../src/finalExport';
+import { PLAN_CHANGES_TYPE } from '../src/planChanges';
 import type { DiagramData, MockupData } from '../src/schemas';
 import { addDecision } from '../src/store/decisions';
 import {
@@ -149,6 +150,22 @@ describe('finalize requests', () => {
         '- {{diagram:architecture-old}}: "Old overview" is parked, so it\'s left out of the final.',
         '- {{mockup:ui-hidden:after}}: there\'s no item "ui-hidden".',
       ].join('\n'),
+    });
+    expect(await readFinalize(dir)).toEqual(before);
+    expect(await exists(proposalFile(dir))).toBe(false);
+  });
+
+  it("refuses a token naming a Plan changes item, which has no drawing, saving nothing", async () => {
+    const conflict = pair('plan-changes-v2-1', { type: 'plan-changes', title: 'Approach', status: 'resolved' });
+    const dir = await seedProject({ pairs: [conflict] });
+    const all = [...types, PLAN_CHANGES_TYPE];
+    const request = await requestFinalize(dir, { types: all });
+    await pickUpFinalize(dir, 'w-a');
+    const before = await readFinalize(dir);
+    const markdown = '# Final\n\n{{diagram:plan-changes-v2-1}}\n';
+    expect(await refusal(saveProposal(dir, { requestId: request.id, markdown, types: all, name: 'restock' }))).toEqual({
+      type: 'InputError',
+      message: ['Nothing was saved. Fix these and call dp_finalize again with the whole document:', '- {{diagram:plan-changes-v2-1}}: "Approach" isn\'t a diagram item.'].join('\n'),
     });
     expect(await readFinalize(dir)).toEqual(before);
     expect(await exists(proposalFile(dir))).toBe(false);

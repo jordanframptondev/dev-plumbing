@@ -47,14 +47,15 @@ type Given = Partial<Content>;
 const CONTENT = ['title', 'summary', 'body', 'fields', 'mdAnchor', 'codeRefs', 'links', 'data'] as const;
 
 /**
- * One content field in a form where equal values compare equal: empty is the same as absent, code references are a
- * set whose ✓ (which comes from the clone rather than the plan) is left out, and an anchor is its heading.
+ * One content field in a form where equal values compare equal: empty is the same as absent (a field's empty value
+ * too), links and code references are sets, a code reference's ✓ (which comes from the clone rather than the plan) is
+ * left out, and an anchor is its heading.
  */
 function comparable(key: keyof Content, value: unknown): string {
   if (key === 'codeRefs') return stable(((value as CodeRef[] | undefined) ?? []).map(({ verified: _verified, ...ref }) => stable(ref)).sort());
   if (key === 'mdAnchor') return stable((value as Item['mdAnchor'])?.heading ?? null);
-  if (key === 'links') return stable(value ?? []);
-  if (key === 'fields') return stable(value ?? {});
+  if (key === 'links') return stable([...((value as string[] | undefined) ?? [])].sort());
+  if (key === 'fields') return stable(Object.fromEntries(Object.entries((value as Record<string, string> | undefined) ?? {}).filter(([, v]) => v !== '')));
   if (key === 'body') return stable(value || null);
   return stable(value ?? null);
 }

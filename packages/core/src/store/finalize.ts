@@ -98,9 +98,10 @@ function parkedProblem(problem: string, parked: Map<string, Item>): string {
 
 /**
  * The finalizer's document. Every token is checked and expanded first; any problem refuses the whole document and
- * saves nothing. Tokens can name only items that go into the final: not parked ones, nor items of disabled types. Otherwise the expanded final goes to docs/final.proposed.md, and the request records
- * finalInputsHash (the current draft, items and decisions) and the mockups the final links to.
- * `name` is finalName(project.source.path).
+ * saves nothing. Tokens can't name parked items or items of disabled types. Plan changes items aren't left out here, as
+ * they are from the finalizer's pack, but a token can't name one either: every token needs a drawing, and they have
+ * none. Otherwise the expanded final goes to docs/final.proposed.md, and the request records finalInputsHash (the
+ * current draft, items and decisions) and the mockups the final links to. `name` is finalName(project.source.path).
  */
 export async function saveProposal(
   dir: string,
@@ -113,8 +114,8 @@ export async function saveProposal(
   if (o.markdown.length > MAX_FINAL_CHARS) {
     throw nothingSaved([`The final is ${o.markdown.length.toLocaleString('en-US')} characters; it can be at most 500,000.`], RETRY);
   }
-  // Only items that go into the final can be named. As in the checklist and the finalizer's pack, that leaves out
-  // parked items and items of disabled plumbing types.
+  // As in the checklist and the finalizer's pack, parked items and items of disabled plumbing types can't be named.
+  // Plan changes items, which the pack also leaves out, are refused by expandTokens: they have no drawing.
   const [{ values: items }, { values: threads }] = await Promise.all([readItems(dir), readThreads(dir)]);
   const statusByThread = new Map(threads.map((t) => [t.id, displayStatus(t)]));
   const enabled = (i: Item) => o.types.find((t) => t.id === i.type)?.enabled !== false;

@@ -55,12 +55,16 @@ export type ImportPack = {
   existingItems: { id: string; type: string; title: string; removed?: true }[];
   /**
    * Set while a new version of the plan is re-imported, null at first import. `changes` is how the plan changed from
-   * v`from` to v`to`; `existing` is this type's imported items, by key, so the importer can reuse a key for the same thing.
+   * v`from` to v`to`; `conflicts` are the passages this update left to settle in Plan changes (`ours` is still in the
+   * draft, `theirs` isn't yet); `existing` is this type's imported items, by key, so the importer can reuse a key for the
+   * same thing.
    */
   reimport: {
     from: number;
     to: number;
     changes: string;
+    /** In document order. `heading` is the heading above the passage, or null when there's none. */
+    conflicts: { heading: string | null; ours: string; theirs: string }[];
     existing: {
       key: string;
       id: string;
@@ -107,6 +111,19 @@ function planDiff(before: string, after: string): string {
     out.push(`${line.mark} ${line.text}`.trimEnd());
   });
   return out.join('\n');
+}
+
+/**
+ * The passages the update to v`to` left to settle: its Plan changes items (keys `v<to>-<k>`), in the order it made
+ * them, which is document order.
+ */
+function conflictsOf(items: Item[], to: number): NonNullable<ImportPack['reimport']>['conflicts'] {
+  const prefix = `v${to}-`;
+  const k = (i: Item) => Number(i.key!.slice(prefix.length));
+  return items
+    .filter((i) => i.type === PLAN_CHANGES && i.key?.startsWith(prefix) && i.conflict !== undefined)
+    .sort((a, b) => k(a) - k(b))
+    .map((i) => ({ heading: i.mdAnchor?.heading ?? null, ours: i.conflict!.ours, theirs: i.conflict!.theirs }));
 }
 
 /** Spec §13.2: what a thread subagent receives. */
@@ -168,6 +185,7 @@ export async function importPack(o: { dir: string; typeId: string; types: Plumbi
           from: to - 1,
           to,
           changes: planDiff((await readVersionDoc(o.dir, project, to - 1, 'original')) ?? '', (await readVersionDoc(o.dir, project, to, 'original')) ?? ''),
+          conflicts: conflictsOf(items, to),
           existing: items.flatMap((i) =>
             i.type === type.id && i.createdBy === 'import' && i.key !== undefined
               ? [
@@ -324,7 +342,8 @@ export async function finalizePack(o: { dir: string; types: PlumbingType[]; prof
   };
   const order = (item: Item) => typeOf(item)?.order ?? Number.MAX_SAFE_INTEGER;
   // Parked items and items of disabled plumbing types don't go into the final (saveProposal refuses their tokens).
-  // Nor do Plan changes items: what they settled is already in the draft.
+  // Nor do Plan changes items: what they settled is already in the draft. saveProposal doesn't leave them out, but
+  // a token can't name one anyway, since every token needs a drawing and they have none.
   const items = allItems
     .filter((i) => statusOf(i) !== 'parked' && typeOf(i)?.enabled !== false && i.type !== PLAN_CHANGES)
     .sort((a, b) => order(a) - order(b) || a.title.localeCompare(b.title));
