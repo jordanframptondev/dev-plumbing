@@ -3,6 +3,7 @@ import type {
   Anchor,
   ChangesResponse,
   ConfigProblem,
+  DiffSegment,
   MockupKitInfo,
   DiscoveryProblem,
   FinalizeRequest,
@@ -18,6 +19,7 @@ import type {
   ThreadDetail,
   TypeEntry,
   TypeItemRow,
+  VersionSummary,
 } from '@dev-plumbing/core/schemas';
 
 export class ApiError extends Error {
@@ -103,4 +105,9 @@ export const api = {
   startFinalize: (repo: string, id: string) => request<StartFinalizeResponse>(`${proj(repo, id)}/finalize`, send('POST', {})),
   acceptFinal: (repo: string, id: string, clone: string) => request<AcceptFinalResponse>(`${proj(repo, id)}/finalize/accept`, send('POST', { clone })),
   discardProposal: (repo: string, id: string) => request<{ ok: true }>(`${proj(repo, id)}/finalize/discard`, send('POST', {})),
+  versions: (repo: string, id: string) => request<{ versions: VersionSummary[] }>(`${proj(repo, id)}/versions`),
+  versionDoc: (repo: string, id: string, n: number, which: 'original' | 'draft') => request<{ text: string | null }>(`${proj(repo, id)}/versions/${n}/${which}`),
+  compareVersions: (repo: string, id: string, from: number, to: number, which: 'original' | 'draft') =>
+    request<{ segments: DiffSegment[] }>(`${proj(repo, id)}/versions/compare?${new URLSearchParams({ from: String(from), to: String(to), which })}`),
+  updateDiff: (repo: string, id: string, n: number) => request<{ segments: DiffSegment[] }>(`${proj(repo, id)}/versions/${n}/update-diff`),
 };

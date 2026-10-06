@@ -18,6 +18,21 @@ function typeStatus(t: TypeEntry): DisplayStatus {
 const Section = ({ children }: { children: ReactNode }) => <div className="px-2 pb-1 pt-3 text-[11px] font-semibold text-ink-3">{children}</div>;
 
 export function ProjectNav({ home, repo, project, onNavigate }: { home: ProjectHome; repo: string; project: string; onNavigate?: () => void }) {
+  // Once the plan has a v2, Original and Draft say which version they are, and the earlier ones are under Versions.
+  const versioned = home.version.count > 1;
+  const docEntry = (doc: 'original' | 'draft' | 'final') => {
+    const label = versioned && doc !== 'final' ? `${DOC_LABELS[doc]} (v${home.version.current})` : DOC_LABELS[doc];
+    return home.documents[doc] ? (
+      <Link to="/p/$repo/$project/d/$doc" params={{ repo, project, doc }} activeProps={ACTIVE} className={LINK} onClick={onNavigate}>
+        {label}
+      </Link>
+    ) : (
+      <span className={`${LINK} text-ink-3`}>
+        {label}
+        <span className="ml-auto text-[11px]">Not yet</span>
+      </span>
+    );
+  };
   return (
     <nav className="flex flex-col gap-px">
       <Link to="/p/$repo/$project" params={{ repo, project }} activeOptions={{ exact: true }} activeProps={ACTIVE} className={LINK} onClick={onNavigate}>
@@ -42,18 +57,14 @@ export function ProjectNav({ home, repo, project, onNavigate }: { home: ProjectH
         </Link>
       ))}
       <Section>Documents</Section>
-      {(['original', 'draft', 'final'] as const).map((doc) =>
-        home.documents[doc] ? (
-          <Link key={doc} to="/p/$repo/$project/d/$doc" params={{ repo, project, doc }} activeProps={ACTIVE} className={LINK} onClick={onNavigate}>
-            {DOC_LABELS[doc]}
-          </Link>
-        ) : (
-          <span key={doc} className={`${LINK} text-ink-3`}>
-            {DOC_LABELS[doc]}
-            <span className="ml-auto text-[11px]">Not yet</span>
-          </span>
-        ),
+      {docEntry('original')}
+      {docEntry('draft')}
+      {versioned && (
+        <Link to="/p/$repo/$project/versions" params={{ repo, project }} activeProps={ACTIVE} className={LINK} onClick={onNavigate}>
+          Versions
+        </Link>
       )}
+      {docEntry('final')}
       <Section>Review</Section>
       <span className={`${LINK} text-ink-3`} title="Whiteboard Defense arrives in a later update.">
         Whiteboard Defense
