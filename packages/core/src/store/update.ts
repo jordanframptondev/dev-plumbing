@@ -84,15 +84,22 @@ async function bytesIfThere(file: string): Promise<Buffer | null> {
 const sha256 = (data: Uint8Array) => createHash('sha256').update(data).digest('hex');
 
 /**
- * Takes back an update to v<to> that didn't finish, using its journal in docs/versions/v<n>/.
+ * What putting an update back did. `failed`: the files it couldn't put back, because they can't be read, written or
+ * removed. `changed`: the working files it left as they are, because they changed since the update wrote them.
+ */
+type PutBack = { failed: string[]; changed: string[] };
+
+/**
+ * Takes back the writes of an update to v<to> that didn't finish, using its journal in docs/versions/v<n>/:
  * - docs/original.md and docs/draft.md go back to what they were: `before` (the update's own copy, when it's the one
  *   putting itself back) or else the snapshot. Only a file that is what the update wrote is replaced. One that changed
- *   since is left as it is.
- * - The files it created are removed, and so are the snapshot and the journal.
- * Returns the files it couldn't put back; then the snapshot and the journal stay, for the next try.
+ *   since (an accepted change, an edit by hand) is left as it is: putting it back would lose that.
+ * - The files it created are removed.
+ * The snapshot and the journal are left for the caller.
  */
-async function rollBack(dir: string, docs: PlumbingProject['docs'], n: number, journal: Journal, before?: { original: Buffer; draft: Buffer }): Promise<string[]> {
-  const left: string[] = [];
+async function putBack(dir: string, docs: PlumbingProject['docs'], n: number, journal: Journal, before?: { original: Buffer; draft: Buffer }): Promise<PutBack> {
+  const failed: string[] = [];
+  const changed: string[] = [];
   for (const which of ['original', 'draft'] as const) {
     const rel = docs[which];
     try {
@@ -101,15 +108,14 @@ async function rollBack(dir: string, docs: PlumbingProject['docs'], n: number, j
       const saved = before?.[which] ?? (await bytesIfThere(docPath(dir, versionDocRel(n, which))));
       // No snapshot of it means the update stopped before it got that far, so the working file was never replaced.
       if (!saved || current?.equals(saved)) continue;
-      // Changed since the update wrote it (an accepted change, an edit by hand): putting it back would lose that.
       if (current && sha256(current) !== journal.wrote[which]) {
-        left.push(`${rel} (changed since the update, so it was left as it is)`);
+        changed.push(rel);
         continue;
       }
       await writeFileAtomic(working, saved);
     } catch {
       // A file that can't be read or written can't be put back yet.
-      left.push(rel);
+      failed.push(rel);
     }
   }
   for (const rel of [...journal.created].reverse()) {
@@ -118,10 +124,18 @@ async function rollBack(dir: string, docs: PlumbingProject['docs'], n: number, j
     if (!stat) continue;
     // A folder the update made goes only when it's empty again.
     if (stat.isDirectory()) await fs.rmdir(file).catch(quiet);
-    else await fs.rm(file, { force: true }).catch(() => left.push(rel));
+    else await fs.rm(file, { force: true }).catch(() => failed.push(rel));
   }
-  if (left.length) return left;
-  // Everything is back, so the snapshot isn't needed any more. The journal goes last.
+  return { failed, changed };
+}
+
+/**
+ * Once an update is put back, its snapshot isn't needed any more: it's removed, then the journal, then
+ * docs/versions/v<n> and docs/versions if they're empty (a merged.md from the update that brought v<n> in stays).
+ * Returns what it couldn't remove; then the journal stays, for the next try.
+ */
+async function removeSnapshot(dir: string, n: number): Promise<string[]> {
+  const left: string[] = [];
   const folder = docPath(dir, `docs/versions/v${n}`);
   for (const rel of [versionDocRel(n, 'original'), versionDocRel(n, 'draft')]) await fs.rm(docPath(dir, rel), { force: true }).catch(() => left.push(rel));
   await fs.rm(path.join(folder, 'items'), { recursive: true, force: true }).catch(() => left.push(`docs/versions/v${n}/items`));
@@ -133,30 +147,76 @@ async function rollBack(dir: string, docs: PlumbingProject['docs'], n: number, j
 }
 
 /**
- * Finishes what an update left behind when it stopped part-way (the service died, or putting files back failed):
- * a journal whose version is in project.json is just deleted, and any other is rolled back. Runs at the start of
- * planChange and updatePlan, so under the project's lock.
+ * When putting an update back left a changed working file as it is, moves that update's snapshot and journal to
+ * docs/versions/v<n>.unfinished-<UTC time>/, in one rename: nothing in them is lost, and v<n> is free for the next
+ * update's snapshot. A merged.md from the update that brought v<n> in belongs to v<n>, so it goes back there.
+ * Returns the new folder, relative to the project.
  */
-export async function recoverUnfinishedUpdate(dir: string): Promise<void> {
+async function setAside(dir: string, n: number, now: Date): Promise<string> {
+  const stamp = now.toISOString().replace(/\D/g, '').slice(0, 14);
+  let rel = `docs/versions/v${n}.unfinished-${stamp}`;
+  for (let k = 2; await lstat(docPath(dir, rel)); k++) rel = `docs/versions/v${n}.unfinished-${stamp}-${k}`;
+  const folder = docPath(dir, `docs/versions/v${n}`);
+  const aside = docPath(dir, rel);
+  await fs.rename(folder, aside);
+  if (await lstat(path.join(aside, 'merged.md'))) {
+    // If it can't go back, it stays with the rest: nothing is lost, and v<n> isn't left as an empty folder.
+    await fs
+      .mkdir(folder, { recursive: true })
+      .then(() => fs.rename(path.join(aside, 'merged.md'), path.join(folder, 'merged.md')))
+      .catch(() => fs.rmdir(folder).catch(quiet));
+  }
+  return rel;
+}
+
+/**
+ * What recoverUnfinishedUpdate did. `recovered`: it put back an update that hadn't finished. `keptChanged`: the working
+ * files it left as you have them, because they changed since that update wrote them. `setAside`: where the copy from
+ * before that update went, then (docs/versions/v<n>.unfinished-<UTC time>), or null.
+ */
+export type UpdateRecovery = { recovered: boolean; keptChanged: string[]; setAside: string | null };
+
+/**
+ * Finishes what an update left behind when it stopped part-way (the service died, or putting files back failed). A
+ * journal whose version is in project.json is just deleted. Any other update is put back: its snapshot and journal are
+ * removed, or, when a working file changed since the update wrote it, that file stays as it is and they're set aside.
+ * Throws when a file can't be put back yet, keeping the snapshot and the journal for the next try. Runs at the start of
+ * planChange and updatePlan, so under the project's lock. `now` names a set-aside folder.
+ */
+export async function recoverUnfinishedUpdate(dir: string, now: Date = new Date()): Promise<UpdateRecovery> {
+  const note: UpdateRecovery = { recovered: false, keptChanged: [], setAside: null };
   const folders = await fs.readdir(docPath(dir, 'docs/versions')).catch((): string[] => []);
   for (const folder of folders) {
-    const n = /^v([1-9][0-9]*)$/.exec(folder)?.[1];
-    if (!n) continue;
-    const read = await readJsonFile(docPath(dir, journalRel(Number(n))));
+    const match = /^v([1-9][0-9]*)$/.exec(folder)?.[1];
+    if (!match) continue;
+    const n = Number(match);
+    const read = await readJsonFile(docPath(dir, journalRel(n)));
     const journal = read.ok ? journalSchema.safeParse(read.value) : null;
     if (!journal?.success) continue;
     const project = await readProjectFile(dir);
     if (projectVersions(project).some((v) => v.n === journal.data.to)) {
-      await fs.rm(docPath(dir, journalRel(Number(n))), { force: true });
+      await fs.rm(docPath(dir, journalRel(n)), { force: true });
       continue;
     }
-    const left = await rollBack(dir, project.docs, Number(n), journal.data);
-    if (left.length) {
-      throw new ConflictError(
+    const unfinished = (left: string[]) =>
+      new ConflictError(
         `An earlier update to v${journal.data.to} didn't finish, and some files couldn't be put back yet: ${left.join(', ')}. Run /dev-plumbing again to finish putting them back.`,
       );
+    const { failed, changed } = await putBack(dir, project.docs, n, journal.data);
+    if (failed.length) throw unfinished(failed);
+    if (changed.length) {
+      // Your changes win: they stay as they are, and the copy from before the update is kept beside them.
+      note.setAside = await setAside(dir, n, now).catch(() => {
+        throw unfinished([`docs/versions/v${n}`]);
+      });
+      note.keptChanged.push(...changed);
+    } else {
+      const left = await removeSnapshot(dir, n);
+      if (left.length) throw unfinished(left);
     }
+    note.recovered = true;
   }
+  return note;
 }
 
 /**
@@ -245,7 +305,7 @@ export async function updatePlan(
 ): Promise<UpdateResult> {
   const now = o.now ?? new Date();
   const at = now.toISOString();
-  await recoverUnfinishedUpdate(dir);
+  await recoverUnfinishedUpdate(dir, now);
   const refused = await updateRefusal(dir);
   if (refused) throw new ConflictError(refused);
   const project = await readProjectFile(dir);
@@ -376,7 +436,14 @@ export async function updatePlan(
     const reason = error instanceof Error ? error.message : String(error);
     // If writing the journal is what failed, nothing else was written yet. The working files go back from the copies
     // read above, not the snapshot, so a snapshot that can't be read now doesn't stop them.
-    const left = (await lstat(docPath(dir, journalRel(current.n)))) ? await rollBack(dir, project.docs, current.n, journal, before) : [];
+    let left: string[] = [];
+    if (await lstat(docPath(dir, journalRel(current.n)))) {
+      const { failed, changed } = await putBack(dir, project.docs, current.n, journal, before);
+      // A working file something else changed while the update ran stays as it is. The snapshot and the journal stay
+      // too, so the next look sets them aside (recoverUnfinishedUpdate).
+      left = [...failed, ...changed.map((rel) => `${rel} (changed since the update, so it was left as it is)`)];
+      if (!left.length) left = await removeSnapshot(dir, current.n);
+    }
     if (left.length === 0) {
       await fs.rmdir(docPath(dir, `docs/versions/v${current.n}`)).catch(quiet);
       await fs.rmdir(docPath(dir, 'docs/versions')).catch(quiet);

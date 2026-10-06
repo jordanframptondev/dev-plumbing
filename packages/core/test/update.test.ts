@@ -41,9 +41,9 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 import { PLAN_CHANGES_TYPE } from '../src/planChanges';
 import type { PlumbingProject } from '../src/schemas';
 import { pickUpFinalize, requestFinalize } from '../src/store/finalize';
-import { ConflictError, InputError, readItem, readItems, readProjectFile, readSubmissions, readThread, writeProjectFile } from '../src/store/io';
+import { ConflictError, InputError, readItem, readItems, readProjectFile, readSubmissions, readThread, readThreads, writeProjectFile } from '../src/store/io';
 import { finishSubmission, pendingSubmissions, pickUp } from '../src/store/queue';
-import { planChange, updatePlan } from '../src/store/update';
+import { planChange, recoverUnfinishedUpdate, updatePlan } from '../src/store/update';
 import { planHash, snapshotVersion } from '../src/store/versions';
 import { removeTempDirs } from '../../../testkit/tmp';
 import { DRAFT, listType, pair, seedProject, TYPES } from './fixtures';
@@ -500,27 +500,88 @@ describe('when an update is refused or fails', () => {
     expect(await snapshot(dir)).toEqual(before);
   });
 
-  it('leaves a draft you changed after an update stopped as it is, keeping the copy from before the update', async () => {
+  it('keeps a draft you changed after an update stopped, and sets the copy from before the update aside', async () => {
     const dir = await seed();
     failing.counts.clear();
-    failing.calls = new Set([`${path.join(dir, 'project.json')}#1`, `${path.join(dir, 'docs', 'draft.md')}#2`]);
-    await failure(update(dir, CONFLICTING));
+    // Putting the original and the draft back fails too, so the next look has both to deal with.
+    failing.calls = new Set([`${path.join(dir, 'project.json')}#1`, `${path.join(dir, 'docs', 'original.md')}#2`, `${path.join(dir, 'docs', 'draft.md')}#2`]);
+    const error = await failure(update(dir, CONFLICTING));
     failing.calls = new Set();
+    expect((error as Error).message).toBe(
+      "The update didn't finish (No space left on device), and some files couldn't be put back yet: docs/original.md, docs/draft.md. Run /dev-plumbing again to finish putting them back.",
+    );
+    expect(await read(dir, 'docs/original.md')).toBe(CONFLICTING);
     // Before the next /dev-plumbing, the draft changes: an accepted change, or an edit by hand.
     const edited = `${await read(dir, 'docs/draft.md')}\n## Rollout\n\nShip to one store first.\n`;
     await fs.writeFile(path.join(dir, 'docs', 'draft.md'), edited);
-    const error = await failure(planChange(dir, CONFLICTING));
-    expect(error).toBeInstanceOf(ConflictError);
-    expect((error as Error).message).toBe(
-      "An earlier update to v2 didn't finish, and some files couldn't be put back yet: docs/draft.md (changed since the update, so it was left as it is). Run /dev-plumbing again to finish putting them back.",
-    );
+    const aside = 'docs/versions/v1.unfinished-20261005113000';
+    expect(await recoverUnfinishedUpdate(dir, new Date('2026-10-05T11:30:00.000Z'))).toEqual({ recovered: true, keptChanged: ['docs/draft.md'], setAside: aside });
+    // Your edit wins. The original, which only the update had changed, is v1's again, and the conflict's files are gone.
     expect(await read(dir, 'docs/draft.md')).toBe(edited);
-    expect(await read(dir, 'docs/versions/v1/draft.md')).toBe(OURS);
     expect(await read(dir, 'docs/original.md')).toBe(DRAFT);
-    expect(await fs.readdir(path.join(dir, 'docs', 'versions', 'v1'))).toContain('update.json');
-    // An update is refused the same way, and still leaves the draft alone.
-    await expect(update(dir, CONFLICTING)).rejects.toThrow(ConflictError);
+    expect((await readItems(dir)).values).toEqual([]);
+    expect((await readThreads(dir)).values).toEqual([]);
+    expect(await readSubmissions(dir)).toEqual([]);
+    expect(await readProjectFile(dir)).toMatchObject({ status: 'active', versions: [] });
+    // The copy from before the update is set aside with the journal, so v1 is free for the next update's snapshot.
+    expect(await fs.readdir(path.join(dir, 'docs', 'versions'))).toEqual(['v1.unfinished-20261005113000']);
+    expect((await fs.readdir(path.join(dir, aside))).sort()).toEqual(['draft.md', 'original.md', 'update.json']);
+    expect(await read(dir, `${aside}/draft.md`)).toBe(OURS);
+    expect(await read(dir, `${aside}/original.md`)).toBe(DRAFT);
+    // The next look offers the update again, and it runs, from the draft as you have it.
+    expect(await planChange(dir, CONFLICTING)).toMatchObject({ from: 1, to: 2 });
+    expect((await update(dir, CONFLICTING)).version).toBe(2);
+    expect(await read(dir, 'docs/versions/v1/draft.md')).toBe(edited);
+    expect(await read(dir, `${aside}/draft.md`)).toBe(OURS);
+  });
+
+  it('keeps a draft you changed after the service stopped part-way through an update', async () => {
+    const dir = await seed({ pairs: [pair('q1')] });
+    const write = async (rel: string, text: string) => {
+      await fs.mkdir(path.dirname(path.join(dir, rel)), { recursive: true });
+      await fs.writeFile(path.join(dir, rel), text);
+    };
+    // The update to v2 had written everything but project.json, then you changed the draft it merged.
+    const created = ['docs/versions/v2', 'submissions', 'items/plan-changes-v2-1.json', 'threads/t-plan-changes-v2-1.json', 'submissions/s-1.json', 'docs/versions/v2/merged.md'];
+    await write('docs/versions/v1/update.json', JSON.stringify({ to: 2, created, wrote: { draft: planHash('The merged draft.\n'), original: planHash(CONFLICTING) } }));
+    await snapshotVersion(dir, 1);
+    for (const rel of created.slice(2)) await write(rel, '{}');
+    await write('docs/original.md', CONFLICTING);
+    await write('docs/draft.md', 'The merged draft, and your edit.\n');
+    const before = await snapshot(dir);
+    expect(await recoverUnfinishedUpdate(dir, T)).toEqual({ recovered: true, keptChanged: ['docs/draft.md'], setAside: 'docs/versions/v1.unfinished-20261005100000' });
+    expect(await read(dir, 'docs/draft.md')).toBe('The merged draft, and your edit.\n');
+    expect(await read(dir, 'docs/original.md')).toBe(DRAFT);
+    expect((await readItems(dir)).values.map((i) => i.id)).toEqual(['q1']);
+    expect((await readThreads(dir)).values.map((t) => t.id)).toEqual(['t-q1']);
+    expect(await fs.readdir(path.join(dir, 'docs', 'versions'))).toEqual(['v1.unfinished-20261005100000']);
+    // What was in v1 is all there, under the new folder.
+    const moved = Object.fromEntries(
+      Object.entries(before)
+        .filter(([p]) => p.startsWith(path.join(dir, 'docs', 'versions', 'v1') + path.sep))
+        .map(([p, text]) => [p.replace(`${path.sep}v1${path.sep}`, `${path.sep}v1.unfinished-20261005100000${path.sep}`), text]),
+    );
+    expect(await snapshot(dir)).toMatchObject(moved);
+    expect(Object.keys(moved).map((p) => path.basename(p)).sort()).toEqual(['draft.md', 'items', 'original.md', 'q1.json', 'update.json']);
+  });
+
+  it("keeps the merged draft of the version it's at when it sets an unfinished update aside", async () => {
+    const dir = await seed();
+    await update(dir, CLEAN);
+    await writeProjectFile(dir, { ...(await readProjectFile(dir)), status: 'active', importPending: [], reimporting: undefined });
+    const mergedV2 = await read(dir, 'docs/versions/v2/merged.md');
+    const T3 = new Date('2026-10-06T10:00:00.000Z');
+    failing.counts.clear();
+    failing.calls = new Set([`${path.join(dir, 'project.json')}#1`, `${path.join(dir, 'docs', 'draft.md')}#2`]);
+    await failure(update(dir, CLEAN.replace('a reminders table', 'the reminder log'), { now: T3 }));
+    failing.calls = new Set();
+    const edited = `${await read(dir, 'docs/draft.md')}\nAnd your edit.\n`;
+    await fs.writeFile(path.join(dir, 'docs', 'draft.md'), edited);
+    expect(await recoverUnfinishedUpdate(dir, T3)).toMatchObject({ recovered: true, setAside: 'docs/versions/v2.unfinished-20261006100000' });
     expect(await read(dir, 'docs/draft.md')).toBe(edited);
+    expect(await fs.readdir(path.join(dir, 'docs', 'versions', 'v2'))).toEqual(['merged.md']);
+    expect(await read(dir, 'docs/versions/v2/merged.md')).toBe(mergedV2);
+    expect((await fs.readdir(path.join(dir, 'docs', 'versions', 'v2.unfinished-20261006100000'))).sort()).toEqual(['draft.md', 'original.md', 'update.json']);
   });
 
   it('puts back an update that stopped part-way, the next time it looks at the plan', async () => {
