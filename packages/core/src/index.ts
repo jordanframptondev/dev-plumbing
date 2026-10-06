@@ -24,6 +24,7 @@ export * from './store/queue';
 export * from './store/context';
 export * from './store/detail';
 export * from './docDiff';
+export * from './merge';
 export * from './kit';
 export * from './dataDiff';
 export * from './prisma';
