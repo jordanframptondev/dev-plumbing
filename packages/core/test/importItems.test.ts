@@ -457,6 +457,24 @@ describe('re-import', () => {
     expect(await files(dir, ...pairFiles('questions-how'))).toEqual(how);
   });
 
+  it('clears the reviewed mark on an item it flags as changed or removed, and keeps it on one it leaves alone', async () => {
+    const marked = (key: string, o: Parameters<typeof pair>[1] = {}) => {
+      const p = imported(key, o);
+      return { ...p, item: { ...p.item, reviewedAt: AT } };
+    };
+    const dir = await reimporting([marked('who'), marked('when'), marked('how', { status: 'with_claude', messages: answered.slice(0, 2) }), marked('why')]);
+    await send(dir, [same('who'), { ...same('when'), summary: 'Now about email and SMS.' }], { removed: ['how'] });
+    const changed = await readItem(dir, 'questions-when');
+    expect(changed.flags).toEqual([{ reason: "Changed in the plan's v2.", fromThreadId: 't-questions-when', at: T2.toISOString() }]);
+    expect('reviewedAt' in changed).toBe(false);
+    const removed = await readItem(dir, 'questions-how');
+    expect(removed.flags).toEqual([{ reason: 'Removed from the plan in v2.', fromThreadId: 't-questions-how', at: T2.toISOString() }]);
+    expect('reviewedAt' in removed).toBe(false);
+    // The same content, or not mentioned: nothing changed, so the mark stays.
+    expect((await readItem(dir, 'questions-who')).reviewedAt).toBe(AT);
+    expect((await readItem(dir, 'questions-why')).reviewedAt).toBe(AT);
+  });
+
   it('an item that comes back with an answer that still stands is resolved again', async () => {
     const decided = imported('who', { status: 'parked', messages: answered });
     const open = imported('when', { status: 'parked', messages: answered });

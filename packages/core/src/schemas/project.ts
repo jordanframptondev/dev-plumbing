@@ -77,6 +77,11 @@ export const itemSchema = z
     createdBy: z.enum(['import', 'claude', 'you', 'whiteboard']),
     /** "May need another look": set when another thread's reply says it might affect this item. */
     flags: z.array(itemFlagSchema).optional(),
+    /**
+     * When you marked the item reviewed (ISO). Its only effect is taking the item off the Finalize page's "Nobody has
+     * reviewed these". Anything that flags the item clears it, so a changed item shows up there again.
+     */
+    reviewedAt: z.string().optional(),
     /** An imported item whose part of the plan was removed in this version. It's parked, never deleted. */
     removedIn: z.number().int().min(2).optional(),
     /** A Plan changes item: the passage as your draft, the old plan and the repo's new version had it. */

@@ -1,5 +1,6 @@
 import type { Message, Submission, ThreadDraft, YouMessage } from '../schemas';
 import { ConflictError, newId, readItem, readItems, readSubmission, readSubmissions, readThread, writeItem, writeSubmission, writeThread } from './io';
+import { withFlag } from './reviewed';
 
 export async function pendingSubmissions(dir: string): Promise<Submission[]> {
   return (await readSubmissions(dir)).filter((s) => s.sent.length > 0 && !s.pickedUpAt && !s.finishedAt);
@@ -25,7 +26,7 @@ const draftFrom = (m: YouMessage, at: string): ThreadDraft => ({
  * draft. A thread with no answer from you (one the service queued, like a Plan changes thread) just comes back to
  * you. A thread whose item an update took out of the plan meanwhile is parked instead, with your answer kept as its
  * draft, so the item stays out of the final. Conflicts the main window found are noted on every thread involved and
- * flag their items.
+ * flag their items, which clears their reviewed marks.
  */
 export async function finishSubmission(dir: string, id: string, conflicts: { threads: string[]; text: string }[], now: Date = new Date()): Promise<{ returned: string[] }> {
   const s = await readSubmission(dir, id);
@@ -62,7 +63,7 @@ export async function finishSubmission(dir: string, id: string, conflicts: { thr
       await writeThread(dir, { ...thread, messages: [...thread.messages, line(`Might conflict with another answer: ${c.text}`)] });
       const item = await readItem(dir, thread.itemId).catch(() => null);
       const other = c.threads.find((t) => t !== threadId) ?? threadId;
-      if (item) await writeItem(dir, { ...item, flags: [...(item.flags ?? []), { reason: c.text, fromThreadId: other, at }] });
+      if (item) await writeItem(dir, withFlag(item, { reason: c.text, fromThreadId: other, at }));
     }
   }
   await writeSubmission(dir, { ...s, finishedAt: at });

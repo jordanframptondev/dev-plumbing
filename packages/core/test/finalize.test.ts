@@ -18,6 +18,7 @@ import {
   saveProposal,
 } from '../src/store/finalize';
 import { readItem, writeDocText, writeItem } from '../src/store/io';
+import { markReviewed, setReviewed } from '../src/store/reviewed';
 import { setParked } from '../src/store/threads';
 import { removeTempDirs } from '../../../testkit/tmp';
 import { DRAFT, listType, pair, seedProject, TYPES } from './fixtures';
@@ -266,6 +267,20 @@ describe('final names and fingerprints', () => {
     await writeItem(dir, { ...item, data: { ...DIAGRAM, nodes: [...DIAGRAM.nodes, { id: 'mail', label: 'Mailer', status: 'new' }] } });
     expect(await fs.readFile(path.join(dir, 'docs', 'draft.md'), 'utf8')).toBe(DRAFT);
     expect(await finalInputsHash(dir)).not.toBe(proposal?.draftHash);
+  });
+
+  it('marking items reviewed, or clearing the mark, never makes a proposal stale', async () => {
+    const dir = await seed();
+    const request = await requestFinalize(dir, { types });
+    await pickUpFinalize(dir, 'w-a');
+    const { proposal } = await saveProposal(dir, { requestId: request.id, markdown: FINAL, types, name: 'restock' });
+    await setReviewed(dir, 'architecture-system', true, T3);
+    expect((await readItem(dir, 'architecture-system')).reviewedAt).toBe(T3.toISOString());
+    expect(await finalInputsHash(dir)).toBe(proposal?.draftHash);
+    await markReviewed(dir, ['q1', 'c1', 'ui-account'], T3);
+    expect(await finalInputsHash(dir)).toBe(proposal?.draftHash);
+    await setReviewed(dir, 'architecture-system', false, T3);
+    expect(await finalInputsHash(dir)).toBe(proposal?.draftHash);
   });
 
   it('a proposal is stale when an item changed after the finalizer picked the request up', async () => {

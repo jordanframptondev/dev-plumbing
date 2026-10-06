@@ -13,6 +13,7 @@ import {
   writeHistoryEntry,
   writeItem,
 } from './io';
+import { withoutReviewed } from './reviewed';
 import { changeProblems } from './validate';
 
 /** JSON with object keys sorted, so two equal items compare equal whatever order their keys were written in. */
@@ -138,18 +139,27 @@ export async function undoChange(dir: string, changeId: string, now: Date = new 
     if (!r.ok) throw new ConflictError(`The draft has changed there since, so this can't be undone. ${r.error}`);
     draftText = r.text;
   }
+  // The reviewed mark isn't content: one set or cleared since doesn't stop the undo, and the item keeps it as it is now.
+  const currentItems = new Map<string, Item>();
   for (const [id, after] of Object.entries(entry.itemsAfter)) {
     const current = await readItem(dir, id);
-    if (stable(current) !== stable(after)) throw new ConflictError(`"${current.title}" has changed since, so this can't be undone.`);
+    if (stable(withoutReviewed(current)) !== stable(withoutReviewed(itemSchema.parse(after)))) {
+      throw new ConflictError(`"${current.title}" has changed since, so this can't be undone.`);
+    }
+    currentItems.set(id, current);
   }
   const updated: HistoryEntry = { ...entry, undoneAt: now.toISOString() };
   try {
     if (draftText !== null) await writeDocText(dir, project.docs.draft, draftText);
-    for (const before of Object.values(entry.itemsBefore)) await writeItem(dir, itemSchema.parse(before));
+    for (const raw of Object.values(entry.itemsBefore)) {
+      const before = withoutReviewed(itemSchema.parse(raw));
+      const mark = currentItems.get(before.id)?.reviewedAt;
+      await writeItem(dir, mark ? { ...before, reviewedAt: mark } : before);
+    }
     await writeHistoryEntry(dir, updated);
   } catch (error) {
     if (currentDraft !== null) await writeDocText(dir, project.docs.draft, currentDraft).catch(quiet);
-    for (const after of Object.values(entry.itemsAfter)) await writeItem(dir, itemSchema.parse(after)).catch(quiet);
+    for (const current of currentItems.values()) await writeItem(dir, current).catch(quiet);
     throw error;
   }
   await touch(dir, now);

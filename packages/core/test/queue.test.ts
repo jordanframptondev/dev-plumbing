@@ -62,6 +62,22 @@ describe('the queue', () => {
     expect((await readItem(dir, 'q2')).flags?.[0]).toMatchObject({ reason: 'One says SMS only, the other email only.', fromThreadId: 't-q1' });
   });
 
+  it('clears the reviewed mark on the items a conflict flags', async () => {
+    const marked = (id: string) => {
+      const p = pair(id);
+      return { ...p, item: { ...p.item, reviewedAt: AT } };
+    };
+    const dir = await seedProject({ pairs: [marked('q1'), marked('q2'), marked('q3')] });
+    await writeSubmission(dir, submission('s-1', [], { pickedUpAt: AT, pickedUpBy: 'w-a' }));
+    await finishSubmission(dir, 's-1', [{ threads: ['t-q1', 't-q2'], text: 'One says SMS only, the other email only.' }]);
+    for (const id of ['q1', 'q2']) {
+      const item = await readItem(dir, id);
+      expect(item.flags).toHaveLength(1);
+      expect('reviewedAt' in item).toBe(false);
+    }
+    expect((await readItem(dir, 'q3')).reviewedAt).toBe(AT);
+  });
+
   it('requeues work from windows that went away, and leaves live windows alone', async () => {
     const dir = await seedProject({ pairs: [sentPair('q1'), sentPair('q2'), sentPair('q3')] });
     await writeSubmission(dir, submission('s-dead', ['t-q1', 't-q2'], { pickedUpAt: AT, pickedUpBy: 'w-dead' }));

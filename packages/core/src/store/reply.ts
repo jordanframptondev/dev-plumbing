@@ -5,6 +5,7 @@ import { addDecision } from './decisions';
 import { uniqueId, verifyCodeRefs } from './importItems';
 import { InputError, newId, readDecisions, readDocText, readItem, readItems, readProjectFile, readThread, StoreError, touchProject, writeItem, writeThread } from './io';
 import { slugify } from './open';
+import { withFlag } from './reviewed';
 import { changeDataProblems, fieldProblems, itemDataKinds, messageProblems, nothingSaved, optionDataProblems } from './validate';
 
 export async function postReply(
@@ -123,7 +124,7 @@ export async function postReply(
 
   for (const imp of r.impacts ?? []) {
     const item = await readItem(dir, imp.itemId);
-    await writeItem(dir, { ...item, flags: [...(item.flags ?? []), { reason: imp.reason, fromThreadId: thread.id, at }] });
+    await writeItem(dir, withFlag(item, { reason: imp.reason, fromThreadId: thread.id, at }));
   }
 
   const message: ClaudeMessage = {

@@ -59,6 +59,8 @@ export type FinalizeChecklist = {
   parked: ChecklistEntry[];
   /** "Nobody has reviewed these": a warning, never a block. */
   unreviewed: ChecklistEntry[];
+  /** How many items would be in `unreviewed` but are marked as reviewed. */
+  reviewed: number;
   /** blocking.length === 0 */
   canStart: boolean;
 };

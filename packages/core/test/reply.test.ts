@@ -67,6 +67,18 @@ describe('posting a reply', () => {
     expect((await readItem(dir, 'c1')).flags).toEqual([{ reason: 'Retention changes the burst risk.', fromThreadId: 't-q1', at: expect.any(String) }]);
   });
 
+  it("clears the reviewed mark on an item it flags, so it's back on the Finalize warning list", async () => {
+    const c1 = pair('c1', { type: 'concerns' });
+    const c2 = pair('c2', { type: 'concerns' });
+    const dir = await seedProject({ pairs: [asked('q1'), { ...c1, item: { ...c1.item, reviewedAt: AT } }, { ...c2, item: { ...c2.item, reviewedAt: AT } }] });
+    await reply(dir, { threadId: 't-q1', text: 'This changes the burst risk.', impacts: [{ itemId: 'c1', reason: 'Retention changes the burst risk.' }] });
+    const flagged = await readItem(dir, 'c1');
+    expect(flagged.flags).toHaveLength(1);
+    expect('reviewedAt' in flagged).toBe(false);
+    // An item the reply doesn't flag keeps its mark.
+    expect((await readItem(dir, 'c2')).reviewedAt).toBe(AT);
+  });
+
   it('resolves the thread with a decision', async () => {
     const dir = await seedProject({ pairs: [asked('q1')] });
     await reply(dir, { threadId: 't-q1', text: 'Settled.', resolve: { decision: 'Reminders go by SMS and email' } });

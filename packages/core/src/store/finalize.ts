@@ -34,8 +34,9 @@ export async function finalInputsHash(dir: string): Promise<string> {
   const project = await readProjectFile(dir);
   const draft = await readDocText(dir, project.docs.draft);
   const [{ values }, { values: threads }] = await Promise.all([readItems(dir), readThreads(dir)]);
-  // flags ("May need another look") are review marks, not content: clearing one mustn't make a proposal stale.
-  const items = values.sort((a, b) => a.id.localeCompare(b.id)).map(({ flags: _flags, ...content }) => content);
+  // flags ("May need another look") and the reviewed mark are review marks, not content: setting or clearing one
+  // mustn't make a proposal stale.
+  const items = values.sort((a, b) => a.id.localeCompare(b.id)).map(({ flags: _flags, reviewedAt: _reviewedAt, ...content }) => content);
   // As in saveProposal: an item is parked when its thread is.
   const statusByThread = new Map(threads.map((t) => [t.id, displayStatus(t)]));
   const parked = items.filter((i) => statusByThread.get(i.threadId) === 'parked').map((i) => i.id);

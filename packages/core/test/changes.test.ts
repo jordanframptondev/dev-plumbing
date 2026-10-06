@@ -4,6 +4,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { applyPendingChange, recordChange, undoChange } from '../src/store/changes';
 import { activeDecisions, addDecision } from '../src/store/decisions';
 import { ConflictError, readDecisions, readHistory, readItem, writeItem } from '../src/store/io';
+import { setReviewed } from '../src/store/reviewed';
 import { removeTempDirs } from '../../../testkit/tmp';
 import { DRAFT, pair, seedProject } from './fixtures';
 
@@ -100,6 +101,25 @@ describe('undo', () => {
     const itemEdit = await recordChange(dir, { threadId: 't-q1', kind: 'small-edit', summary: 's', change: { items: [{ itemId: 'q1', patch: { title: 'New' } }] }, apply: true });
     await writeItem(dir, { ...(await readItem(dir, 'q1')), title: 'Changed by hand' });
     await expect(undoChange(dir, itemEdit.id)).rejects.toThrow(/has changed since/);
+  });
+
+  it("isn't stopped by a reviewed mark set or cleared since, and keeps the mark as it is now", async () => {
+    const dir = await seedProject({ pairs: [pair('q1'), pair('q2')] });
+    await setReviewed(dir, 'q2', true, new Date('2026-10-01T08:00:00.000Z'));
+    const edit = await recordChange(dir, {
+      threadId: 't-q1',
+      kind: 'small-edit',
+      summary: 's',
+      change: { items: [{ itemId: 'q1', patch: { title: 'New' } }, { itemId: 'q2', patch: { title: 'Also new' } }] },
+      apply: true,
+    });
+    await setReviewed(dir, 'q1', true, new Date('2026-10-01T09:00:00.000Z'));
+    await setReviewed(dir, 'q2', false);
+    await undoChange(dir, edit.id);
+    expect(await readItem(dir, 'q1')).toMatchObject({ title: 'Question q1', reviewedAt: '2026-10-01T09:00:00.000Z' });
+    const q2 = await readItem(dir, 'q2');
+    expect(q2.title).toBe('Question q2');
+    expect('reviewedAt' in q2).toBe(false);
   });
 });
 

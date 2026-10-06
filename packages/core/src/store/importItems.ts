@@ -4,6 +4,7 @@ import { dataKindOf, dataProblems, parseData, type CodeRef, type ImportBatch, ty
 import { stable } from './changes';
 import { statusWhenUnparked } from './decisions';
 import { InputError, newId, readDocText, readItems, readProjectFile, readThread, writeItem, writeProjectFile, writeThread } from './io';
+import { withFlag } from './reviewed';
 import { fieldProblems, itemDataKinds, messageProblems, nothingSaved, optionDataProblems } from './validate';
 
 export const IMPORT_DID_NOT_FINISH = "The importer didn't finish for this plumbing type.";
@@ -73,8 +74,8 @@ const systemLine = (now: Date, text: string): Message => ({ id: newId('m', now),
  * anchor and flags, and every field the importer left out. It's written only when something changed:
  * - back in the plan after it was removed: removedIn is cleared, and a parked thread is unparked (resolved again when
  *   its decision still stands);
- * - a field the importer gave is different: the item is updated and flagged, its thread says so, and the importer's
- *   question is added only when the thread is idle or waiting for you.
+ * - a field the importer gave is different: the item is updated and flagged (which clears its reviewed mark), its
+ *   thread says so, and the importer's question is added only when the thread is idle or waiting for you.
  */
 async function reimportItem(dir: string, old: Item, given: Given, opening: Message | null, version: number, now: Date): Promise<void> {
   const back = old.removedIn !== undefined;
@@ -85,7 +86,7 @@ async function reimportItem(dir: string, old: Item, given: Given, opening: Messa
   await writeItem(
     dir,
     changed
-      ? withoutEmpty({ ...kept, ...given, flags: [...(old.flags ?? []), { reason: `Changed in the plan's v${version}.`, fromThreadId: old.threadId, at: now.toISOString() }] })
+      ? withoutEmpty(withFlag({ ...kept, ...given }, { reason: `Changed in the plan's v${version}.`, fromThreadId: old.threadId, at: now.toISOString() }))
       : kept,
   );
   if (!thread) return;
@@ -108,17 +109,15 @@ async function reimportItem(dir: string, old: Item, given: Given, opening: Messa
 
 /**
  * An imported item the importer listed in `removed`: the new version took its part of the plan out. It's parked,
- * never deleted, whatever its thread's state, except a thread Claude is working on, whose item is flagged instead.
+ * never deleted, whatever its thread's state, except a thread Claude is working on, whose item is flagged instead
+ * (which clears its reviewed mark).
  */
 async function markRemoved(dir: string, item: Item, version: number, now: Date): Promise<void> {
   const text = `Removed from the plan in v${version}.`;
   const thread = await readThread(dir, item.threadId).catch(() => null);
   const withClaude = thread?.status === 'with_claude';
-  await writeItem(dir, {
-    ...item,
-    removedIn: version,
-    ...(withClaude ? { flags: [...(item.flags ?? []), { reason: text, fromThreadId: item.threadId, at: now.toISOString() }] } : {}),
-  });
+  const removed: Item = { ...item, removedIn: version };
+  await writeItem(dir, withClaude ? withFlag(removed, { reason: text, fromThreadId: item.threadId, at: now.toISOString() }) : removed);
   if (thread) await writeThread(dir, { ...thread, status: withClaude ? thread.status : 'parked', messages: [...thread.messages, systemLine(now, text)] });
 }
 

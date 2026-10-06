@@ -31,7 +31,7 @@ const TWICE = entry({ itemId: 'concerns-twice', threadId: 't-concerns-twice', ti
 /** The Finalize page's data: an empty checklist and no request, overridden as needed. */
 function view(over: Partial<FinalizeView> = {}): FinalizeView {
   return {
-    checklist: { blocking: [], defaults: [], parked: [], unreviewed: [], canStart: true },
+    checklist: { blocking: [], defaults: [], parked: [], unreviewed: [], reviewed: 0, canStart: true },
     request: null,
     proposal: null,
     final: null,
@@ -67,7 +67,7 @@ function show(v: FinalizeView) {
 
 describe('the Finalize page', () => {
   it('lists what blocks Finalize, what uses its default, what is parked and what nobody reviewed', async () => {
-    show(view({ checklist: { blocking: [CHANNELS], defaults: [{ ...LEAD, defaultValue: '3 days' }], parked: [SNOOZE], unreviewed: [TWICE], canStart: false } }));
+    show(view({ checklist: { blocking: [CHANNELS], defaults: [{ ...LEAD, defaultValue: '3 days' }], parked: [SNOOZE], unreviewed: [TWICE], reviewed: 0, canStart: false } }));
     const blocking = await screen.findByTestId('checklist-blocking');
     expect(within(blocking).getByRole('heading').textContent).toBe('These block Finalize');
     const link = within(blocking).getByRole('link');
@@ -190,7 +190,7 @@ describe('with a final from Claude', () => {
   it("turns off a stale final's Finalize again while something blocks Finalize", async () => {
     show(
       view({
-        checklist: { blocking: [CHANNELS], defaults: [], parked: [], unreviewed: [], canStart: false },
+        checklist: { blocking: [CHANNELS], defaults: [], parked: [], unreviewed: [], reviewed: 0, canStart: false },
         request: {
           id: 'f-1',
           state: 'proposed',

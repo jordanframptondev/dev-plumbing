@@ -70,6 +70,7 @@ describe('the finalize checklist', () => {
       ],
       parked: [row('q-parked', 'SMS later?', 'Questions', 'Parked.')],
       unreviewed: [row('c-low', 'Slow query', 'Concerns', 'Nobody has answered here.')],
+      reviewed: 0,
       canStart: false,
     });
   });
@@ -121,6 +122,7 @@ describe('the finalize checklist', () => {
       defaults: [],
       parked: [row('plan-changes-v2-4', 'Change 4', 'Plan changes', 'Parked.')],
       unreviewed: [],
+      reviewed: 0,
       canStart: false,
     });
     const settled = pairs.filter((p) => ['resolved', 'parked'].includes(p.thread.status));
@@ -135,6 +137,27 @@ describe('the finalize checklist', () => {
       row('q-later', 'Later', 'Questions', 'Parked.'),
       row('q-gone', 'SMS opt-in', 'Questions', 'Removed from the plan in v2.'),
     ]);
+  });
+
+  it('leaves an item marked as reviewed off the unreviewed list, and counts it', () => {
+    const marked = (p: ReturnType<typeof pair>) => ({ ...p, item: { ...p.item, reviewedAt: AT } });
+    const pairs = [
+      marked(pair('c-low', { type: 'concerns', title: 'Slow query', fields: { severity: 'low' } })),
+      marked(pair('c-med', { type: 'concerns', title: 'Big table', fields: { severity: 'medium' } })),
+      pair('c-new', { type: 'concerns', title: 'Cold cache', fields: { severity: 'low' } }),
+      // Marked, but listed elsewhere or nowhere anyway, so not counted: the mark changes only the unreviewed list.
+      marked(pair('q-block', { title: 'Who gets reminders?', fields: { blocking: 'true' } })),
+      marked(pair('q-default', { title: 'Sender address', fields: { default: 'reminders@acme.test' } })),
+      marked(pair('q-parked', { title: 'SMS later?', status: 'parked' })),
+      marked(pair('q-done', { title: 'Which channels?', status: 'resolved' })),
+      marked(pair('q-answered', { title: 'Lead time', messages: [claude('m1'), you('y1')] })),
+    ];
+    const list = checklistFrom({ items: pairs.map((p) => p.item), threads: pairs.map((p) => p.thread), history: [], types: TYPES });
+    expect(list.unreviewed).toEqual([row('c-new', 'Cold cache', 'Concerns', 'Nobody has answered here.')]);
+    expect(list.reviewed).toBe(2);
+    expect(list.blocking.map((e) => e.itemId)).toEqual(['q-block']);
+    expect(list.defaults.map((e) => e.itemId)).toEqual(['q-default']);
+    expect(list.parked.map((e) => e.itemId)).toEqual(['q-parked']);
   });
 
   it('counts the changes applied since the last final', () => {

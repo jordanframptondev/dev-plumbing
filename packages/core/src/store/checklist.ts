@@ -33,7 +33,8 @@ function blockingReason(item: Item, thread: Thread, status: DisplayStatus, pendi
 /**
  * The Finalize checklist from items, threads and history already read. Items are listed by plumbing type order,
  * then title, and each appears at most once: parked, else blocking, else (unless resolved) on a default, else
- * unreviewed when nobody has answered. Items of disabled types are left out, as the app doesn't show them.
+ * unreviewed when nobody has answered, unless you marked it reviewed (then it's only counted, in `reviewed`). Items
+ * of disabled types are left out, as the app doesn't show them.
  */
 export function checklistFrom(o: { items: Item[]; threads: Thread[]; history: HistoryEntry[]; types: PlumbingType[] }): FinalizeChecklist {
   const threadById = new Map(o.threads.map((t) => [t.id, t]));
@@ -41,7 +42,7 @@ export function checklistFrom(o: { items: Item[]; threads: Thread[]; history: Hi
   const pendingEdits = new Set(o.history.filter((h) => h.kind === 'small-edit' && changeState(h) === 'pending').map((h) => h.threadId));
   const order = (i: Item) => typeById.get(i.type)?.order ?? Number.MAX_SAFE_INTEGER;
   const items = o.items.filter((i) => typeById.get(i.type)?.enabled !== false).sort((a, b) => order(a) - order(b) || a.title.localeCompare(b.title));
-  const list: FinalizeChecklist = { blocking: [], defaults: [], parked: [], unreviewed: [], canStart: true };
+  const list: FinalizeChecklist = { blocking: [], defaults: [], parked: [], unreviewed: [], reviewed: 0, canStart: true };
   for (const item of items) {
     const thread = threadById.get(item.threadId);
     if (!thread) continue;
@@ -65,8 +66,13 @@ export function checklistFrom(o: { items: Item[]; threads: Thread[]; history: Hi
     }
     if (status === 'resolved') continue;
     const defaultValue = item.fields?.default?.trim();
-    if (defaultValue) list.defaults.push({ ...entry('No answer yet; the default will be used.'), defaultValue });
-    else if (!thread.messages.some((m) => m.author === 'you')) list.unreviewed.push(entry('Nobody has answered here.'));
+    if (defaultValue) {
+      list.defaults.push({ ...entry('No answer yet; the default will be used.'), defaultValue });
+    } else if (!thread.messages.some((m) => m.author === 'you')) {
+      // Marked as reviewed: you read it and agree, so it's counted rather than listed.
+      if (item.reviewedAt) list.reviewed++;
+      else list.unreviewed.push(entry('Nobody has answered here.'));
+    }
   }
   list.canStart = list.blocking.length === 0;
   return list;

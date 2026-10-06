@@ -13,7 +13,7 @@ const WRITING = 'Claude is writing the final.';
 const GAVE_UP = "The finalizer didn't send a final.";
 
 type Entry = ChecklistEntry & { defaultValue?: string };
-type Group = { key: Exclude<keyof FinalizeChecklist, 'canStart'>; title: string; testId: string; tone: string };
+type Group = { key: Exclude<keyof FinalizeChecklist, 'canStart' | 'reviewed'>; title: string; testId: string; tone: string };
 
 /** The checklist's four lists, in order. Only the first stops Finalize; the last is a warning. */
 const GROUPS: Group[] = [

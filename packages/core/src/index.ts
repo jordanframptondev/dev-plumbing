@@ -31,6 +31,7 @@ export * from './dataDiff';
 export * from './prisma';
 export * from './store/checks';
 export * from './store/checklist';
+export * from './store/reviewed';
 export * from './store/finalize';
 export * from './finalExport';
 export * from './store/accept';
