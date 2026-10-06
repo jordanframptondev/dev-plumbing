@@ -1,10 +1,13 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { dataShapeDoc, repoProfileSchema } from '../src/schemas';
+import { writeFileAtomic } from '../src/atomic';
+import { dataShapeDoc, repoProfileSchema, type PlanVersion } from '../src/schemas';
 import { importPack, threadPack } from '../src/store/context';
 import { addDecision } from '../src/store/decisions';
 import { readItem, writeItem } from '../src/store/io';
 import { removeTempDirs } from '../../../testkit/tmp';
-import { listType, pair, seedProject, TYPES } from './fixtures';
+import { DRAFT, listType, pair, seedProject, TYPES } from './fixtures';
 
 afterAll(removeTempDirs);
 
@@ -36,7 +39,92 @@ describe('context packs', () => {
     expect(pack.draft).toMatch(/^# Restock reminders/);
     expect(pack.profile).toEqual({ name: 'acme', conventions: ['Ids use uuid()'], apps: [{ name: 'web', path: 'apps/web', kitFiles: ['apps/web/theme.css'] }], planFolders: [] });
     expect(pack.existingItems).toEqual([{ id: 'q1', type: 'questions', title: 'Question q1' }]);
+    expect(pack.reimport).toBeNull();
     await expect(importPack({ dir, typeId: 'nope', types: TYPES })).rejects.toThrow(/no plumbing type "nope"/);
+  });
+
+  it("gives a re-importer the plan's changes and this type's imported items", async () => {
+    const version = (n: number): PlanVersion => ({ n, at: '2026-10-01T09:00:00.000Z', hash: `h${n}`, clone: '/tmp/acme', branch: 'main', commit: null });
+    const v2 = DRAFT.replace('Log reminders in a table.', 'Log reminders in a table, by day.');
+    const v3 = v2
+      .replace('Remind customers before a subscription item runs out.', 'Remind customers a few days before a subscription item runs out.')
+      .replace('Log reminders in a table, by day.', 'Log reminders in a table, by day.\n\n## Channels\n\nSend by SMS.');
+    const who = pair('questions-who', { title: 'Who gets reminders?', fields: { blocking: 'true' } });
+    const gone = pair('questions-gone', { title: 'SMS later?', status: 'parked' });
+    const mine = pair('questions-mine', { title: 'Mine' });
+    const map = pair('architecture-map', { type: 'architecture', title: 'Reminder job' });
+    const conflict = pair('plan-changes-v2-1', { type: 'plan-changes', title: 'Data' });
+    const dir = await seedProject({
+      pairs: [
+        { ...who, item: { ...who.item, key: 'who', body: 'Everyone, or only active subscribers?', mdAnchor: { heading: 'Data', lines: [9, 11] } } },
+        { ...gone, item: { ...gone.item, key: 'gone', removedIn: 2 } },
+        { ...mine, item: { ...mine.item, createdBy: 'you' } },
+        { ...map, item: { ...map.item, key: 'map', data: { kind: 'system', groups: [], nodes: [], edges: [] } } },
+        { ...conflict, item: { ...conflict.item, key: 'v2-1' } },
+      ],
+      project: { status: 'importing', importPending: ['questions', 'architecture'], versions: [version(1), version(2), version(3)], reimporting: { version: 3, from: 'active' } },
+    });
+    await writeFileAtomic(path.join(dir, 'docs', 'versions', 'v2', 'original.md'), v2);
+    await fs.writeFile(path.join(dir, 'docs', 'original.md'), v3);
+    const pack = await importPack({ dir, typeId: 'questions', types: TYPES });
+    expect(pack.reimport).toEqual({
+      from: 2,
+      to: 3,
+      changes: [
+        '@@',
+        '  # Restock reminders',
+        '',
+        '- Remind customers before a subscription item runs out.',
+        '+ Remind customers a few days before a subscription item runs out.',
+        '',
+        '  ## Approach',
+        '@@',
+        '',
+        '  Log reminders in a table, by day.',
+        '+',
+        '+ ## Channels',
+        '+',
+        '+ Send by SMS.',
+      ].join('\n'),
+      existing: [
+        { key: 'gone', id: 'questions-gone', title: 'SMS later?', summary: 'A summary.', body: null, fields: {}, mdAnchor: null, hasData: false, data: null, removed: true },
+        {
+          key: 'who',
+          id: 'questions-who',
+          title: 'Who gets reminders?',
+          summary: 'A summary.',
+          body: 'Everyone, or only active subscribers?',
+          fields: { blocking: 'true' },
+          mdAnchor: { heading: 'Data' },
+          hasData: false,
+          data: null,
+          removed: false,
+        },
+      ],
+    });
+    // The draft is still the whole draft, and every item but the Plan changes one is still listed, a removed one marked.
+    expect(pack.draft).toBe(DRAFT);
+    expect(pack.existingItems).toEqual([
+      { id: 'architecture-map', type: 'architecture', title: 'Reminder job' },
+      { id: 'questions-gone', type: 'questions', title: 'SMS later?', removed: true },
+      { id: 'questions-mine', type: 'questions', title: 'Mine' },
+      { id: 'questions-who', type: 'questions', title: 'Who gets reminders?' },
+    ]);
+    // A drawing comes with its data, so the importer edits what the threads settled rather than redrawing it.
+    expect((await importPack({ dir, typeId: 'architecture', types: TYPES })).reimport?.existing).toEqual([
+      {
+        key: 'map',
+        id: 'architecture-map',
+        title: 'Reminder job',
+        summary: 'A summary.',
+        body: null,
+        fields: {},
+        mdAnchor: null,
+        hasData: true,
+        data: { kind: 'system', groups: [], nodes: [], edges: [] },
+        removed: false,
+      },
+    ]);
   });
 
   it('gives a pin thread the whole item it is anchored to, data included', async () => {

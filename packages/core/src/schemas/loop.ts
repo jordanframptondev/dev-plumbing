@@ -149,10 +149,14 @@ export const claudeMessageInputSchema = z.object({
   recommended: z.string().optional(),
 });
 
+const titleSchema = z.string().min(1).max(200);
+const summarySchema = z.string().min(1).max(500);
+
+/** One item from an importer. A new item needs its title and summary; in a re-import, an existing key may leave them out. */
 export const importItemSchema = z.object({
   key: idSchema,
-  title: z.string().min(1).max(200),
-  summary: z.string().min(1).max(500),
+  title: titleSchema.optional(),
+  summary: summarySchema.optional(),
   body: z.string().max(20_000).optional(),
   fields: z.record(z.string().max(500)).optional(),
   mdAnchor: mdAnchorSchema.optional(),
@@ -163,14 +167,20 @@ export const importItemSchema = z.object({
 });
 export type ImportItem = z.infer<typeof importItemSchema>;
 
-/** Either items or a "no changes" reason, never both. Checked by writeImportBatch. */
+/**
+ * Either items or a "no changes" reason, never both. In a re-import, `removed` lists the keys of existing items whose
+ * part of the plan the new version took out, with items or on its own. Checked by writeImportBatch.
+ */
 export const importBatchSchema = z.object({
   items: z.array(importItemSchema).max(60).optional(),
   noChanges: z.string().min(1).max(500).optional(),
+  removed: z.array(idSchema).max(200).optional(),
 });
 export type ImportBatch = z.infer<typeof importBatchSchema>;
 
 export const newItemSchema = importItemSchema.omit({ key: true, links: true }).extend({
+  title: titleSchema,
+  summary: summarySchema,
   type: z.string().min(1),
   message: claudeMessageInputSchema,
 });

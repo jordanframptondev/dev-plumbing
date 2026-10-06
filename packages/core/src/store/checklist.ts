@@ -54,7 +54,8 @@ export function checklistFrom(o: { items: Item[]; threads: Thread[]; history: Hi
     });
     const status = displayStatus(thread);
     if (status === 'parked') {
-      list.parked.push(entry('Parked.'));
+      // An item parked because its part of the plan was removed says so.
+      list.parked.push(entry(item.removedIn ? `Removed from the plan in v${item.removedIn}.` : 'Parked.'));
       continue;
     }
     const blocked = blockingReason(item, thread, status, pendingEdits.has(thread.id));

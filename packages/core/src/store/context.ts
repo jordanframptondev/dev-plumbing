@@ -1,3 +1,4 @@
+import { diffText } from '../docDiff';
 import { availableTokens } from '../finalExport';
 import { PLAN_CHANGES } from '../planChanges';
 import {
@@ -26,6 +27,7 @@ import { activeDecisions } from './decisions';
 import { finalName } from './finalize';
 import { docPath, readDecisions, readDocText, readItem, readItems, readProjectFile, readThread, readThreads, StoreError } from './io';
 import { presetLabel } from './threads';
+import { readVersionDoc } from './versions';
 
 export type ThreadPack = {
   project: { repo: string; id: string; title: string; summary: string };
@@ -49,13 +51,62 @@ export type ImportPack = {
   type: { id: string; title: string; screen: Screen; timeline: boolean; fields: string[]; answerPresets: string[]; rules: string; dataShape: string | null };
   draft: string;
   profile: { name: string; schema?: RepoProfile['schema']; conventions: string[]; apps: { name: string; path: string; kitFiles: string[] }[]; planFolders: string[] } | null;
-  existingItems: { id: string; type: string; title: string }[];
+  /** Every item but the Plan changes ones, which aren't part of the plan. One whose part of the plan was removed says so. */
+  existingItems: { id: string; type: string; title: string; removed?: true }[];
+  /**
+   * Set while a new version of the plan is re-imported, null at first import. `changes` is how the plan changed from
+   * v`from` to v`to`; `existing` is this type's imported items, by key, so the importer can reuse a key for the same thing.
+   */
+  reimport: {
+    from: number;
+    to: number;
+    changes: string;
+    existing: {
+      key: string;
+      id: string;
+      title: string;
+      summary: string;
+      body: string | null;
+      fields: Record<string, string>;
+      mdAnchor: { heading: string } | null;
+      hasData: boolean;
+      /** The item's drawing as it is now, with what the threads settled in it, or null. */
+      data: unknown;
+      removed: boolean;
+    }[];
+  } | null;
 };
 
 /** The text subagents follow when writing this type's `data`, or null when its items take none. */
 function dataShapeFor(type: PlumbingType | undefined): string | null {
   const kind = type ? dataKindOf(type) : null;
   return kind ? dataShapeDoc(kind) : null;
+}
+
+/**
+ * Two versions of the plan as a line diff: `+ ` added, `- ` removed and `  ` unchanged, keeping 2 unchanged lines
+ * around each change. Each run of lines starts with `@@`. Empty when nothing changed.
+ */
+function planDiff(before: string, after: string): string {
+  const CONTEXT = 2;
+  const lf = (text: string) => text.replace(/\r\n/g, '\n');
+  const lines: { mark: string; text: string }[] = [];
+  for (const segment of diffText(lf(before), lf(after))) {
+    const mark = segment.kind === 'added' ? '+' : segment.kind === 'removed' ? '-' : ' ';
+    for (const text of segment.text.replace(/\n$/, '').split('\n')) lines.push({ mark, text });
+  }
+  const shown = lines.map(() => false);
+  lines.forEach((line, i) => {
+    if (line.mark === ' ') return;
+    for (let j = Math.max(0, i - CONTEXT); j <= Math.min(lines.length - 1, i + CONTEXT); j++) shown[j] = true;
+  });
+  const out: string[] = [];
+  lines.forEach((line, i) => {
+    if (!shown[i]) return;
+    if (i === 0 || !shown[i - 1]) out.push('@@');
+    out.push(`${line.mark} ${line.text}`.trimEnd());
+  });
+  return out.join('\n');
 }
 
 /** Spec §13.2: what a thread subagent receives. */
@@ -99,13 +150,43 @@ export async function threadPack(o: { dir: string; threadId: string; types: Plum
   };
 }
 
-/** What an importer receives: the whole draft, its plumbing type's whole rules file and data shape, and the repo profile. */
+/**
+ * What an importer receives: the whole draft, its plumbing type's whole rules file and data shape, and the repo profile.
+ * In a re-import, also how the plan changed since the last version and this type's imported items.
+ */
 export async function importPack(o: { dir: string; typeId: string; types: PlumbingType[]; profile?: RepoProfile }): Promise<ImportPack> {
   const type = o.types.find((t) => t.id === o.typeId);
   if (!type) throw new StoreError(`There's no plumbing type "${o.typeId}".`);
   const project = await readProjectFile(o.dir);
   const { values: items } = await readItems(o.dir);
   const p = o.profile;
+  const to = project.reimporting?.version;
+  const reimport: ImportPack['reimport'] =
+    to === undefined
+      ? null
+      : {
+          from: to - 1,
+          to,
+          changes: planDiff((await readVersionDoc(o.dir, project, to - 1, 'original')) ?? '', (await readVersionDoc(o.dir, project, to, 'original')) ?? ''),
+          existing: items.flatMap((i) =>
+            i.type === type.id && i.createdBy === 'import' && i.key !== undefined
+              ? [
+                  {
+                    key: i.key,
+                    id: i.id,
+                    title: i.title,
+                    summary: i.summary,
+                    body: i.body ?? null,
+                    fields: i.fields ?? {},
+                    mdAnchor: i.mdAnchor ? { heading: i.mdAnchor.heading } : null,
+                    hasData: i.data !== undefined,
+                    data: i.data ?? null,
+                    removed: i.removedIn !== undefined,
+                  },
+                ]
+              : [],
+          ),
+        };
   return {
     project: { repo: project.repo, id: project.id, title: project.title },
     type: {
@@ -128,7 +209,8 @@ export async function importPack(o: { dir: string; typeId: string; types: Plumbi
           planFolders: p.planFolders,
         }
       : null,
-    existingItems: items.map((i) => ({ id: i.id, type: i.type, title: i.title })),
+    existingItems: items.filter((i) => i.type !== PLAN_CHANGES).map((i) => ({ id: i.id, type: i.type, title: i.title, ...(i.removedIn !== undefined ? { removed: true as const } : {}) })),
+    reimport,
   };
 }
 

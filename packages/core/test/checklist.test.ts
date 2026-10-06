@@ -127,6 +127,16 @@ describe('the finalize checklist', () => {
     expect(checklistFrom({ items: settled.map((p) => p.item), threads: settled.map((p) => p.thread), history: [], types }).canStart).toBe(true);
   });
 
+  it('says why an item removed from the plan is parked', () => {
+    const gone = pair('q-gone', { title: 'SMS opt-in', status: 'parked' });
+    const pairs = [{ ...gone, item: { ...gone.item, removedIn: 2 } }, pair('q-later', { title: 'Later', status: 'parked' })];
+    const list = checklistFrom({ items: pairs.map((p) => p.item), threads: pairs.map((p) => p.thread), history: [], types: TYPES });
+    expect(list.parked).toEqual([
+      row('q-later', 'Later', 'Questions', 'Parked.'),
+      row('q-gone', 'SMS opt-in', 'Questions', 'Removed from the plan in v2.'),
+    ]);
+  });
+
   it('counts the changes applied since the last final', () => {
     const final = '2026-10-02T10:00:00.000Z';
     const history = [
