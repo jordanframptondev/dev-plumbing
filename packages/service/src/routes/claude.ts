@@ -3,6 +3,8 @@ import path from 'node:path';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import {
+  claimImport,
+  currentVersion,
   expandHome,
   finalizePack,
   finalName,
@@ -13,6 +15,7 @@ import {
   finishSubmission,
   finishWindowSubmissions,
   formatZodError,
+  gitHead,
   gitInfo,
   groupThreads,
   importableTypes,
@@ -29,6 +32,7 @@ import {
   pendingSubmissions,
   pickUp,
   pickUpFinalize,
+  planChange,
   postReply,
   readFinalize,
   readItem,
@@ -48,13 +52,17 @@ import {
   suggestRepoName,
   summarizeProject,
   threadPack,
+  updatePlan,
+  updateRefusal,
   writeImportBatch,
   writeJsonAtomic,
   type FinalizeRequest,
   type LoadedConfig,
+  type PlanChange,
   type PlumbingType,
   type ProjectRef,
   type Submission,
+  type UpdateResult,
 } from '@dev-plumbing/core';
 import type { AppContext } from '../context';
 import { cloneOf } from '../checker';
@@ -68,8 +76,45 @@ export const MAX_POLL_SECONDS = 240;
 
 const NO_REMOTE = "This repo has no git remote, so dev-plumbing can't recognise its other clones. Add one (git remote add origin <url>), then run /dev-plumbing again.";
 
+/**
+ * What the skill asks when the plan in the repo changed since the project's current version. `branch` is set when
+ * this clone is on another branch than the current version came from.
+ */
+function updateQuestion(change: PlanChange, branch: string | null): string {
+  const added = `${change.added} ${change.added === 1 ? 'line' : 'lines'}`;
+  const changed = branch ? `The plan on branch ${branch} changed since v${change.from}` : `The plan changed in the repo since v${change.from}`;
+  const conflicts = `${change.conflicts} ${change.conflicts === 1 ? 'conflict' : 'conflicts'}`;
+  const why = change.whitespaceOnly ? ' Only the formatting changed.' : change.suggestFresh ? ` It's mostly rewritten, so merging would leave ${conflicts}.` : '';
+  return `${changed} (${added} added, ${change.removed} removed).${why} Update to v${change.to}?`;
+}
+
+/** plan-changed's next: the question, its options, and how to call dp_open with the answer. */
+function askNext(change: PlanChange, branch: string | null): string {
+  const ask = `Ask the user: "${updateQuestion(change, branch)}"`;
+  const to = change.to;
+  return change.suggestFresh
+    ? `${ask} with the options "Update to v${to} (merge into my draft)", "Start the draft from v${to}" and "Not now". Then call dp_open again with the same plan or project and update: true for the first, update: true with fresh: true for the second, or update: false for Not now.`
+    : `${ask} with the options "Update to v${to}" and "Not now". Then call dp_open again with the same plan or project and update: true or update: false.`;
+}
+
+/** The one line the skill tells the user once an update is in. */
+function updatedLine(u: UpdateResult): string {
+  if (u.fresh) return `v${u.version}: the draft now starts from the plan's v${u.version}. Your earlier draft is kept under Versions.`;
+  const merged = `${u.clean} ${u.clean === 1 ? 'change' : 'changes'} merged`;
+  return u.conflicts ? `v${u.version}: ${merged}, ${u.conflicts} to settle in Plan changes.` : `v${u.version}: ${merged}, nothing to settle.`;
+}
+
 const projectBody = z.object({ repo: z.string().min(1), project: z.string().min(1) });
-const openBody = z.object({ cwd: z.string().min(1), plan: z.string().min(1).optional(), project: z.string().min(1).optional(), windowId: z.string().optional() });
+const openBody = z.object({
+  cwd: z.string().min(1),
+  plan: z.string().min(1).optional(),
+  project: z.string().min(1).optional(),
+  windowId: z.string().optional(),
+  // The user's answer to plan-changed: true brings the repo's new version in, false opens the project as it was.
+  update: z.boolean().optional(),
+  // With update: true, start the draft again from the repo's new version instead of merging into it.
+  fresh: z.boolean().optional(),
+});
 const profileBody = z.object({ cwd: z.string().min(1), profile: z.unknown().optional() });
 const itemsBody = importBatchSchema.merge(projectBody).extend({ type: z.string().min(1), cwd: z.string().optional() });
 const waitBody = projectBody.extend({
@@ -195,6 +240,8 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
 
       let ref: ProjectRef;
       let created = false;
+      // For a project that already existed: the plan as it is in this clone, which may have changed since.
+      let repoText: string | null = null;
       if (body.project) {
         try {
           ref = (await locateProject(ctx, profile.name, body.project)).ref;
@@ -202,22 +249,87 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
           if (e instanceof StoreError) throw new InputError(`There's no plumbing project "${body.project}" for ${profile.name}. Call dp_open with no arguments to list them.`);
           throw e;
         }
+        // Picked by id, so read the plan at the project's path in this clone. A clone without it just opens the project.
+        const { source } = await readProjectFile(ref.dir);
+        repoText = await resolvePlan({ root: git.root, cwd: git.root, plan: source.path }).then(
+          (plan) => plan.text,
+          () => null,
+        );
       } else {
         const plan = await resolvePlan({ root: git.root, cwd: body.cwd, plan: body.plan! });
         const enabledTypes = importableTypes(cfg.types).map((t) => t.id);
         const opened = await rt.withLock(`open:${folder}`, () => openPlan({ folder, repo: profile.name, clone: git.root, branch: git.branch, plan, enabledTypes, home: ctx.home }));
         ref = { repo: profile.name, id: opened.id, dir: opened.dir };
         created = opened.created;
+        if (!created) repoText = plan.text;
       }
 
       const key = projectKey(ref.repo, ref.id);
-      if (body.windowId) rt.listeners.seen(body.windowId, key);
       const isAlive = (w: string) => rt.listeners.isAlive(w);
+      // A plan that changed in the repo is never brought in without asking. Without `update`, the answer is
+      // plan-changed, before anything is written, and the skill asks the user. update: true brings the new version in;
+      // update: false opens the project as it was, and the next open asks again. When the update would have to wait
+      // (an import, threads queued for Claude, a finalize), the project opens instead, so this window can finish that
+      // work, and the user is told why.
+      let update: UpdateResult | null = null;
+      let tell: string | null = null;
+      if (repoText !== null && body.update !== false) {
+        const text = repoText;
+        const commit = body.update ? await gitHead(git.root) : null;
+        const outcome = await rt.withLock(key, async () => {
+          const change = await planChange(ref.dir, text);
+          if (!change) return null;
+          const project = await readProjectFile(ref.dir);
+          const current = currentVersion(project);
+          if ('older' in change) {
+            return { kind: 'tell' as const, line: `This clone has the plan's v${change.older}, older than the project's v${current.n}. There's nothing to bring in.` };
+          }
+          // Work that a window which is gone had picked up goes back in the queue first, so this one can take it.
+          await requeueUnfinished(ref.dir, isAlive);
+          await requeueFinalize(ref.dir, isAlive);
+          const refused = await updateRefusal(ref.dir);
+          if (refused) return { kind: 'tell' as const, line: `The plan changed in the repo since v${change.from}. ${refused}` };
+          if (!body.update) return { kind: 'ask' as const, change, title: project.title, branch: git.branch === current.branch ? null : git.branch };
+          const result = await updatePlan(ref.dir, { repoText: text, clone: git.root, branch: git.branch, commit, types: cfg.types, fresh: body.fresh === true, home: ctx.home });
+          // Claimed under the same lock, by a window that counts as alive: another window's dp_wait queued behind this
+          // lock would otherwise end the re-import before this window starts its importers.
+          if (body.windowId) {
+            rt.listeners.seen(body.windowId, key);
+            await claimImport(ref.dir, body.windowId);
+          }
+          return { kind: 'updated' as const, result };
+        });
+        if (outcome?.kind === 'ask') {
+          const { change } = outcome;
+          return c.json({
+            kind: 'plan-changed',
+            repo: ref.repo,
+            project: ref.id,
+            title: outcome.title,
+            url: urlFor(ref.repo, ref.id),
+            version: change.from,
+            nextVersion: change.to,
+            added: change.added,
+            removed: change.removed,
+            conflicts: change.conflicts,
+            suggestFresh: change.suggestFresh,
+            whitespaceOnly: change.whitespaceOnly,
+            branch: git.branch,
+            next: askNext(change, outcome.branch),
+          });
+        }
+        if (outcome?.kind === 'tell') tell = outcome.line;
+        if (outcome?.kind === 'updated') update = outcome.result;
+      }
+      if (body.windowId) rt.listeners.seen(body.windowId, key);
       await rt.withLock(key, async () => {
         // Every clone a project is opened from is remembered, so Accept can offer it.
         await recordClone(ref.dir, git.root, ctx.home);
         await requeueUnfinished(ref.dir, isAlive);
         await requeueFinalize(ref.dir, isAlive);
+        // This window runs the importers, so it's the one whose dp_wait may end the import.
+        const { importPending } = await readProjectFile(ref.dir);
+        if (body.windowId && importableTypes(cfg.types).some((t) => importPending.includes(t.id))) await claimImport(ref.dir, body.windowId);
       });
       const project = await readProjectFile(ref.dir);
       // Flows and phases point at items the other importers write (a step's mockupId, a phase's itemIds), so they go last.
@@ -228,6 +340,29 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
         ...pending.filter(later).map((t) => ({ id: t.id, title: t.title, afterOthers: true as const })),
       ];
       rt.events.emit({ type: 'projects' });
+      const waitingSubmissions = (await pendingSubmissions(ref.dir)).length;
+      const next = importTypes.length
+        ? `Start one dev-plumbing:importer subagent per import type (model ${models.importer}, at most ${cfg.agents.maxParallel} at a time). Start the ones marked afterOthers only after all the others have returned. When they have all returned, call dp_wait.`
+        : "Call dp_wait to listen for the user's answers.";
+      if (update) {
+        changed(ref);
+        // The conflicts wait for Claude as a submission, and this window picks them up when it calls dp_wait after its
+        // importers. No other window is woken: its dp_wait would end the re-import before the importers are back.
+        return c.json({
+          kind: 'updated',
+          repo: ref.repo,
+          project: ref.id,
+          title: project.title,
+          url: urlFor(ref.repo, ref.id),
+          version: update.version,
+          merged: { clean: update.clean, conflicts: update.conflicts },
+          importTypes,
+          models,
+          maxParallel: cfg.agents.maxParallel,
+          waitingSubmissions,
+          next: `Tell the user: "${updatedLine(update)}" ${next}`,
+        });
+      }
       return c.json({
         kind: created ? 'created' : 'reopened',
         repo: ref.repo,
@@ -237,10 +372,8 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
         importTypes,
         models,
         maxParallel: cfg.agents.maxParallel,
-        waitingSubmissions: (await pendingSubmissions(ref.dir)).length,
-        next: importTypes.length
-          ? `Start one dev-plumbing:importer subagent per import type (model ${models.importer}, at most ${cfg.agents.maxParallel} at a time). Start the ones marked afterOthers only after all the others have returned. When they have all returned, call dp_wait.`
-          : "Call dp_wait to listen for the user's answers.",
+        waitingSubmissions,
+        next: tell ? `Tell the user: "${tell}" ${next}` : next,
       });
     }),
   );
@@ -302,7 +435,7 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
       if (!type) throw new InputError(`"${body.type}" isn't an enabled plumbing type.`);
       const clone = await cloneFor(body.cwd, ref);
       const result = await rt.withLock(projectKey(ref.repo, ref.id), () =>
-        writeImportBatch({ dir: ref.dir, type, types: cfg.types, batch: { items: body.items, noChanges: body.noChanges }, clone }),
+        writeImportBatch({ dir: ref.dir, type, types: cfg.types, batch: { items: body.items, noChanges: body.noChanges, removed: body.removed }, clone }),
       );
       changed(ref);
       if (result.importFinished) await openInBrowser(cfg, ref);
@@ -386,7 +519,8 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
         }
         await requeueUnfinished(ref.dir, isAlive);
         await requeueFinalize(ref.dir, isAlive);
-        return finishImport(ref.dir);
+        // Only the window that runs the importers ends the import, or this one once that window is gone.
+        return finishImport(ref.dir, { windowId: body.windowId, isAlive: (w) => rt.listeners.isAlive(w) });
       });
       changed(ref);
       if (importDone) await openInBrowser(cfg, ref);

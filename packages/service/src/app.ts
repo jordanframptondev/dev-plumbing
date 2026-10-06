@@ -7,6 +7,7 @@ import { finalizeRoutes } from './routes/finalize';
 import { kitScript, mockupRoutes } from './routes/mockups';
 import { projectRoutes } from './routes/projects';
 import { threadRoutes } from './routes/threads';
+import { versionRoutes } from './routes/versions';
 import { createRuntime, type Runtime } from './runtime';
 import { frameHeaders, guard } from './security';
 import { staticHandler } from './static';
@@ -20,6 +21,7 @@ export function createApp(ctx: AppContext, rt: Runtime = createRuntime()): Hono 
   app.route('/api', projectRoutes(ctx, rt));
   app.route('/api', threadRoutes(ctx, rt));
   app.route('/api', finalizeRoutes(ctx, rt));
+  app.route('/api', versionRoutes(ctx));
   app.route('/api', mockupRoutes(ctx));
   app.route('/api', configRoutes(ctx, rt));
   app.route('/api/claude', claudeRoutes(ctx, rt));
