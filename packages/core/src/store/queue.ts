@@ -22,7 +22,8 @@ const draftFrom = (m: YouMessage, at: string): ThreadDraft => ({
 
 /**
  * Ends a submission. Threads Claude didn't answer go back to Your turn with your answer restored as a
- * draft. Conflicts the main window found are noted on every thread involved and flag their items.
+ * draft. A thread with no answer from you (one the service queued, like a Plan changes thread) just comes back to
+ * you. Conflicts the main window found are noted on every thread involved and flag their items.
  */
 export async function finishSubmission(dir: string, id: string, conflicts: { threads: string[]; text: string }[], now: Date = new Date()): Promise<{ returned: string[] }> {
   const s = await readSubmission(dir, id);
@@ -38,7 +39,14 @@ export async function finishSubmission(dir: string, id: string, conflicts: { thr
       ...thread,
       status: 'your_turn',
       ...(you ? { draft: draftFrom(you, at) } : {}),
-      messages: [...thread.messages, line("Claude didn't get to this one. Your answer is back in the box: send it again when you're ready.")],
+      messages: [
+        ...thread.messages,
+        line(
+          you
+            ? "Claude didn't get to this one. Your answer is back in the box: send it again when you're ready."
+            : "Claude didn't get to this one. Pick Keep my draft or Take the repo's version, or say what you want, and send it.",
+        ),
+      ],
     });
     returned.push(threadId);
   }

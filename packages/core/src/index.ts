@@ -35,3 +35,4 @@ export * from './store/finalize';
 export * from './finalExport';
 export * from './store/accept';
 export * from './store/detect';
+export * from './store/update';
