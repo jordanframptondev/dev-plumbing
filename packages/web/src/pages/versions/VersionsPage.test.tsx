@@ -58,6 +58,10 @@ describe('the Versions page', () => {
     expect(versionMeta({ ...V2, commit: null, merge: { clean: 1, conflicts: 0 } })).toBe(`${formatUpdated(V2.at)} · restock · 1 change merged · 0 conflicts`);
   });
 
+  it('says when a version started the draft afresh', () => {
+    expect(versionMeta({ ...V2, n: 3, commit: null, merge: { clean: 0, conflicts: 0, fresh: true } })).toBe(`${formatUpdated(V2.at)} · restock · Draft started from v3`);
+  });
+
   it("says why the list couldn't be read", async () => {
     vi.spyOn(api, 'versions').mockRejectedValue(new Error("There's no plumbing project restock in acme-app."));
     render(

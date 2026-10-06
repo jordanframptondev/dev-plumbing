@@ -9,11 +9,15 @@ const count = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
 /**
  * Where a version came from, in one line: when, the branch (and commit, when the clone had one), and what its merge
- * did. v1 is the import.
+ * did, or that the draft started again from it. v1 is the import.
  */
 export function versionMeta(v: VersionSummary): string {
   const source = v.commit ? `${v.branch} · ${v.commit.slice(0, 7)}` : v.branch;
-  const merge = v.merge ? `${count(v.merge.clean, 'change')} merged · ${count(v.merge.conflicts, 'conflict')}` : 'Imported';
+  const merge = !v.merge
+    ? 'Imported'
+    : v.merge.fresh
+      ? `Draft started from v${v.n}`
+      : `${count(v.merge.clean, 'change')} merged · ${count(v.merge.conflicts, 'conflict')}`;
   return [formatUpdated(v.at), source, merge].join(' · ');
 }
 
