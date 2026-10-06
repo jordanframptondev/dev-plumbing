@@ -159,12 +159,12 @@ Notes:
 
 ## Plan 5: Bring changes in
 
-Date: 2026-10-06 · Claude Code version: 2.1.289 (Claude Code)
+Date: 2026-10-05 · Claude Code version: 2.1.289 (Claude Code)
 
 | Check | Result | Evidence |
 |---|---|---|
 | Round 1 still passes: import, a thread, Finalize | yes | user log up to "Next: writing-plans docs/specs/restock-reminders.final.md" |
-| Claude asked to update to v2, and updated on yes | yes | runner, round 2: "offered the update: 1", "brought it in: 1", `"update":true` 1, `"update":false` 0, `"fresh"` 0; main window: `dp_open` 2, `dp_wait` 1 |
+| Claude asked to update to v2, and updated on yes | yes | runner, round 2 (re-counted on `transcript-2.jsonl` with the fixed greps; the committed log printed the old 2, 2 and 2): "offered the update: 1", "brought it in: 1", `"update":true` 1, `"update":false` 0, `"fresh"` 0; main window: `dp_open` 2, `dp_wait` 1 |
 | v2 is in the trail, and v1 was kept as it was | yes | user log: "Versions: v1, v2 (merge: 2 clean, 1 in conflict)", "Versions list: v2 (current), v1", "docs/versions/v1: plan as it was, draft as it was" |
 | The repo's changes were merged into the draft, with a conflict and no markers | yes | user log: "Changed the plan in the repo: rewrote "A daily job finds subscriptions due in the next few days and" in Approach, which the draft changed too; rewrote Phases, which the draft never changed; removed Open points.", "Draft: Phases edit merged, Open points gone, your Approach kept, conflict markers: none" |
 | The project is Active again, and Finalize says v2 came in | yes | user log: "Status: active, import pending: none", "Finalize page: "The plan's v2 came in since the last final."" |

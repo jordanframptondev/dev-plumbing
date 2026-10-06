@@ -242,8 +242,6 @@ Plans change after they're imported: someone edits the spec, or you pull a newer
 
 ## Where everything is stored
 
-## Where everything is stored
-
 ```
 ~/.dev-plumbing/                 your config (all plain files; also editable in the app)
   settings.json                  port, projects folder, theme, start at login, …
