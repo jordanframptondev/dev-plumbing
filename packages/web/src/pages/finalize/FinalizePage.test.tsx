@@ -184,8 +184,13 @@ describe('marking items reviewed', () => {
     expect(within(unreviewed).getByRole('link', { name: /The job might run twice/ }).getAttribute('href')).toBe('/p/acme-app/restock/th/t-concerns-twice');
     fireEvent.click(box);
     await waitFor(() => expect(set).toHaveBeenCalledWith('acme-app', 'restock', 'concerns-twice', true));
-    // Ticked while the mark is on its way.
+    // Ticked, and locked, while the mark is on its way: a quick untick can't send a second request racing it.
     expect(box.checked).toBe(true);
+    expect(box.disabled).toBe(true);
+    fireEvent.click(box);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(set).toHaveBeenCalledTimes(1);
+    expect((within(unreviewed).getByRole('checkbox', { name: 'Mark Slow query as reviewed' }) as HTMLInputElement).disabled).toBe(false);
     expect(navigate).not.toHaveBeenCalled();
     // Then the page asks again, and the row leaves the list.
     done({ ok: true });
@@ -241,6 +246,7 @@ describe('marking items reviewed', () => {
     fireEvent.click(box);
     expect((await screen.findByRole('alert')).textContent).toBe("Item concerns-twice doesn't exist.");
     expect(box.checked).toBe(false);
+    expect(box.disabled).toBe(false);
   });
 });
 

@@ -79,7 +79,8 @@ export const itemSchema = z
     flags: z.array(itemFlagSchema).optional(),
     /**
      * When you marked the item reviewed (ISO). Its only effect is taking the item off the Finalize page's "Nobody has
-     * reviewed these". Anything that flags the item clears it, so a changed item shows up there again.
+     * reviewed these". Any change to the item clears it (a flag, or a small edit or accept that rewrites its content),
+     * so a changed item shows up there again.
      */
     reviewedAt: z.string().optional(),
     /** An imported item whose part of the plan was removed in this version. It's parked, never deleted. */

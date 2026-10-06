@@ -35,7 +35,7 @@ function statusLine(v: FinalizeView): string | null {
 }
 
 /** The reviewed marks on "Nobody has reviewed these": a checkbox on each row, and Mark all as reviewed. */
-type Review = { ticked: ReadonlySet<string>; busy: boolean; error: Error | null; onTick: (itemId: string, reviewed: boolean) => void; onAll: () => void };
+type Review = { ticked: ReadonlySet<string>; busy: boolean; error: Error | null; onMark: (itemId: string) => void; onAll: () => void };
 
 function ChecklistGroup({
   group,
@@ -87,8 +87,9 @@ function ChecklistGroup({
                   type="checkbox"
                   aria-label={`Mark ${e.title} as reviewed`}
                   checked={review.ticked.has(e.itemId)}
-                  disabled={review.busy}
-                  onChange={(ev) => review.onTick(e.itemId, ev.target.checked)}
+                  // Locked once ticked, until the checklist comes back, so an untick can't race the mark.
+                  disabled={review.busy || review.ticked.has(e.itemId)}
+                  onChange={() => review.onMark(e.itemId)}
                   className="size-3.5 accent-slate"
                 />
               </label>
@@ -128,7 +129,8 @@ export function FinalizeBody({ repo, project }: { repo: string; project: string 
     mutationFn: () => api.discardProposal(repo, project),
     onSettled: () => void qc.invalidateQueries({ predicate: (k) => k.queryKey[1] === repo && k.queryKey[2] === project }),
   });
-  // Rows you tick stay ticked until the checklist comes back: without them once they're marked, unticked if it failed.
+  // Rows you tick stay ticked, and locked, until the checklist comes back: without them once they're marked, unticked
+  // and free again if it failed.
   const [ticked, setTicked] = useState<ReadonlySet<string>>(() => new Set());
   const tick = (itemIds: string[], on: boolean) =>
     setTicked((s) => {
@@ -141,8 +143,8 @@ export function FinalizeBody({ repo, project }: { repo: string; project: string 
     });
   const reloaded = (itemIds: string[]) => qc.invalidateQueries({ predicate: (k) => k.queryKey[1] === repo && k.queryKey[2] === project }).then(() => tick(itemIds, false));
   const review = useMutation({
-    mutationFn: (v: { itemId: string; reviewed: boolean }) => api.setReviewed(repo, project, v.itemId, v.reviewed),
-    onSettled: (_r, _e, v) => reloaded([v.itemId]),
+    mutationFn: (itemId: string) => api.setReviewed(repo, project, itemId, true),
+    onSettled: (_r, _e, itemId) => reloaded([itemId]),
   });
   const markAll = useMutation({
     mutationFn: async (itemIds: string[]) => {
@@ -228,9 +230,10 @@ export function FinalizeBody({ repo, project }: { repo: string; project: string 
                     ticked,
                     busy: markAll.isPending,
                     error: (review.error ?? markAll.error) as Error | null,
-                    onTick: (itemId, reviewed) => {
-                      tick([itemId], reviewed);
-                      review.mutate({ itemId, reviewed });
+                    onMark: (itemId) => {
+                      if (ticked.has(itemId)) return;
+                      tick([itemId], true);
+                      review.mutate(itemId);
                     },
                     onAll: () => {
                       const ids = [...new Set(checklist.unreviewed.map((e) => e.itemId))];

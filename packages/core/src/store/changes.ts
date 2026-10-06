@@ -51,7 +51,9 @@ async function write(dir: string, change: Change): Promise<Snapshot & { restore:
   for (const c of change.items ?? []) {
     const before = itemsAfter[c.itemId] ?? (await readItem(dir, c.itemId));
     if (!(c.itemId in itemsBefore)) itemsBefore[c.itemId] = before;
-    itemsAfter[c.itemId] = patchItem(before, c.patch);
+    const patched = patchItem(before, c.patch);
+    // A change to the item's content clears its reviewed mark, so it's back on "Nobody has reviewed these".
+    itemsAfter[c.itemId] = stable(withoutReviewed(patched)) === stable(withoutReviewed(before)) ? patched : withoutReviewed(patched);
   }
   const restore = async () => {
     await writeDocText(dir, project.docs.draft, draft).catch(quiet);
@@ -143,9 +145,9 @@ export async function undoChange(dir: string, changeId: string, now: Date = new 
   const currentItems = new Map<string, Item>();
   for (const [id, after] of Object.entries(entry.itemsAfter)) {
     const current = await readItem(dir, id);
-    if (stable(withoutReviewed(current)) !== stable(withoutReviewed(after as Item))) {
-      throw new ConflictError(`"${current.title}" has changed since, so this can't be undone.`);
-    }
+    // History keeps items as stored, unchecked: anything that isn't an object can't match, so it's refused.
+    const same = Boolean(after) && typeof after === 'object' && stable(withoutReviewed(current)) === stable(withoutReviewed(after as Item));
+    if (!same) throw new ConflictError(`"${current.title}" has changed since, so this can't be undone.`);
     currentItems.set(id, current);
   }
   const updated: HistoryEntry = { ...entry, undoneAt: now.toISOString() };

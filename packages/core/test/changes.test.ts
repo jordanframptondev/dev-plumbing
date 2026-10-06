@@ -69,6 +69,47 @@ describe('recording changes', () => {
   });
 });
 
+describe('changes and the reviewed mark', () => {
+  const MARKED = '2026-10-01T08:00:00.000Z';
+  const marked = (id: string) => {
+    const p = pair(id);
+    return { ...p, item: { ...p.item, reviewedAt: MARKED } };
+  };
+
+  it("clears the mark on an item whose content a small edit or an accept changes, and keeps it when nothing changes", async () => {
+    const dir = await seedProject({ pairs: [marked('q1'), marked('q2'), marked('q3'), marked('q4')] });
+    const edit = await recordChange(dir, {
+      threadId: 't-q1',
+      kind: 'small-edit',
+      summary: 's',
+      // q2's patch gives it the title it already has: no change, so its mark stays.
+      change: { items: [{ itemId: 'q1', patch: { title: 'New' } }, { itemId: 'q2', patch: { title: 'Question q2' } }] },
+      apply: true,
+    });
+    const q1 = await readItem(dir, 'q1');
+    expect(q1.title).toBe('New');
+    expect('reviewedAt' in q1).toBe(false);
+    expect((await readItem(dir, 'q2')).reviewedAt).toBe(MARKED);
+    // An accept from another thread rewrites q3.
+    await recordChange(dir, { threadId: 't-q4', kind: 'accept', summary: 's', change: { items: [{ itemId: 'q3', patch: { summary: 'Now about SMS too.' } }] }, apply: true });
+    const q3 = await readItem(dir, 'q3');
+    expect(q3.summary).toBe('Now about SMS too.');
+    expect('reviewedAt' in q3).toBe(false);
+    // A pending small edit clears it when it's applied, not before.
+    const pending = await recordChange(dir, { threadId: 't-q1', kind: 'small-edit', summary: 's', change: { items: [{ itemId: 'q4', patch: { fields: { default: '3 days' } } }] }, apply: false });
+    expect((await readItem(dir, 'q4')).reviewedAt).toBe(MARKED);
+    await applyPendingChange(dir, pending.id);
+    expect('reviewedAt' in (await readItem(dir, 'q4'))).toBe(false);
+
+    // The first edit still undoes: q1 is back as it was, and stays unmarked, as the undo changed it again.
+    await undoChange(dir, edit.id);
+    const undone = await readItem(dir, 'q1');
+    expect(undone.title).toBe('Question q1');
+    expect('reviewedAt' in undone).toBe(false);
+    expect((await readItem(dir, 'q2')).reviewedAt).toBe(MARKED);
+  });
+});
+
 describe('undo', () => {
   it('undoes a small edit to the draft and to items', async () => {
     const dir = await seedProject({ pairs: [pair('q1')] });
@@ -105,7 +146,6 @@ describe('undo', () => {
 
   it("isn't stopped by a reviewed mark set or cleared since, and keeps the mark as it is now", async () => {
     const dir = await seedProject({ pairs: [pair('q1'), pair('q2')] });
-    await setReviewed(dir, 'q2', true, new Date('2026-10-01T08:00:00.000Z'));
     const edit = await recordChange(dir, {
       threadId: 't-q1',
       kind: 'small-edit',
@@ -114,6 +154,7 @@ describe('undo', () => {
       apply: true,
     });
     await setReviewed(dir, 'q1', true, new Date('2026-10-01T09:00:00.000Z'));
+    await setReviewed(dir, 'q2', true, new Date('2026-10-01T09:00:00.000Z'));
     await setReviewed(dir, 'q2', false);
     await undoChange(dir, edit.id);
     expect(await readItem(dir, 'q1')).toMatchObject({ title: 'Question q1', reviewedAt: '2026-10-01T09:00:00.000Z' });
@@ -128,6 +169,14 @@ describe('undo', () => {
     await writeHistoryEntry(dir, { ...edit, itemsAfter: { q1: { id: 'q1', title: 'New' } } });
     await expect(undoChange(dir, edit.id)).rejects.toThrow(ConflictError);
     expect((await readItem(dir, 'q1')).title).toBe('New');
+    // Not an object at all: refused the same way, not thrown.
+    for (const damaged of [null, 'New', 7]) {
+      await writeHistoryEntry(dir, { ...edit, itemsAfter: { q1: damaged } });
+      const refused = await undoChange(dir, edit.id).then(() => null, (e: Error) => e);
+      expect(refused).toBeInstanceOf(ConflictError);
+      expect(refused?.message).toBe('"New" has changed since, so this can\'t be undone.');
+      expect((await readItem(dir, 'q1')).title).toBe('New');
+    }
   });
 });
 
