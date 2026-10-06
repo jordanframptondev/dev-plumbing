@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, it } from 'vitest';
+import { CONFLICT_REASON, PLAN_CHANGES_TYPE } from '../src/planChanges';
 import type { HistoryEntry, Message, Option } from '../src/schemas';
 import { changesSinceFinal, checklistFrom, finalizeChecklist } from '../src/store/checklist';
 import { writeHistoryEntry } from '../src/store/io';
@@ -96,6 +97,34 @@ describe('the finalize checklist', () => {
     const list = checklistFrom({ items: pairs.map((p) => p.item), threads: pairs.map((p) => p.thread), history: [], types: [...TYPES, risks, hidden] });
     expect(list.blocking).toEqual([row('r1', 'Data loss', 'Risks', 'High-severity concern, not resolved.')]);
     expect([...list.defaults, ...list.parked, ...list.unreviewed]).toEqual([]);
+  });
+
+  it("blocks on a Plan changes item until it's resolved or parked", () => {
+    const conflict = (id: string, title: string, o: Parameters<typeof pair>[1] = {}) => pair(id, { type: 'plan-changes', title, ...o });
+    const pairs = [
+      conflict('plan-changes-v2-1', 'Approach'),
+      conflict('plan-changes-v2-2', 'Data', { status: 'with_claude' }),
+      conflict('plan-changes-v2-3', 'Channels', { status: 'resolved' }),
+      conflict('plan-changes-v2-4', 'Change 4', { status: 'parked' }),
+      // Claude's merged version is a proposal too, but the conflict is the reason given.
+      conflict('plan-changes-v2-5', 'Lead time', { messages: [claude('m1'), claude('m2', { options: WITH_CHANGE, recommended: 'email' })] }),
+      pair('q1', { title: 'Who gets reminders?', status: 'resolved' }),
+    ];
+    const types = [PLAN_CHANGES_TYPE, ...TYPES];
+    const list = checklistFrom({ items: pairs.map((p) => p.item), threads: pairs.map((p) => p.thread), history: [], types });
+    expect(list).toEqual({
+      blocking: [
+        row('plan-changes-v2-1', 'Approach', 'Plan changes', CONFLICT_REASON),
+        row('plan-changes-v2-2', 'Data', 'Plan changes', 'Claude is working on it.'),
+        row('plan-changes-v2-5', 'Lead time', 'Plan changes', "Your draft and the repo's new version disagree here."),
+      ],
+      defaults: [],
+      parked: [row('plan-changes-v2-4', 'Change 4', 'Plan changes', 'Parked.')],
+      unreviewed: [],
+      canStart: false,
+    });
+    const settled = pairs.filter((p) => ['resolved', 'parked'].includes(p.thread.status));
+    expect(checklistFrom({ items: settled.map((p) => p.item), threads: settled.map((p) => p.thread), history: [], types }).canStart).toBe(true);
   });
 
   it('counts the changes applied since the last final', () => {

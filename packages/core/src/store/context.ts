@@ -1,4 +1,5 @@
 import { availableTokens } from '../finalExport';
+import { PLAN_CHANGES } from '../planChanges';
 import {
   dataKindOf,
   dataShapeDoc,
@@ -136,7 +137,10 @@ export type FinalizePack = {
   /** outputs/finalize.md: the final's structure and rules. */
   rules: string;
   draft: string;
-  /** Every item that goes into the final, in plumbing-type order. Parked items and items of disabled types are left out of the final, so they aren't here. */
+  /**
+   * Every item that goes into the final, in plumbing-type order. Parked items, items of disabled types and Plan changes
+   * items (what they settled is already in the draft) are left out of the final, so they aren't here.
+   */
   items: {
     id: string;
     type: string;
@@ -238,8 +242,9 @@ export async function finalizePack(o: { dir: string; types: PlumbingType[]; prof
   };
   const order = (item: Item) => typeOf(item)?.order ?? Number.MAX_SAFE_INTEGER;
   // Parked items and items of disabled plumbing types don't go into the final (saveProposal refuses their tokens).
+  // Nor do Plan changes items: what they settled is already in the draft.
   const items = allItems
-    .filter((i) => statusOf(i) !== 'parked' && typeOf(i)?.enabled !== false)
+    .filter((i) => statusOf(i) !== 'parked' && typeOf(i)?.enabled !== false && i.type !== PLAN_CHANGES)
     .sort((a, b) => order(a) - order(b) || a.title.localeCompare(b.title));
   const checklist = await finalizeChecklist(o.dir, o.types);
   const blocking = new Set(checklist.blocking.map((e) => e.itemId));

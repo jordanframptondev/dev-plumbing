@@ -82,6 +82,19 @@ describe('submit', () => {
     expect((await readDecisions(dir)).map((d) => d.text)).toEqual(['Rows per send?: One row per send']);
   });
 
+  it('accepting an option whose change is empty settles the thread, as Keep my draft does on a Plan changes thread', async () => {
+    const keep = { id: 'keep', label: 'Keep my draft', change: { md: [] } };
+    const dir = await seedProject({ pairs: [pair('q1', { title: 'Data', options: [perSend, keep], draft: { optionId: 'keep', updatedAt: AT } })] });
+    const before = await draftOf(dir);
+    const r = await submit(dir, { scope: 'thread', threadId: 't-q1', types: TYPES });
+    expect(r).toMatchObject({ resolved: ['t-q1'], sent: [], skipped: [] });
+    expect(await draftOf(dir)).toBe(before);
+    const thread = await readThread(dir, 't-q1');
+    expect(thread.status).toBe('resolved');
+    expect(thread.messages.at(-1)).toMatchObject({ author: 'system', text: 'Applied and resolved.' });
+    expect((await readDecisions(dir)).map((d) => d.text)).toEqual(['Data: Keep my draft']);
+  });
+
   it('applies an accept with a note, and sends the note to Claude', async () => {
     const dir = await seedProject({ pairs: [pair('q1', { options, draft: { optionId: 'per-send', note: 'Delete rows after 180 days.', updatedAt: AT } })] });
     const r = await submit(dir, { scope: 'thread', threadId: 't-q1', types: TYPES });

@@ -33,8 +33,9 @@ import { projectKey, type Runtime } from '../runtime';
 const FILE = /^[a-z][a-z0-9-]*\.md$/;
 const NAME = /^[a-z0-9][a-z0-9._-]*$/i;
 const exists = (p: string) => fs.access(p).then(() => true, () => false);
+/** The rules files you can edit and turn on or off. Built-in types (Plan changes) ship in code, so they aren't listed. */
 const summaries = (types: PlumbingType[]): RuleSummary[] =>
-  types.map((t) => ({ file: t.file, id: t.id, title: t.title, order: t.order, screen: t.screen, enabled: t.enabled }));
+  types.filter((t) => !t.builtIn).map((t) => ({ file: t.file, id: t.id, title: t.title, order: t.order, screen: t.screen, enabled: t.enabled }));
 
 /** A JSON config file as a flat map. A missing file, or one that isn't a JSON object, reads as {}. */
 async function readFlat(file: string): Promise<Record<string, unknown>> {

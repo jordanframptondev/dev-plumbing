@@ -31,6 +31,7 @@ export function listType(id: string, extra: Partial<PlumbingType> = {}): Plumbin
     answerPresets: [],
     timeline: false,
     enabled: true,
+    builtIn: false,
     file: `${id}.md`,
     body: '## Rules\n- Be brief.\n',
     sections: { Rules: '- Be brief.' },

@@ -131,6 +131,17 @@ describe('opening a plan', () => {
     expect(types[0]).toEqual({ id: 'architecture', title: 'Architecture' });
     expect(open.body.next).toMatch(/afterOthers only after all the others have returned/);
   });
+
+  it('never imports the built-in Plan changes type', async () => {
+    const t = await setup();
+    const open = await t.claude('/open', { cwd: t.repo, plan: PLAN });
+    expect(open.body.importTypes).toHaveLength(10);
+    expect(open.body.importTypes.map((x: Json) => x.id)).not.toContain('plan-changes');
+    expect((await readProjectFile(path.join(t.root, 'acme-app', 'restock-reminders'))).importPending).not.toContain('plan-changes');
+    const r = await t.claude('/items', { repo: 'acme-app', project: open.body.project, type: 'plan-changes', noChanges: 'None.' });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toBe('"plan-changes" isn\'t an enabled plumbing type.');
+  });
 });
 
 describe('importing', () => {

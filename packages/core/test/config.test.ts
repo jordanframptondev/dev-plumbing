@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { installDefaults, loadConfig, resetToDefault, updateSettingsFile } from '../src/config';
+import { importableTypes, PLAN_CHANGES_TYPE } from '../src/planChanges';
 import { defaultSettings } from '../src/schemas';
 import { removeTempDirs, tempDir } from '../../../testkit/tmp';
 
@@ -37,7 +38,10 @@ describe('config folder', () => {
     await installDefaults({ configDir: dir, defaultsDir });
     const c = await loadConfig(dir);
     expect(c.problems).toEqual([]);
-    expect(c.types).toHaveLength(10);
+    // The ten rules files, and the built-in Plan changes type first.
+    expect(c.types).toHaveLength(11);
+    expect(c.types[0]).toEqual(PLAN_CHANGES_TYPE);
+    expect(importableTypes(c.types)).toHaveLength(10);
     expect(c.settings).toEqual(defaultSettings);
     expect(c.outputs).toEqual(['finalize.md', 'whiteboard-defense.md']);
   });
@@ -45,7 +49,7 @@ describe('config folder', () => {
   it('works on an empty folder', async () => {
     const c = await loadConfig(dir);
     expect(c.settings).toEqual(defaultSettings);
-    expect(c.types).toEqual([]);
+    expect(c.types).toEqual([PLAN_CHANGES_TYPE]);
     expect(c.problems).toEqual([]);
   });
 
@@ -83,7 +87,7 @@ describe('config folder', () => {
     await write('plumbing/database.md', '---\nid: database\n---\nno screen');
     const c = await loadConfig(dir);
     expect(c.types.map((t) => t.id)).not.toContain('database');
-    expect(c.types).toHaveLength(9);
+    expect(importableTypes(c.types)).toHaveLength(9);
     expect(c.problems).toEqual([expect.objectContaining({ file: 'plumbing/database.md' })]);
   });
 
@@ -95,6 +99,46 @@ describe('config folder', () => {
     expect(c.types.map((t) => t.id)).not.toContain('database');
     expect(c.problems).toEqual([{ file: 'plumbing/database.md', message: expect.stringMatching(/JavaScript front matter is not allowed/) }]);
     await expect(fs.access(marker)).rejects.toThrow();
+  });
+
+  it('adds the built-in Plan changes type, which a rules file of yours replaces', async () => {
+    await installDefaults({ configDir: dir, defaultsDir });
+    const c = await loadConfig(dir);
+    expect(c.types.filter((t) => t.builtIn)).toEqual([PLAN_CHANGES_TYPE]);
+    expect(PLAN_CHANGES_TYPE).toMatchObject({
+      id: 'plan-changes',
+      title: 'Plan changes',
+      order: 0,
+      screen: 'list',
+      emptyMessage: "Nothing in the repo's new version conflicts with your draft.",
+      fields: [],
+      answerPresets: ['Keep my draft', "Take the repo's version"],
+      timeline: false,
+      enabled: true,
+      builtIn: true,
+      file: '',
+    });
+    expect(Object.keys(PLAN_CHANGES_TYPE.sections)).toEqual(['What to look for', 'Rules', 'Done when']);
+    expect(PLAN_CHANGES_TYPE.sections.Rules).toContain('When the thread has no message from the person yet, reply with three options, each with a `change`');
+    expect(PLAN_CHANGES_TYPE.sections.Rules).toContain('`keep`, "Keep my draft": `change: { md: [] }`.');
+    expect(importableTypes(c.types).map((t) => t.id)).not.toContain('plan-changes');
+    // Yours wins, and no rules file is built in, whatever its header says.
+    await write('plumbing/plan-changes.md', '---\nid: plan-changes\ntitle: Repo changes\norder: 12\nscreen: list\nemptyMessage: None.\nbuiltIn: true\n---\n\n## Rules\n- Keep it short.\n');
+    await write('plumbing/rollout.md', '---\nid: rollout\ntitle: Rollout\norder: 11\nscreen: list\nemptyMessage: None.\nbuiltIn: true\n---\n\n## Rules\n- Say who flips the flag.\n');
+    const mine = await loadConfig(dir);
+    expect(mine.problems).toEqual([]);
+    expect(mine.types.filter((t) => t.id === 'plan-changes')).toEqual([expect.objectContaining({ title: 'Repo changes', file: 'plan-changes.md', builtIn: false })]);
+    expect(mine.types.filter((t) => t.builtIn)).toEqual([]);
+    expect(importableTypes(mine.types).map((t) => t.id)).toContain('rollout');
+  });
+
+  it('never imports Plan changes, even from a rules file of yours', async () => {
+    await installDefaults({ configDir: dir, defaultsDir });
+    await write('plumbing/plan-changes.md', '---\nid: plan-changes\ntitle: Repo changes\norder: 12\nscreen: list\nemptyMessage: None.\n---\n\n## Rules\n- Keep it short.\n');
+    const c = await loadConfig(dir);
+    expect(c.types.find((t) => t.id === 'plan-changes')).toMatchObject({ title: 'Repo changes', enabled: true, builtIn: false });
+    expect(importableTypes(c.types).map((t) => t.id)).not.toContain('plan-changes');
+    expect(importableTypes(c.types)).toHaveLength(10);
   });
 
   it('reads repo profiles and reports broken or duplicate ones', async () => {
@@ -145,7 +189,7 @@ describe('config folder', () => {
   it('loadConfig does not reject when plumbing is a regular file', async () => {
     await write('plumbing', 'not a folder');
     const c = await loadConfig(dir);
-    expect(c.types).toEqual([]);
+    expect(c.types).toEqual([PLAN_CHANGES_TYPE]);
     expect(c.problems).toEqual([expect.objectContaining({ file: 'plumbing', message: expect.stringMatching(/couldn't be read/) })]);
   });
 

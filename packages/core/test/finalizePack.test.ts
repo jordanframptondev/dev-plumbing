@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { availableTokens } from '../src/finalExport';
+import { PLAN_CHANGES_TYPE } from '../src/planChanges';
 import { repoProfileSchema, type ClaudeMessage, type Item, type Message, type PlumbingType, type Thread, type YouMessage } from '../src/schemas';
 import { finalizePack } from '../src/store/context';
 import { addDecision } from '../src/store/decisions';
@@ -201,6 +202,18 @@ describe("the finalizer's context pack", () => {
     expect(pack.tokens.join('\n')).not.toContain('{{mockup:');
     expect(pack.tokens.join('\n')).toContain('{{diagram:architecture-system}}');
     expect(pack.openItems.map((e) => e.itemId)).toEqual(['q-lead', 'q-channel']);
+  });
+
+  it('leaves out Plan changes items, whatever their state: what they settled is already in the draft', async () => {
+    const settled = pair('plan-changes-v2-1', { type: 'plan-changes', title: 'Approach', status: 'resolved' });
+    const open = pair('plan-changes-v2-2', { type: 'plan-changes', title: 'Data', status: 'your_turn' });
+    const dir = await seedProject({ pairs: [settled, open, pair('q1', { title: 'Who gets reminders?' })] });
+    await addDecision(dir, { text: 'Approach: kept my draft', threadId: 't-plan-changes-v2-1', itemIds: ['plan-changes-v2-1'] });
+    const pack = await finalizePack({ dir, types: [PLAN_CHANGES_TYPE, ...types], rules: RULES });
+    expect(pack.items.map((i) => i.id)).toEqual(['q1']);
+    expect(pack.openItems.map((e) => e.itemId)).toEqual(['q1']);
+    expect(pack.decisions).toEqual([]);
+    expect(pack.tokens).toEqual([]);
   });
 
   it('works for a project with nothing decided, no profile and no earlier final', async () => {

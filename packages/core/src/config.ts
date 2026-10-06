@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ZodError } from 'zod';
 import { writeFileAtomic, writeJsonAtomic } from './atomic';
+import { PLAN_CHANGES, PLAN_CHANGES_TYPE } from './planChanges';
 import { parseRulesFile, resolveTypes, type RulesFileResult } from './rules';
 import {
   agentsFields,
@@ -99,8 +100,12 @@ export async function loadConfig(dir: string): Promise<LoadedConfig> {
   const results: RulesFileResult[] = [];
   for (const f of await listFiles(path.join(dir, 'plumbing'), '.md', 'plumbing', problems)) {
     const fileContent = await readText(path.join(dir, 'plumbing', f), `plumbing/${f}`, problems);
-    results.push(parseRulesFile(f, fileContent ?? ''));
+    const parsed = parseRulesFile(f, fileContent ?? '');
+    // A rules file is the user's, so it's never built in, whatever its header says.
+    results.push(parsed.ok ? { ...parsed, type: { ...parsed.type, builtIn: false } } : parsed);
   }
+  // Plan changes ships in code. The user's own plumbing/plan-changes.md, when it loads, replaces it.
+  if (!results.some((r) => r.ok && r.type.id === PLAN_CHANGES)) results.push({ ok: true, type: PLAN_CHANGES_TYPE });
   const { types, errors } = resolveTypes(results);
   errors.forEach((e) => problems.push({ file: `plumbing/${e.file}`, message: e.error }));
 

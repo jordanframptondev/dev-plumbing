@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
+import { PLAN_CHANGES_TYPE } from '../src/planChanges';
 import { undoChange } from '../src/store/changes';
 import { InputError, projectFiles, readDecisions, readHistory, readItem, readItems, readThread, StoreError } from '../src/store/io';
 import { postReply } from '../src/store/reply';
@@ -94,6 +95,41 @@ describe('posting a reply', () => {
     expect((await readThread(dir, 't-q1')).messages).toHaveLength(2);
     expect(await draftOf(dir)).toBe(DRAFT);
     expect(await readHistory(dir)).toEqual([]);
+  });
+
+  it("won't make a Plan changes item: only an update makes those", async () => {
+    const dir = await seedProject({ pairs: [asked('q1')] });
+    const attempt = postReply(dir, {
+      reply: { threadId: 't-q1', text: 'This changes the plan.', newItems: [{ type: 'plan-changes', title: 'Approach', summary: 'A summary.', message: { text: 'Merge it?' } }] },
+      types: [PLAN_CHANGES_TYPE, ...TYPES],
+      autoApply: true,
+      clone: '/nowhere',
+    });
+    await expect(attempt).rejects.toThrow('New item 1 (Approach): "plan-changes" isn\'t an enabled plumbing type. Use one of: architecture, questions, concerns.');
+    expect((await readItems(dir)).values.map((i) => i.id)).toEqual(['q1']);
+  });
+
+  it('takes three options on a Plan changes thread, each ready to accept, Keep my draft with a change that changes nothing', async () => {
+    const dir = await seedProject({ pairs: [asked('plan-changes-v2-1', { type: 'plan-changes', title: 'Data' })] });
+    await postReply(dir, {
+      reply: {
+        threadId: 't-plan-changes-v2-1',
+        text: 'You log one row per send, and the repo moved the log to the events table. The merged version keeps both.',
+        options: [
+          { id: 'merged', label: 'Use the merged version', change: { md: [{ find: 'Log reminders in a table.', replace: 'Log one row per send in the events table.' }] } },
+          { id: 'theirs', label: "Take the repo's version", change: { md: [{ find: 'Log reminders in a table.', replace: 'Log reminders in the events table.' }] } },
+          { id: 'keep', label: 'Keep my draft', change: { md: [] } },
+        ],
+        recommended: 'merged',
+      },
+      types: [PLAN_CHANGES_TYPE, ...TYPES],
+      autoApply: true,
+      clone: '/nowhere',
+    });
+    const thread = await readThread(dir, 't-plan-changes-v2-1');
+    expect(thread.status).toBe('your_turn');
+    expect(thread.messages.at(-1)).toMatchObject({ author: 'claude', recommended: 'merged', options: [{ id: 'merged' }, { id: 'theirs' }, { id: 'keep', change: { md: [] } }] });
+    expect(await draftOf(dir)).toBe(DRAFT);
   });
 
   it("refuses threads that aren't waiting for Claude", async () => {

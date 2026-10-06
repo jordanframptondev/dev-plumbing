@@ -5,7 +5,7 @@ import { installDefaults, loadConfig } from '../src/config';
 import { writeDemoProjects } from '../src/demo';
 import { dataKindOf, dataProblems, defaultSettings, parseData, repoProfileSchema } from '../src/schemas';
 import { writeJsonAtomic } from '../src/atomic';
-import { readItems, readProjectFile, readThread, writeHistoryEntry, writeProjectFile, writeThread } from '../src/store/io';
+import { readItems, readProjectFile, readThread, writeHistoryEntry, writeItem, writeProjectFile, writeThread } from '../src/store/io';
 import {
   discoverProjects,
   findProjects,
@@ -315,5 +315,28 @@ describe('the project home for plan versions', () => {
     const versions = [{ ...v, n: 1, hash: 'x' }, { ...v, n: 2, hash: 'y', merge: { clean: 1, conflicts: 0 } }];
     await writeProjectFile(dir, { ...(await readProjectFile(dir)), versions });
     expect((await loadProjectHome(restock, TYPES)).version).toEqual({ current: 2, count: 2 });
+  });
+});
+
+describe('the project home for Plan changes', () => {
+  it('shows Plan changes in the navigation only when the project has such items, and first', async () => {
+    const types = await defaultTypes();
+    const dir = await seedProject();
+    const restock = { repo: 'acme', id: 'restock', dir };
+    expect((await loadProjectHome(restock, types)).types.map((t) => t.id)).toEqual([
+      'architecture', 'database', 'ui', 'flows', 'questions', 'concerns', 'ideas', 'phases', 'testing', 'security',
+    ]);
+    expect(await loadTypeItems(restock, types, 'plan-changes')).toBeNull();
+
+    const conflict = pair('plan-changes-v2-1', { type: 'plan-changes', title: 'Approach', status: 'with_claude' });
+    await writeItem(dir, conflict.item);
+    await writeThread(dir, conflict.thread);
+    const home = await loadProjectHome(restock, types);
+    expect(home.types.map((t) => t.id)).toEqual([
+      'plan-changes', 'architecture', 'database', 'ui', 'flows', 'questions', 'concerns', 'ideas', 'phases', 'testing', 'security',
+    ]);
+    expect(home.types[0]).toMatchObject({ title: 'Plan changes', order: 0, itemCount: 1, withClaude: 1, noChanges: null, answerPresets: ['Keep my draft', "Take the repo's version"] });
+    expect(home.inbox.find((e) => e.itemId === 'plan-changes-v2-1')?.typeTitle).toBe('Plan changes');
+    expect((await loadTypeItems(restock, types, 'plan-changes'))?.items.map((i) => i.id)).toEqual(['plan-changes-v2-1']);
   });
 });

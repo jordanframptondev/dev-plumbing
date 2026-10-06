@@ -24,6 +24,7 @@ const type = (id: string, title: string, screen: PlumbingType['screen'], order: 
   answerPresets: [],
   timeline: false,
   enabled: true,
+  builtIn: false,
   file: `${id}.md`,
   body: '',
   sections: {},

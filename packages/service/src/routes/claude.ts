@@ -15,6 +15,7 @@ import {
   formatZodError,
   gitInfo,
   groupThreads,
+  importableTypes,
   importBatchSchema,
   importPack,
   InputError,
@@ -203,7 +204,7 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
         }
       } else {
         const plan = await resolvePlan({ root: git.root, cwd: body.cwd, plan: body.plan! });
-        const enabledTypes = cfg.types.filter((t) => t.enabled).map((t) => t.id);
+        const enabledTypes = importableTypes(cfg.types).map((t) => t.id);
         const opened = await rt.withLock(`open:${folder}`, () => openPlan({ folder, repo: profile.name, clone: git.root, branch: git.branch, plan, enabledTypes, home: ctx.home }));
         ref = { repo: profile.name, id: opened.id, dir: opened.dir };
         created = opened.created;
@@ -221,7 +222,7 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
       const project = await readProjectFile(ref.dir);
       // Flows and phases point at items the other importers write (a step's mockupId, a phase's itemIds), so they go last.
       const later = (t: PlumbingType) => t.screen === 'flows' || t.timeline;
-      const pending = cfg.types.filter((t) => project.importPending.includes(t.id));
+      const pending = importableTypes(cfg.types).filter((t) => project.importPending.includes(t.id));
       const importTypes = [
         ...pending.filter((t) => !later(t)).map((t) => ({ id: t.id, title: t.title })),
         ...pending.filter(later).map((t) => ({ id: t.id, title: t.title, afterOthers: true as const })),
@@ -296,7 +297,8 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
     handle(async (c) => {
       const body = await parse(c, itemsBody);
       const { cfg, ref } = await locateProject(ctx, body.repo, body.project);
-      const type = cfg.types.find((t) => t.id === body.type && t.enabled);
+      // Built-in types (Plan changes) are never imported.
+      const type = importableTypes(cfg.types).find((t) => t.id === body.type);
       if (!type) throw new InputError(`"${body.type}" isn't an enabled plumbing type.`);
       const clone = await cloneFor(body.cwd, ref);
       const result = await rt.withLock(projectKey(ref.repo, ref.id), () =>

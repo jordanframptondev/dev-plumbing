@@ -14,6 +14,8 @@ export const plumbingTypeHeaderSchema = z.object({
   timeline: z.boolean().default(false),
   enabled: z.boolean().default(true),
   addLabel: z.string().min(1).max(40).optional(),
+  /** Shipped in code (Plan changes), never read from a rules file: kept out of imports and of the rules lists. */
+  builtIn: z.boolean().default(false),
 });
 
 export type PlumbingTypeHeader = z.infer<typeof plumbingTypeHeaderSchema>;

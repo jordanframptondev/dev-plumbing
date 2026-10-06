@@ -180,8 +180,9 @@ export async function loadProjectHome(ref: ProjectRef, types: PlumbingType[]): P
   const itemById = new Map(items.map((i) => [i.id, i]));
   const titleOf = new Map(types.map((t) => [t.id, t.title]));
 
+  // A built-in type (Plan changes) shows only in a project that has items of it.
   const typeEntries: TypeEntry[] = types
-    .filter((t) => t.enabled)
+    .filter((t) => t.enabled && (!t.builtIn || items.some((i) => i.type === t.id)))
     .map((t) => {
       const ofType = items.filter((i) => i.type === t.id);
       const statuses = ofType.flatMap((i) => {

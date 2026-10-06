@@ -1,3 +1,4 @@
+import { CONFLICT_REASON, PLAN_CHANGES } from '../planChanges';
 import {
   changeState,
   displayStatus,
@@ -19,6 +20,7 @@ const HIGH_SEVERITY = new Set(['critical', 'high']);
 function blockingReason(item: Item, thread: Thread, status: DisplayStatus, pendingEdit: boolean): string | null {
   if (status === 'with_claude') return 'Claude is working on it.';
   const unresolved = status !== 'resolved';
+  if (unresolved && item.type === PLAN_CHANGES) return CONFLICT_REASON;
   if (unresolved && item.fields?.blocking === 'true') return 'Blocking question, not resolved.';
   if (unresolved && HIGH_SEVERITY.has(item.fields?.severity?.trim().toLowerCase() ?? '')) return 'High-severity concern, not resolved.';
   // A proposal is a reply that offers a change. The importer's opening options are the item's first choices, not a proposal.

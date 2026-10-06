@@ -1,3 +1,4 @@
+import { importableTypes } from '../planChanges';
 import { applyMdPatches, dataKindOf, dataProblems, type ClaudeMessage, type HistoryEntry, type PlumbingType, type ReplyInput, type Thread } from '../schemas';
 import { recordChange } from './changes';
 import { addDecision } from './decisions';
@@ -28,7 +29,8 @@ export async function postReply(
   const draft = await readDocText(dir, project.docs.draft);
   const { values: items } = await readItems(dir);
   const itemIds = new Set(items.map((i) => i.id));
-  const enabled = new Map(o.types.filter((t) => t.enabled).map((t) => [t.id, t]));
+  // The types Claude may add an item of: the enabled ones, but never a built-in one (Plan changes comes from updates).
+  const enabled = new Map(importableTypes(o.types).map((t) => [t.id, t]));
   const newItems = r.newItems ?? [];
   // New items' ids are worked out up front, so data in this reply may name them.
   const taken = new Set(itemIds);
