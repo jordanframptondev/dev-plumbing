@@ -158,9 +158,20 @@ describe('the plugin', () => {
       'For an existing item, send its key, plus only the fields that changed; a field you leave out keeps its value, title and summary included (so leave out `data` unless the drawing changed).',
       "If a drawing's part of the plan changed, edit the current `data` you're given; don't redraw it from scratch.",
       "Changed in the plan's v<to>.",
+      // Only the plan's changes are brought in: the draft's other differences are the user's own, already settled.
+      '`conflicts`',
+      '**Change an existing item only for what the `+ ` and `- ` lines in `changes` say.**',
+      'Where the draft differs from an item for another reason (the user\'s own edits, which threads already settled), leave the item as it is. Never bring items in line with the draft.',
+      '**Leave items about a passage in `conflicts` alone.** Their Plan changes thread settles it.',
+      // Every importer writes, removals included.
+      'Always call `dp_write_items` once: items, `removed`, both, or `noChanges`.',
+      '"<Type title>: <n> items, <k> removed from the plan"',
     ]) {
       expect(importer).toContain(s);
     }
+    // The draft is never the yardstick for an existing item.
+    expect(importer).not.toContain("`draft` is already the new version, with the user's own edits in it.");
+    expect(importer).not.toContain('either `items` or `noChanges`');
     // Nothing is removed by leaving it out any more.
     expect(importer).not.toContain('Send the whole list');
     // A field left out keeps its value, so the importer never has to resend a drawing it didn't change.

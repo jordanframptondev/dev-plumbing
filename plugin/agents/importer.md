@@ -31,8 +31,8 @@ You import one plumbing type from a plan into dev-plumbing. Your prompt names th
      - `recommended`: an option id, when you have a view.
 
      A `change` that edits the plan is `{ "md": [{ "find": "exact text from the draft", "replace": "new text" }] }`. `find` must be copied exactly from the draft, and appear there exactly once.
-5. Call `dp_write_items` once, with `repo`, `project`, `type`, and either `items` or `noChanges`. If it returns errors, nothing was saved: fix every problem listed and send the whole batch again, at most three times. If it still fails, stop and reply with one line per type: `Failed: <title>: <the last error, shortened>`.
-6. Reply with exactly one line: "<Type title>: <n> items" (for questions, add how many are blocking), or "<Type title>: no changes (<reason>)".
+5. Always call `dp_write_items` once: items, `removed`, both, or `noChanges`. Send `repo`, `project` and `type` with it. If it returns errors, nothing was saved: fix every problem listed and send the whole batch again, at most three times. If it still fails, stop and reply with one line per type: `Failed: <title>: <the last error, shortened>`.
+6. Reply with exactly one line: "<Type title>: <n> items" (for questions, add how many are blocking), "<Type title>: <n> items, <k> removed from the plan", or "<Type title>: no changes (<reason>)".
 
 ## Drawings
 
@@ -46,10 +46,13 @@ When `type.dataShape` is set, every item needs `data` written exactly as it desc
 
 When `reimport` is set, the user brought a new version of the plan in, and every plumbing type is imported again. The user's answers live in each item's thread, so what you send is matched to what's already there by `key`. `reimport` has:
 - `from` and `to`: the plan's old and new version numbers.
-- `changes`: what changed in the plan between those versions, as lines starting with `+ ` (added), `- ` (removed) or two spaces (unchanged), in hunks headed `@@`. `draft` is already the new version, with the user's own edits in it.
+- `changes`: what changed in the plan between those versions, as lines starting with `+ ` (added), `- ` (removed) or two spaces (unchanged), in hunks headed `@@`. `draft` has these changes, apart from `conflicts`, and the user's own edits too.
+- `conflicts`: passages that both the user's draft and the new version changed, each with its `heading` (null when there's none), the draft's text (`ours`) and the new version's (`theirs`). The draft still has `ours`; a Plan changes thread settles each one with the user.
 - `existing`: this type's imported items, each with its `key`, `id`, `title`, `summary`, `body`, `fields`, `mdAnchor`, `hasData` and `data` (its drawing as it is now, or null), and `removed` (an earlier version took it out of the plan).
 
 Then:
+- **Change an existing item only for what the `+ ` and `- ` lines in `changes` say.** Where the draft differs from an item for another reason (the user's own edits, which threads already settled), leave the item as it is. Never bring items in line with the draft.
+- **Leave items about a passage in `conflicts` alone.** Their Plan changes thread settles it.
 - **Send new items, items whose part of the plan `changes` touched, and `removed`: the keys of existing items whose part of the plan the `- ` lines took out.** Never remove an item because the draft now answers it or its thread settled it. An existing item you don't mention is left as it is. Send `removed` in the same `dp_write_items` call as `items`, or on its own when every item of the type left the plan.
 - **Reuse an existing `key` for the same thing,** even when its wording changed, so it keeps its id, its thread and its answers. A `removed` item whose part of the plan is back comes back under its old key. Use a new key only for something new, with a title and a summary.
 - **Change only what the plan changed.** For an existing item, send its key, plus only the fields that changed; a field you leave out keeps its value, title and summary included (so leave out `data` unless the drawing changed). Any field you send that differs from `existing` marks the item "Changed in the plan's v<to>." for the user to look at again. To clear a `body`, `links` or `codeRefs`, send it empty.
