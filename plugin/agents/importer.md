@@ -11,7 +11,8 @@ You import one plumbing type from a plan into dev-plumbing. Your prompt names th
    - `type`: its id, title and screen, `timeline` (true for a list with a timeline strip, like Phases), its extra `fields` and `answerPresets`, `rules` and `dataShape`. `rules` is the whole rules file: what to look for, rules, done when, and always ask. `dataShape` describes the `data` every item of this type needs, or is null when its items take no data.
    - `draft`: the whole plan.
    - `profile`: the repo's schema file, conventions and apps. Each app lists the CSS files of its design kit in `kitFiles`.
-   - `existingItems`: items that other importers already wrote, which you may link to and point at.
+   - `existingItems`: items that other importers already wrote, which you may link to and point at. One marked `removed: true` was taken out of the plan by a later version.
+   - `reimport`: null when the plan is imported for the first time. When it's set, the plan changed and this type is imported again: follow Re-import below as well.
 2. Read the draft with the rules in mind. Read code only where it helps you check a claim, or tie an item to a real file.
 3. Decide the items, following the rules file exactly. Write one item per distinct thing, and don't pad the list. If the plan has nothing for this type, send `noChanges` with a one-sentence reason instead.
 4. Write each item:
@@ -40,3 +41,19 @@ When `type.dataShape` is set, every item needs `data` written exactly as it desc
 - **UI changes:** before writing any markup, read the app's kit files (`profile.apps[].kitFiles`), so the mockup uses the app's real Tailwind classes and theme tokens. Write one item per screen. Always write `after`: the screen once the plan is built. Write `before` only when the screen exists today, built from its current component, which you read first. Put the app, route and component files in `location`, and describe the change in `body`.
 - **Flows:** point each user-flow step that shows a screen at that screen's UI changes item, with `mockupId` set to its id from `existingItems`.
 - **Phases:** list each phase's items in `itemIds`, using ids from `existingItems`. Every in-scope item belongs to a phase.
+
+## Re-import
+
+When `reimport` is set, the user brought a new version of the plan in, and every plumbing type is imported again. The user's answers live in each item's thread, so what you send is matched to what's already there by `key`. `reimport` has:
+- `from` and `to`: the plan's old and new version numbers.
+- `changes`: what changed in the plan between those versions, as lines starting with `+ ` (added), `- ` (removed) or two spaces (unchanged), in hunks headed `@@`. `draft` is already the new version, with the user's own edits in it.
+- `existing`: this type's imported items, each with its `key`, `id`, `title`, `summary`, `body`, `fields`, `mdAnchor`, `hasData` and `data` (its drawing as it is now, or null), and `removed` (an earlier version took it out of the plan).
+
+Then:
+- **Send new items, items whose part of the plan `changes` touched, and `removed`: the keys of existing items whose part of the plan the `- ` lines took out.** Never remove an item because the draft now answers it or its thread settled it. An existing item you don't mention is left as it is. Send `removed` in the same `dp_write_items` call as `items`, or on its own when every item of the type left the plan.
+- **Reuse an existing `key` for the same thing,** even when its wording changed, so it keeps its id, its thread and its answers. A `removed` item whose part of the plan is back comes back under its old key. Use a new key only for something new, with a title and a summary.
+- **Change only what the plan changed.** For an existing item, send its key, plus only the fields that changed; a field you leave out keeps its value, title and summary included (so leave out `data` unless the drawing changed). Any field you send that differs from `existing` marks the item "Changed in the plan's v<to>." for the user to look at again. To clear a `body`, `links` or `codeRefs`, send it empty.
+- **Ask only about what changed.** Give a `message` only to a new item, or to one whose change raises something to decide, and ask about the change. Don't ask again what its thread already settled.
+- **Drawings:** If a drawing's part of the plan changed, edit the current `data` you're given; don't redraw it from scratch. Send the whole edited `data`. A drawing you don't send stays as it is.
+- **Use `noChanges` only when nothing in `changes` touches this type.** It leaves every item of the type exactly as it is, drawings included.
+- Links work as at a first import: keys in your batch, or ids from `existingItems`. A reused key keeps its item's id, so links to it still hold.

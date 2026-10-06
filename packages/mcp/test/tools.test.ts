@@ -183,4 +183,43 @@ describe('the dp tools', () => {
     expect(await wait({ detect: 'acme' })).toMatchObject({ kind: 'submission' });
     expect(calls.map((c) => c.body.finished ?? null)).toEqual([null, null, { finalize: 'f-1' }, { detect: 'acme' }]);
   });
+  it("passes the user's answer to plan-changed through as update, and fresh", async () => {
+    const results: unknown[] = [
+      { kind: 'plan-changed', version: 1, nextVersion: 2, added: 3, removed: 1 },
+      { kind: 'updated', version: 2, merged: { clean: 2, conflicts: 1 } },
+      { kind: 'reopened', importTypes: [] },
+      { kind: 'updated', version: 2, merged: { clean: 0, conflicts: 0 } },
+    ];
+    const { client, calls } = fakeService({ '/open': () => results.shift() });
+    const mcp = await connect(createDpServer({ client, cwd: '/repo', windowId: 'w-1' }));
+    const open = async (args: Record<string, unknown>) => JSON.parse(textOf(await mcp.callTool({ name: 'dp_open', arguments: args })));
+    expect(await open({ plan: 'docs/specs/restock.md' })).toMatchObject({ kind: 'plan-changed', nextVersion: 2 });
+    expect(await open({ plan: 'docs/specs/restock.md', update: true })).toMatchObject({ kind: 'updated', version: 2 });
+    expect(await open({ project: 'restock-reminders', update: false })).toMatchObject({ kind: 'reopened' });
+    expect(await open({ plan: 'docs/specs/restock.md', update: true, fresh: true })).toMatchObject({ kind: 'updated', version: 2 });
+    expect(calls.map((c) => c.body)).toEqual([
+      { plan: 'docs/specs/restock.md', cwd: '/repo', windowId: 'w-1' },
+      { plan: 'docs/specs/restock.md', update: true, cwd: '/repo', windowId: 'w-1' },
+      { project: 'restock-reminders', update: false, cwd: '/repo', windowId: 'w-1' },
+      { plan: 'docs/specs/restock.md', update: true, fresh: true, cwd: '/repo', windowId: 'w-1' },
+    ]);
+    const tool = (await mcp.listTools()).tools.find((t) => t.name === 'dp_open')!;
+    expect(Object.keys(tool.inputSchema.properties ?? {}).sort()).toEqual(['fresh', 'plan', 'project', 'update']);
+    for (const s of ['plan-changed', 'update: true', 'updated', 'update: false', 'fresh: true']) expect(tool.description).toContain(s);
+    // An answer that isn't true or false never reaches the service.
+    const bad = await mcp.callTool({ name: 'dp_open', arguments: { plan: 'docs/specs/restock.md', update: 'yes' } });
+    expect(bad.isError).toBe(true);
+    expect(calls).toHaveLength(4);
+  });
+
+  it("passes a re-import's removed keys through dp_write_items", async () => {
+    const { client, calls } = fakeService({ '/items': () => ({ saved: 0, itemIds: [], importFinished: false }) });
+    const mcp = await connect(createDpServer({ client, cwd: '/repo', windowId: 'w-1' }));
+    await mcp.callTool({ name: 'dp_write_items', arguments: { repo: 'acme', project: 'restock-reminders', type: 'questions', items: [{ key: 'who' }], removed: ['sms-later'] } });
+    expect(calls.map((c) => c.body)).toEqual([{ repo: 'acme', project: 'restock-reminders', type: 'questions', items: [{ key: 'who' }], removed: ['sms-later'], cwd: '/repo' }]);
+    const tool = (await mcp.listTools()).tools.find((t) => t.name === 'dp_write_items')!;
+    expect(Object.keys(tool.inputSchema.properties ?? {}).sort()).toEqual(['items', 'noChanges', 'project', 'removed', 'repo', 'type']);
+    expect(tool.description).toContain('removed lists the keys of existing items');
+  });
+
 });

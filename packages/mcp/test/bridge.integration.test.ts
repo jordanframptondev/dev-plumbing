@@ -15,6 +15,7 @@ const cli = path.join(root, 'packages/cli/dist/index.js');
 let configDir: string;
 let env: Record<string, string>;
 let mcp: Client;
+let repo: string;
 
 async function freePort(): Promise<number> {
   const s = net.createServer().listen(0, '127.0.0.1');
@@ -35,7 +36,7 @@ beforeAll(async () => {
   fs.writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(settingsFile, 'utf8')), openBrowserOnImport: false }));
   fs.mkdirSync(path.join(configDir, 'repos'), { recursive: true });
   fs.writeFileSync(path.join(configDir, 'repos', 'acme-app.json'), JSON.stringify({ name: 'acme-app', match: ['github.com/acme/acme-app'] }));
-  const repo = makeRepo({ remote: 'git@github.com:acme/acme-app.git' });
+  repo = makeRepo({ remote: 'git@github.com:acme/acme-app.git' });
   mcp = new Client({ name: 'bridge-test', version: '1.0.0' });
   await mcp.connect(new StdioClientTransport({ command: 'sh', args: [path.join(root, 'plugin/bin/dp-mcp.sh')], env: { ...env, CLAUDE_PROJECT_DIR: repo } }));
 });
@@ -106,4 +107,29 @@ it('hands a finalize to the window and takes the final back', async () => {
   const view = await http(`${P}/finalize`);
   expect(view.request.state).toBe('proposed');
   expect(view.proposal.markdown).toContain('Reminders go by SMS and email.');
+}, 60_000);
+
+it('asks before bringing a changed plan in, and brings it in on yes', async () => {
+  // Continues from the tests above: the plan is v1, and its one question is resolved.
+  const PLAN = 'docs/specs/restock-reminders.md';
+  const file = path.join(repo, PLAN);
+  fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('A daily job finds', 'An hourly job finds'));
+  const open = async (args: Record<string, unknown>) => json(await mcp.callTool({ name: 'dp_open', arguments: args }));
+  expect(await open({ plan: PLAN })).toMatchObject({ kind: 'plan-changed', version: 1, nextVersion: 2, added: 1, removed: 1 });
+  expect(await open({ plan: PLAN, update: false })).toMatchObject({ kind: 'reopened', importTypes: [] });
+  const updated = await open({ plan: PLAN, update: true });
+  expect(updated).toMatchObject({ kind: 'updated', version: 2, merged: { clean: 1, conflicts: 0 } });
+  for (const t of updated.importTypes as { id: string }[]) {
+    const batch = t.id === 'questions' ? { items: [{ key: 'channels', title: 'Which channels?', summary: 'SMS or email.' }] } : { noChanges: 'None.' };
+    const r = await mcp.callTool({ name: 'dp_write_items', arguments: { repo: 'acme-app', project: 'restock-reminders', type: t.id, ...batch } });
+    expect(r.isError).toBeFalsy();
+  }
+  const P = '/api/projects/acme-app/restock-reminders';
+  expect((await http(P)).project.status).toBe('active');
+  expect((await http(`${P}/versions`)).versions.map((v: { n: number; current: boolean }) => [v.n, v.current])).toEqual([
+    [2, true],
+    [1, false],
+  ]);
+  // The question kept its id and its thread, which is still resolved.
+  expect((await http(`${P}/threads/t-questions-channels`)).thread.status).toBe('resolved');
 }, 60_000);

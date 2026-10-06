@@ -117,4 +117,57 @@ describe('the plugin', () => {
       expect(skill).toContain(s);
     }
   });
+  it('asks before bringing a changed plan in, and has importers re-import by key, removing only what they list', () => {
+    const skill = parseFrontMatter(read('plugin/skills/dev-plumbing/SKILL.md')).content;
+    const open = skill.slice(skill.indexOf('## 1. Open'), skill.indexOf('## 2. Import'));
+    for (const s of [
+      '**plan-changed**',
+      'AskUserQuestion',
+      '> The plan changed in the repo since v<n> (<a> lines added, <r> removed). Update to v<n+1>?',
+      '**Update to v<n+1>**',
+      '**Not now**',
+      'update: true',
+      'update: false',
+      'take **Not now**',
+      '**Update to v<n+1> (merge into my draft)**',
+      '**Start the draft from v<n+1>**',
+      '`fresh: true`',
+      " Only the formatting changed.",
+      " It's mostly rewritten, so merging would leave <k> conflicts.",
+      'The plan on branch <branch> changed since v<n>',
+      '**updated**',
+      '`v<n>: <clean> changes merged, <conflicts> to settle in Plan changes.`',
+      '`v<n>: <clean> changes merged, nothing to settle.`',
+      "`v<n>: the draft now starts from the plan's v<n>. Your earlier draft is kept under Versions.`",
+      'go to 2 with its `importTypes`',
+      'when `next` starts with `Tell the user: "…"`, tell the user that line first',
+      'If `dp_open` returns an error after `update: true`, the project changed in the meantime: tell the user the error, then call `dp_open` again with the same `plan` (or `project`) and `update: false`',
+    ]) {
+      expect(open).toContain(s);
+    }
+    const importer = parseFrontMatter(read('plugin/agents/importer.md')).content;
+    for (const s of [
+      '## Re-import',
+      '`reimport`',
+      '`changes`',
+      '`existing`',
+      'Send new items, items whose part of the plan `changes` touched, and `removed`: the keys of existing items whose part of the plan the `- ` lines took out.',
+      'Never remove an item because the draft now answers it or its thread settled it. An existing item you don\'t mention is left as it is.',
+      '**Reuse an existing `key` for the same thing,**',
+      '**Use `noChanges` only when nothing in `changes` touches this type.**',
+      'For an existing item, send its key, plus only the fields that changed; a field you leave out keeps its value, title and summary included (so leave out `data` unless the drawing changed).',
+      "If a drawing's part of the plan changed, edit the current `data` you're given; don't redraw it from scratch.",
+      "Changed in the plan's v<to>.",
+    ]) {
+      expect(importer).toContain(s);
+    }
+    // Nothing is removed by leaving it out any more.
+    expect(importer).not.toContain('Send the whole list');
+    // A field left out keeps its value, so the importer never has to resend a drawing it didn't change.
+    expect(importer).not.toContain('whole `data` again');
+    const thread = parseFrontMatter(read('plugin/agents/thread.md')).content;
+    expect(thread).toContain("If the thread has no message from the person yet, the service sent it to you: a Plan changes thread, for example");
+    expect(thread).toContain("do what the plumbing type's Rules say");
+  });
+
 });

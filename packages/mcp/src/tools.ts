@@ -45,8 +45,13 @@ export function createDpServer(o: { client: ServiceClient; cwd: string; windowId
     'dp_open',
     {
       description:
-        "Open a plumbing project for the repo this session is in. Pass plan (a Markdown plan's path, relative to the repo or absolute) to import it, or to reopen it if it was imported before. Pass project (an id from a listing) to reopen one. Pass neither to list this repo's plumbing projects. The result's kind and next say what to do.",
-      inputSchema: { plan: z.string().min(1).optional(), project: z.string().min(1).optional() },
+        "Open a plumbing project for the repo this session is in. Pass plan (a Markdown plan's path, relative to the repo or absolute) to import it, or to reopen it if it was imported before. Pass project (an id from a listing) to reopen one. Pass neither to list this repo's plumbing projects. When the plan in the repo changed since the project's current version, it returns plan-changed and changes nothing: ask the user, then call it again with the same plan or project and update: true (it returns updated, with the importers to run again), update: true with fresh: true (the same, but the draft starts again from the new version) or update: false (it opens the project as it was). The result's kind and next say what to do.",
+      inputSchema: {
+        plan: z.string().min(1).optional(),
+        project: z.string().min(1).optional(),
+        update: z.boolean().optional().describe("The user's answer after plan-changed: true brings the new version in, false opens the project as it was"),
+        fresh: z.boolean().optional().describe('With update: true, when the user picked "Start the draft from v<n>": the draft starts again from the new version instead of merging'),
+      },
     },
     async (args) => {
       const result = await call('/open', { ...args, cwd: o.cwd, windowId: o.windowId });
@@ -69,8 +74,14 @@ export function createDpServer(o: { client: ServiceClient; cwd: string; windowId
     'dp_write_items',
     {
       description:
-        'Write everything one plumbing type found in the plan, in one call: items, or noChanges with a reason. The batch is checked as a whole. If anything is wrong, nothing is saved and the error lists every problem: fix them all and send the whole batch again.',
-      inputSchema: { ...project, type: z.string().min(1).describe('The plumbing type id'), items: z.array(importItemSchema).max(60).optional(), noChanges: z.string().min(1).max(500).optional() },
+        'Write everything one plumbing type found in the plan, in one call: items, or noChanges with a reason. In a re-import, removed lists the keys of existing items whose part of the plan the new version took out, with items or on its own. The batch is checked as a whole. If anything is wrong, nothing is saved and the error lists every problem: fix them all and send the whole batch again.',
+      inputSchema: {
+        ...project,
+        type: z.string().min(1).describe('The plumbing type id'),
+        items: z.array(importItemSchema).max(60).optional(),
+        noChanges: z.string().min(1).max(500).optional(),
+        removed: z.array(z.string().min(1)).max(200).optional().describe('Re-import only: keys of existing items whose part of the plan was taken out'),
+      },
     },
     async (args) => call('/items', { ...args, cwd: o.cwd }),
   );

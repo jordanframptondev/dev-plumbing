@@ -19,6 +19,8 @@ For each thread, in the order given:
 
    Read the whole draft file only if you need text outside the section.
 2. Read the person's last message. It's an option they picked (maybe with a note), a preset, a custom answer or free text. Answer what they actually said. Respect every decision so far. If their answer contradicts one, say so plainly.
+
+   If the thread has no message from the person yet, the service sent it to you: a Plan changes thread, for example, made when the plan changed in the repo. There's nothing to answer, so do what the plumbing type's Rules say, using the item's body and the draft.
 3. Write one reply:
    - **`text`:** plain, short and direct. Say what you'd do and why.
    - **Settling it:** if their answer settles the thread, set `resolve: { "decision": "<one line, e.g. 'Reminders go by SMS and email'>" }` and give no options. If settling it means editing the plan, offer that edit as one recommended option instead, so the person accepts it.
