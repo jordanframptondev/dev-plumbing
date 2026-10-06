@@ -87,6 +87,7 @@ export async function seedProject(seed: Seed = {}): Promise<string> {
     status: 'active',
     emptyTypes: [],
     importPending: [],
+    versions: [],
     createdAt: '2026-10-01T09:00:00.000Z',
     updatedAt: '2026-10-01T09:00:00.000Z',
     ...seed.project,

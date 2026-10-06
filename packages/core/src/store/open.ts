@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,6 +5,7 @@ import { writeFileAtomic } from '../atomic';
 import { expandHome } from '../paths';
 import { normalizeRemote, plumbingProjectSchema, titleFromMarkdown, type PlumbingProject, type RepoProfile, type Settings } from '../schemas';
 import { InputError, readJsonFile, readProjectFile, writeProjectFile } from './io';
+import { planHash } from './versions';
 
 export class PlanError extends InputError {}
 
@@ -109,12 +109,13 @@ export async function openPlan(o: {
     id,
     repo: o.repo,
     title: titleFromMarkdown(o.plan.text) ?? base,
-    source: { path: o.plan.rel, clone: tildify(o.clone, o.home), branch: o.branch, hashAtImport: createHash('sha256').update(o.plan.text).digest('hex') },
+    source: { path: o.plan.rel, clone: tildify(o.clone, o.home), branch: o.branch, hashAtImport: planHash(o.plan.text) },
     clones: [tildify(o.clone, o.home)],
     docs: { original: 'docs/original.md', draft: 'docs/draft.md' },
     status: o.enabledTypes.length ? 'importing' : 'active',
     emptyTypes: [],
     importPending: o.enabledTypes,
+    versions: [],
     createdAt: at,
     updatedAt: at,
   };

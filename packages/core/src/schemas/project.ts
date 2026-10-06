@@ -5,6 +5,26 @@ import { codeRefSchema, itemFlagSchema, mdAnchorSchema, messageSchema } from './
 export const threadStatusValues = ['idle', 'your_turn', 'with_claude', 'resolved', 'parked'] as const;
 export type ThreadStatus = (typeof threadStatusValues)[number];
 
+/** One version of the repo's plan. v1 is the import; each update that brings a changed plan in adds the next. */
+export const versionSchema = z.object({
+  n: z.number().int().min(1),
+  /** When it came in. v1's is the project's createdAt. */
+  at: z.string(),
+  /** sha256 hex of the repo's plan text, as source.hashAtImport is for v1. */
+  hash: z.string(),
+  /** The clone it was read from, ~-shortened. */
+  clone: z.string(),
+  branch: z.string(),
+  /** HEAD of that clone when it was read, or null when it isn't known. */
+  commit: z.string().nullable(),
+  /**
+   * How the update brought it into the draft: `clean` changes merged and `conflicts` left to settle, or `fresh` when
+   * the draft was started again from this version. Absent for v1.
+   */
+  merge: z.object({ clean: z.number().int().min(0), conflicts: z.number().int().min(0), fresh: z.boolean().optional() }).optional(),
+});
+export type PlanVersion = z.infer<typeof versionSchema>;
+
 export const plumbingProjectSchema = z.object({
   id: z.string().min(1),
   repo: z.string().min(1),
@@ -23,6 +43,12 @@ export const plumbingProjectSchema = z.object({
   emptyTypes: z.array(z.object({ type: z.string(), reason: z.string() })).default([]),
   /** Plumbing types whose importer hasn't written yet. */
   importPending: z.array(z.string()).default([]),
+  /** Every version of the plan, oldest first. Empty means the project is still at v1, read from `source`. */
+  versions: z.array(versionSchema).default([]),
+  /** Set while the importers re-run after an update: the version they import, and the status to go back to. */
+  reimporting: z.object({ version: z.number().int().min(2), from: z.enum(['active', 'finalized']) }).optional(),
+  /** While importing: the Claude window that runs the importers. Only it, or another once it's gone, ends the import. */
+  importBy: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -51,6 +77,10 @@ export const itemSchema = z
     createdBy: z.enum(['import', 'claude', 'you', 'whiteboard']),
     /** "May need another look": set when another thread's reply says it might affect this item. */
     flags: z.array(itemFlagSchema).optional(),
+    /** An imported item whose part of the plan was removed in this version. It's parked, never deleted. */
+    removedIn: z.number().int().min(2).optional(),
+    /** A Plan changes item: the passage as your draft, the old plan and the repo's new version had it. */
+    conflict: z.object({ ours: z.string(), base: z.string(), theirs: z.string() }).optional(),
   })
   .passthrough();
 export type Item = z.infer<typeof itemSchema>;

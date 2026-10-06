@@ -12,6 +12,7 @@ export * from './runFile';
 export * from './git';
 export * from './store/io';
 export * from './store/open';
+export * from './store/versions';
 export * from './store/validate';
 export * from './store/importItems';
 export * from './store/changes';

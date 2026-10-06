@@ -8,6 +8,7 @@ import { readFinalize } from './finalize';
 import { IMPORT_DID_NOT_FINISH } from './importItems';
 import { docPath, readDecisions, readHistory, readItems, readJsonFile, readThreads } from './io';
 import { openOptions } from './threads';
+import { currentVersion, projectVersions } from './versions';
 import type { DataChecker } from './checks';
 import {
   countThreads,
@@ -245,7 +246,8 @@ export async function loadProjectHome(ref: ProjectRef, types: PlumbingType[]): P
     state: (await readFinalize(ref.dir))?.state ?? null,
     changesSinceFinal: changesSinceFinal(history, project.docs.exportedTo?.at),
   };
-  return { summary, project, types: typeEntries, inbox, documents, finalize };
+  const version = { current: currentVersion(project).n, count: projectVersions(project).length };
+  return { summary, project, types: typeEntries, inbox, documents, version, finalize };
 }
 
 const byTitle = (a: TypeItemRow, b: TypeItemRow) => a.title.localeCompare(b.title);

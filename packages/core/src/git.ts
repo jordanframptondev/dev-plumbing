@@ -30,3 +30,9 @@ export async function gitInfo(cwd: string): Promise<GitInfo> {
   const exclude = (await git(root, ['rev-parse', '--git-path', 'info/exclude'])) ?? '.git/info/exclude';
   return { root, remote, branch, excludeFile: path.resolve(root, exclude) };
 }
+
+/** The commit the clone is on (`git rev-parse HEAD`), or null when it can't be read: not a clone, or no commit yet. */
+export async function gitHead(cwd: string): Promise<string | null> {
+  const sha = await git(cwd, ['rev-parse', 'HEAD']);
+  return sha && /^[0-9a-f]{40,64}$/.test(sha) ? sha : null;
+}

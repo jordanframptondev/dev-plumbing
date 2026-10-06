@@ -305,3 +305,15 @@ describe('the project home for Finalize', () => {
     expect(await finalizeOf(dir)).toEqual({ canStart: true, blockingCount: 0, state: null, changesSinceFinal: 1 });
   });
 });
+
+describe('the project home for plan versions', () => {
+  it('says which version of the plan the project is at, and how many there are', async () => {
+    const dir = await seedProject();
+    const restock = { repo: 'acme', id: 'restock', dir };
+    expect((await loadProjectHome(restock, TYPES)).version).toEqual({ current: 1, count: 1 });
+    const v = { at: '2026-10-05T09:00:00.000Z', clone: '/tmp/acme', branch: 'main', commit: null };
+    const versions = [{ ...v, n: 1, hash: 'x' }, { ...v, n: 2, hash: 'y', merge: { clean: 1, conflicts: 0 } }];
+    await writeProjectFile(dir, { ...(await readProjectFile(dir)), versions });
+    expect((await loadProjectHome(restock, TYPES)).version).toEqual({ current: 2, count: 2 });
+  });
+});

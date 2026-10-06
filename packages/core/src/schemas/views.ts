@@ -1,5 +1,5 @@
 import type { ChangeState, Decision, Option, ThreadDraft } from './loop';
-import type { Item, PlumbingProject, Thread } from './project';
+import type { Item, PlanVersion, PlumbingProject, Thread } from './project';
 import type { Screen } from './plumbingType';
 import type { Anchor, DataKind } from './data';
 import type { FinalizeChecklist, FinalizeRequest, FinalizeState } from './finalize';
@@ -94,6 +94,8 @@ export type ProjectHome = {
   types: TypeEntry[];
   inbox: InboxEntry[];
   documents: { original: boolean; draft: boolean; final: boolean };
+  /** The plan version the working original and draft hold, and how many versions there are (1 until an update). */
+  version: { current: number; count: number };
   listening?: ListeningState;
   /**
    * For the header's Finalize spec button. `state` is the finalize request's, or null when none is under way.
@@ -101,6 +103,9 @@ export type ProjectHome = {
    */
   finalize: { canStart: boolean; blockingCount: number; state: FinalizeState | null; changesSinceFinal: number };
 };
+
+/** One version in the Versions list (GET …/versions, newest first). `current` marks the one the working files hold. */
+export type VersionSummary = PlanVersion & { current: boolean };
 
 export type OpenOptions = { messageId: string; options: Option[]; recommended?: string };
 
