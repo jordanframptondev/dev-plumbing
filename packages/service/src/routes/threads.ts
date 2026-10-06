@@ -8,9 +8,11 @@ import {
   InputError,
   loadChanges,
   loadThreadDetail,
+  markReviewed,
   readItems,
   saveDraft,
   setParked,
+  setReviewed,
   submit,
   submitMessage,
   undoChange,
@@ -33,6 +35,9 @@ const draftBody = z.union([
     .refine((d) => d.optionId !== undefined || d.note !== undefined || d.text !== undefined, 'Send optionId, note or text, or clear: true.'),
 ]);
 const parkBody = z.object({ parked: z.boolean() });
+const reviewedBody = z.object({ reviewed: z.boolean() });
+// Mark all as reviewed: every item on the Finalize page's "Nobody has reviewed these".
+const markReviewedBody = z.object({ itemIds: z.array(z.string().min(1).max(200)).min(1).max(500) });
 const submitBody = z.union([z.object({ scope: z.literal('all') }), z.object({ scope: z.literal('thread'), threadId: z.string().min(1) })]);
 // Strict, so a misspelt key can't turn a pin into a plain item.
 const itemBody = z
@@ -89,6 +94,20 @@ export function threadRoutes(ctx: AppContext, rt: Runtime): Hono {
     const { ref } = await find(c);
     await write(ref, () => setParked(ref.dir, c.req.param('threadId')!, body.parked));
     return c.json({ ok: true });
+  }));
+
+  r.post(`${base}/items/:itemId/reviewed`, handle(async (c) => {
+    const body = await parse(c, reviewedBody);
+    const { ref } = await find(c);
+    await write(ref, () => setReviewed(ref.dir, c.req.param('itemId')!, body.reviewed));
+    return c.json({ ok: true });
+  }));
+
+  r.post(`${base}/reviewed`, handle(async (c) => {
+    const body = await parse(c, markReviewedBody);
+    const { ref } = await find(c);
+    const { marked } = await write(ref, () => markReviewed(ref.dir, body.itemIds));
+    return c.json({ ok: true, marked });
   }));
 
   r.post(`${base}/submit`, handle(async (c) => {

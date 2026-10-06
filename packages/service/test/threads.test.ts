@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
-import { readThread, writeJsonAtomic } from '@dev-plumbing/core';
+import { afterAll, describe, expect, it, vi } from 'vitest';
+import { readItem, readThread, writeJsonAtomic } from '@dev-plumbing/core';
 import { createApp } from '../src/app';
 import { createRuntime } from '../src/runtime';
 import { makeRepo } from '../../core/test/fixtures';
@@ -154,5 +154,62 @@ describe('thread routes', () => {
     expect(inDraft || sent).toBe(true);
     expect(submitted.status).toBe(200);
     expect((await readThread(t.dir, 't-questions-rows')).messages.at(-1)).toMatchObject({ author: 'claude', text: 'Noted.' });
+  });
+});
+
+describe('reviewed marks', () => {
+  const unreviewed = async (t: Awaited<ReturnType<typeof setup>>) => {
+    const { checklist } = (await t.send('GET', `${P}/finalize`)).body;
+    return { ids: checklist.unreviewed.map((e: Json) => e.itemId), reviewed: checklist.reviewed };
+  };
+
+  it('marks an item reviewed, taking it off the Finalize warning list, and undoes it', async () => {
+    const t = await setup();
+    expect(await unreviewed(t)).toEqual({ ids: ['questions-rows', 'questions-channels'], reviewed: 0 });
+    const changed = vi.spyOn(t.rt.events, 'projectChanged');
+    const r = await t.send('POST', `${P}/items/questions-channels/reviewed`, { reviewed: true });
+    expect(r).toEqual({ status: 200, body: { ok: true } });
+    expect(changed).toHaveBeenCalledWith('acme-app', 'restock-reminders');
+    expect((await readItem(t.dir, 'questions-channels')).reviewedAt).toEqual(expect.any(String));
+    expect(await unreviewed(t)).toEqual({ ids: ['questions-rows'], reviewed: 1 });
+    // The thread is left as it was.
+    expect((await readThread(t.dir, 't-questions-channels')).status).toBe('your_turn');
+
+    expect((await t.send('POST', `${P}/items/questions-channels/reviewed`, { reviewed: false })).body).toEqual({ ok: true });
+    expect((await readItem(t.dir, 'questions-channels')).reviewedAt).toBeUndefined();
+    expect(await unreviewed(t)).toEqual({ ids: ['questions-rows', 'questions-channels'], reviewed: 0 });
+  });
+
+  it("refuses an item that doesn't exist, and a body without reviewed", async () => {
+    const t = await setup();
+    const missing = await t.send('POST', `${P}/items/questions-nope/reviewed`, { reviewed: true });
+    expect(missing).toEqual({ status: 404, body: { error: "Item questions-nope doesn't exist." } });
+    for (const body of [{}, { reviewed: 'yes' }, null]) {
+      const r = await t.send('POST', `${P}/items/questions-channels/reviewed`, body);
+      expect(r.status).toBe(400);
+      expect(r.body.error).toEqual(expect.any(String));
+    }
+    expect((await t.send('POST', `/api/projects/acme-app/nope/items/questions-channels/reviewed`, { reviewed: true })).status).toBe(404);
+  });
+
+  it('marks every item given at once, saying how many it marked', async () => {
+    const t = await setup();
+    const changed = vi.spyOn(t.rt.events, 'projectChanged');
+    const r = await t.send('POST', `${P}/reviewed`, { itemIds: ['questions-channels', 'questions-rows'] });
+    expect(r).toEqual({ status: 200, body: { ok: true, marked: 2 } });
+    expect(changed).toHaveBeenCalledWith('acme-app', 'restock-reminders');
+    expect(await unreviewed(t)).toEqual({ ids: [], reviewed: 2 });
+  });
+
+  it('refuses unknown ids, naming them, and marks nothing; and wants 1 to 500 ids', async () => {
+    const t = await setup();
+    const r = await t.send('POST', `${P}/reviewed`, { itemIds: ['questions-channels', 'questions-ghost'] });
+    expect(r).toEqual({ status: 400, body: { error: 'There\'s no item "questions-ghost". Nothing was marked.' } });
+    expect((await readItem(t.dir, 'questions-channels')).reviewedAt).toBeUndefined();
+    for (const body of [{ itemIds: [] }, { itemIds: Array.from({ length: 501 }, (_, i) => `q-${i}`) }, { itemIds: [''] }, { itemIds: 'questions-rows' }, {}]) {
+      const bad = await t.send('POST', `${P}/reviewed`, body);
+      expect(bad.status).toBe(400);
+      expect(bad.body.error).toEqual(expect.any(String));
+    }
   });
 });
