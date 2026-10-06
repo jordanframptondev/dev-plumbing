@@ -140,7 +140,12 @@ export async function postReply(
     ...(r.resolve ? { resolved: true } : {}),
   };
   if (r.resolve) await addDecision(dir, { text: r.resolve.decision, threadId: thread.id, itemIds: r.resolve.itemIds ?? [thread.itemId], now });
-  await writeThread(dir, { ...thread, status: r.resolve ? 'resolved' : 'your_turn', messages: [...thread.messages, message] });
+  // An update took this item out of the plan while Claude was working on it: once the reply lands, the thread is parked,
+  // so the item stays out of the final. The reply, and any decision, are kept.
+  const removedIn = items.find((i) => i.id === thread.itemId)?.removedIn;
+  const messages = [...thread.messages, message];
+  if (removedIn !== undefined) messages.push({ id: newId('m', now), at, author: 'system', text: `Parked, because it was removed from the plan in v${removedIn}.` });
+  await writeThread(dir, { ...thread, status: removedIn !== undefined ? 'parked' : r.resolve ? 'resolved' : 'your_turn', messages });
   await touchProject(dir, now);
   return { messageId: message.id, edits, newThreadIds: newItemIds.map((id) => `t-${id}`) };
 }

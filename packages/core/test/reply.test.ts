@@ -132,6 +132,25 @@ describe('posting a reply', () => {
     expect(await draftOf(dir)).toBe(DRAFT);
   });
 
+  it('parks the thread once the reply lands when an update took its item out of the plan, keeping the reply and any decision', async () => {
+    const open = asked('q1');
+    const settled = asked('q2');
+    const dir = await seedProject({ pairs: [open, settled].map((p) => ({ ...p, item: { ...p.item, removedIn: 2 } })) });
+    const asking = await reply(dir, { threadId: 't-q1', text: 'Which retention?', options: [{ id: 'short', label: '30 days' }, { id: 'long', label: '1 year' }] });
+    const resolving = await reply(dir, { threadId: 't-q2', text: 'Settled.', resolve: { decision: 'Reminders go by SMS and email' } });
+    const line = { author: 'system', text: 'Parked, because it was removed from the plan in v2.' };
+    for (const [threadId, messageId] of [['t-q1', asking.messageId], ['t-q2', resolving.messageId]]) {
+      const thread = await readThread(dir, threadId);
+      expect(thread.status).toBe('parked');
+      expect(thread.messages.slice(-2)).toMatchObject([{ id: messageId, author: 'claude' }, line]);
+    }
+    expect((await readThread(dir, 't-q2')).messages.at(-2)).toMatchObject({ resolved: true });
+    expect(await readDecisions(dir)).toEqual([expect.objectContaining({ text: 'Reminders go by SMS and email', threadId: 't-q2', itemIds: ['q2'] })]);
+    // The items stay removed, so the checklist says why they're parked.
+    expect((await readItem(dir, 'q1')).removedIn).toBe(2);
+    expect((await readItem(dir, 'q2')).removedIn).toBe(2);
+  });
+
   it("refuses threads that aren't waiting for Claude", async () => {
     const dir = await seedProject({ pairs: [pair('q1')] });
     await expect(reply(dir, { threadId: 't-q1', text: 'x' })).rejects.toThrow(/isn't waiting for Claude/);

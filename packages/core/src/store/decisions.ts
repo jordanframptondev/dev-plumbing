@@ -1,7 +1,19 @@
-import type { Decision } from '../schemas';
+import type { Decision, Thread } from '../schemas';
 import { newId, readDecisions, readItems, writeDecisions } from './io';
 
 export const activeDecisions = (decisions: Decision[]): Decision[] => decisions.filter((d) => !d.supersededBy);
+
+/**
+ * The status a parked thread goes back to: your turn when Claude spoke last, idle otherwise. When its item is coming
+ * back into the plan (an update had parked it as removed), a thread whose answer still stands, because it has an active
+ * decision, is resolved again. A plain unpark doesn't look at decisions: a resolved thread can carry on, and its
+ * decision stays active while it does.
+ */
+export async function statusWhenUnparked(dir: string, thread: Thread, o: { backInPlan: boolean }): Promise<Thread['status']> {
+  if (o.backInPlan && activeDecisions(await readDecisions(dir)).some((d) => d.threadId === thread.id)) return 'resolved';
+  const lastSpoken = [...thread.messages].reverse().find((m) => m.author !== 'system');
+  return lastSpoken?.author === 'claude' ? 'your_turn' : 'idle';
+}
 
 /** Adds a decision. Nothing is deleted: the thread's earlier decision is marked superseded by this one. */
 export async function addDecision(dir: string, o: { text: string; threadId: string; itemIds: string[]; now?: Date }): Promise<Decision> {

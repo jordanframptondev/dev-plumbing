@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
+import { addDecision } from '../src/store/decisions';
 import { readDecisions, readHistory, readItem, readSubmissions, readThread, writeItem } from '../src/store/io';
 import { finishSubmission, pickUp } from '../src/store/queue';
 import { submit } from '../src/store/submit';
@@ -39,6 +40,22 @@ describe('drafts and parking', () => {
   it("won't park a resolved thread", async () => {
     const dir = await seedProject({ pairs: [pair('q1', { status: 'resolved', options })] });
     await expect(setParked(dir, 't-q1', true)).rejects.toThrow(/nothing to park/);
+  });
+
+  it('parks a resolved thread whose item an update took out of the plan, so it stays out of the final', async () => {
+    const p = pair('q1', { status: 'resolved', options });
+    const dir = await seedProject({ pairs: [{ ...p, item: { ...p.item, removedIn: 2 } }] });
+    expect((await setParked(dir, 't-q1', true)).status).toBe('parked');
+    expect(await lastOf(dir, 't-q1')).toMatchObject({ author: 'system', text: 'Parked.' });
+    expect((await readItem(dir, 'q1')).removedIn).toBe(2);
+  });
+
+  it('a plain unpark goes back to whoever spoke last, even on a thread that was resolved before', async () => {
+    // A resolved thread can carry on, and its decision stays active: only an item coming back into the plan is resolved again.
+    const dir = await seedProject({ pairs: [pair('q1', { options })] });
+    await addDecision(dir, { text: 'One row per send.', threadId: 't-q1', itemIds: ['q1'] });
+    await setParked(dir, 't-q1', true);
+    expect((await setParked(dir, 't-q1', false)).status).toBe('your_turn');
   });
 
   it('finds the options you can answer now, skipping system lines', async () => {

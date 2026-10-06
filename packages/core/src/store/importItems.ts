@@ -2,8 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { dataKindOf, dataProblems, parseData, type CodeRef, type ImportBatch, type Item, type Message, type PlumbingProject, type PlumbingType } from '../schemas';
 import { stable } from './changes';
-import { activeDecisions } from './decisions';
-import { InputError, newId, readDecisions, readDocText, readItems, readProjectFile, readThread, writeItem, writeProjectFile, writeThread } from './io';
+import { statusWhenUnparked } from './decisions';
+import { InputError, newId, readDocText, readItems, readProjectFile, readThread, writeItem, writeProjectFile, writeThread } from './io';
 import { fieldProblems, itemDataKinds, messageProblems, nothingSaved, optionDataProblems } from './validate';
 
 export const IMPORT_DID_NOT_FINISH = "The importer didn't finish for this plumbing type.";
@@ -91,12 +91,8 @@ async function reimportItem(dir: string, old: Item, given: Given, opening: Messa
   let status = thread.status;
   const messages = [...thread.messages];
   if (back) {
-    if (status === 'parked') {
-      // A thread whose answer still stands is resolved again. Any other goes to whoever spoke last.
-      const decided = activeDecisions(await readDecisions(dir)).some((d) => d.threadId === thread.id);
-      const lastSpoken = [...thread.messages].reverse().find((m) => m.author !== 'system');
-      status = decided ? 'resolved' : lastSpoken?.author === 'claude' ? 'your_turn' : 'idle';
-    }
+    // A thread whose answer still stands is resolved again. Any other goes to whoever spoke last.
+    if (status === 'parked') status = await statusWhenUnparked(dir, thread, { backInPlan: true });
     messages.push(systemLine(now, `Back in the plan in v${version}.`));
   }
   if (changed) {
