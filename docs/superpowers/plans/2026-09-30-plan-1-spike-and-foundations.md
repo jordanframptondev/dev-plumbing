@@ -19,7 +19,7 @@ Config and plumbing projects are plain JSON and Markdown files; there's no datab
 ## Global Constraints
 
 - Node `>=22.12`, pnpm `10.x`, TypeScript `strict`, ESM everywhere (`"type": "module"`).
-- The public repo stays generic: no refill-co (or any real company) names, paths, schema or examples in code, tests, fixtures or docs. Examples use the made-up "Acme" app.
+- The public repo stays generic: no real company names, paths, schema or examples in code, tests, fixtures or docs. Examples use the made-up "Acme" app.
 - Config folder: `~/.dev-plumbing/`, overridable with the `DEV_PLUMBING_HOME` env var. Files: `README.md`, `settings.json`, `agents.json`, `repos/<repo>.json`, `plumbing/<type>.md`, `outputs/finalize.md`, `outputs/whiteboard-defense.md`, `run/service.json`.
 - `settings.json` defaults, exactly: `port` 4545, `projectsFolder` `"~/dev-plumbing-projects"`, `startAtLogin` true, `openBrowserOnImport` true, `autoApplySmallEdits` true, `homePageSize` 10, `theme` `"system"`.
 - `agents.json` defaults, exactly: `maxParallel` 4, `groupLinkedThreads` true, `models.repoSetup` "sonnet", `models.importer` "sonnet", `models.thread` "sonnet", `models.finalizer` "opus", `models.whiteboard` "opus", `waitHeartbeatSeconds` 60.
@@ -6829,7 +6829,7 @@ Expected: typecheck clean, then unit, integration and e2e tests all PASS.
 
 - [ ] **Step 4: Check the public repo stays generic**
 
-Run: `git grep -n -i -E "refill|/Users/jordanframpton" -- . ':!pnpm-lock.yaml' ':!docs/superpowers/plans'`
+Run: `git grep -n -F "$HOME" -- . ':!pnpm-lock.yaml' ':!docs/superpowers/plans'`
 Expected: no output. The plans folder is left out because this plan names what must be kept out; tests use made-up paths like `/Users/a`.
 
 - [ ] **Step 5: Commit and push**

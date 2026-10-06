@@ -8677,7 +8677,7 @@ claude --plugin-dir plugin   # try the plugin from this checkout without install
 Run:
 ```bash
 pnpm install --frozen-lockfile && pnpm check
-git grep -n -i -E "refill|/Users/jordanframpton" -- . ':!pnpm-lock.yaml' ':!docs/superpowers/plans'
+git grep -n -F "$HOME" -- . ':!pnpm-lock.yaml' ':!docs/superpowers/plans'
 ls -d "${TMPDIR:-/tmp}"/dp-* 2>/dev/null | wc -l
 ```
 Expected:

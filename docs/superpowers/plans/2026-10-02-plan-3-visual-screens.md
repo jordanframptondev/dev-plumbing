@@ -11821,7 +11821,7 @@ Run:
 ```bash
 before=$(ls -d "${TMPDIR:-/tmp}"/dp-* 2>/dev/null | grep -v dp-smoke- | wc -l)
 pnpm install --frozen-lockfile && pnpm check
-git grep -n -i -E "refill|/Users/jordanframpton" -- . ':!pnpm-lock.yaml' ':!docs/superpowers/plans'
+git grep -n -F "$HOME" -- . ':!pnpm-lock.yaml' ':!docs/superpowers/plans'
 after=$(ls -d "${TMPDIR:-/tmp}"/dp-* 2>/dev/null | grep -v dp-smoke- | wc -l)
 echo "temp folders: $before before, $after after"
 ```
