@@ -4,7 +4,8 @@
 # would in the browser, and a thread subagent replies. Then it finalizes: it applies small edits, accepts Claude's
 # proposals, parks whatever still blocks Finalize, starts it, waits for the finalizer's final, accepts it into the
 # scratch repo and checks the copy. Then it changes the plan in the scratch repo, and this script stops Claude and
-# runs /dev-plumbing again: Claude asks to update to v2, merges, re-imports, and answers the Plan changes threads.
+# runs /dev-plumbing again: Claude asks to update to v2, merges, re-imports, and answers the Plan changes threads. It
+# fails when an importable type got no saved dp_write_items batch in the re-import.
 # It uses a temporary dev-plumbing home and leaves your real ~/.dev-plumbing alone. It makes real model calls.
 #   scripts/smoke-claude.sh                   about 30 minutes (the finalizer runs on opus)
 #   DP_SMOKE_LONG=1 scripts/smoke-claude.sh   waits 35 minutes before answering, to check the long wait
@@ -176,5 +177,35 @@ if [ -e "$work/transcript-2.jsonl" ]; then
   grep -h '"parent_tool_use_id":null' "$t2" | grep -o '"name":"mcp__plugin_dev-plumbing_dp__dp_open","input":{[^}]*}' | grep -oE '"(update|fresh)":(true|false)' | sort | uniq -c || true
   echo "Thread subagents started by the main window (one per Plan changes group):"
   grep -h '"parent_tool_use_id":null' "$t2" | grep -o '"name":"Agent","input":{[^}]*"subagent_type":"dev-plumbing:thread"' | wc -l | tr -d ' ' || true
+  # Every importable type has to get a batch in the re-import: items, removed or noChanges. A type whose importer never
+  # wrote keeps its items as they were, and the import still ends once the main window calls dp_wait, so nothing else
+  # catches it. Counting calls isn't enough: a refused batch sent again counts twice. So each enabled type needs a
+  # dp_write_items call of its own that wasn't refused.
+  echo "Importable types with no saved dp_write_items batch (should be none):"
+  if missing="$(node -e '
+    const fs = require("fs"), path = require("path");
+    const [transcript, plumbing] = process.argv.slice(1);
+    const types = fs.readdirSync(plumbing).filter((f) => f.endsWith(".md")).map((f) => fs.readFileSync(path.join(plumbing, f), "utf8"))
+      .filter((text) => /^enabled: true$/m.test(text) && !/^builtIn: true$/m.test(text))
+      .map((text) => /^id: *(\S+)/m.exec(text)?.[1]).filter(Boolean);
+    const calls = new Map();
+    const saved = new Set();
+    for (const line of fs.readFileSync(transcript, "utf8").split("\n")) {
+      let entry;
+      try { entry = JSON.parse(line); } catch { continue; }
+      const blocks = Array.isArray(entry.message?.content) ? entry.message.content : [];
+      for (const b of blocks) {
+        if (b.type === "tool_use" && b.name === "mcp__plugin_dev-plumbing_dp__dp_write_items") calls.set(b.id, b.input?.type);
+        if (b.type === "tool_result" && calls.has(b.tool_use_id) && !b.is_error) saved.add(calls.get(b.tool_use_id));
+      }
+    }
+    console.log(types.filter((t) => !saved.has(t)).join(" "));
+  ' "$t2" "$DEV_PLUMBING_HOME/plumbing")"; then
+    echo "${missing:-none}"
+    if [ -n "$missing" ]; then status=1; fi
+  else
+    echo "Couldn't read $t2 to check."
+    status=1
+  fi
 fi
 exit "$status"
