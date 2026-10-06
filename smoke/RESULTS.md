@@ -156,3 +156,26 @@ Notes:
 [user 16:50:43]   Next: writing-plans docs/specs/restock-reminders.final.md
 [user 16:50:43] Smoke test passed.
 ```
+
+## Plan 5: Bring changes in
+
+Date: 2026-10-06 · Claude Code version: 2.1.289 (Claude Code)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Round 1 still passes: import, a thread, Finalize | yes | user log up to "Next: writing-plans docs/specs/restock-reminders.final.md" |
+| Claude asked to update to v2, and updated on yes | yes | runner, round 2: "offered the update: 1", "brought it in: 1", `"update":true` 1, `"update":false` 0, `"fresh"` 0; main window: `dp_open` 2, `dp_wait` 1 |
+| v2 is in the trail, and v1 was kept as it was | yes | user log: "Versions: v1, v2 (merge: 2 clean, 1 in conflict)", "Versions list: v2 (current), v1", "docs/versions/v1: plan as it was, draft as it was" |
+| The repo's changes were merged into the draft, with a conflict and no markers | yes | user log: "Changed the plan in the repo: rewrote "A daily job finds subscriptions due in the next few days and" in Approach, which the draft changed too; rewrote Phases, which the draft never changed; removed Open points.", "Draft: Phases edit merged, Open points gone, your Approach kept, conflict markers: none" |
+| The project is Active again, and Finalize says v2 came in | yes | user log: "Status: active, import pending: none", "Finalize page: "The plan's v2 came in since the last final."" |
+| The importers ran again and kept their items by key | yes | user log: "Re-import: 15 imported items before. 12 kept their ids (8 flagged as changed in v2), 1 new, 3 removed from the plan, 0 gone."; runner, round 2: the seven importers in order, Flows and Phases last, `dp_write_items` 6, no "Nothing was saved" |
+| No answered item was removed while its section stayed | yes | user log: "Answered in round 1: 1 items, 0 removed from the plan while their section is still there" |
+| The removed section's items were parked, not deleted | yes | user log: three "Removed from the plan: …" lines (two questions, one concern), all parked, removedIn 2 |
+| Each conflict became a Plan changes thread, and Claude's merged version applied | yes | user log: "Plan changes: 1 thread", ""Approach": accepted Claude's "Use the merged version": Applied. 1 thread resolved."; runner, round 2: "Thread subagents started by the main window: 1", `dp_reply` 1 |
+
+Notes:
+- **Round 1 change:** the user script answered "System overview" with a request to change the Approach line to a new line. Claude offered "Update the Approach line", and the user log accepted it ("Applied. 1 thread resolved."), so the draft changed before Finalize. Round 1 parked two items and Finalize took 191 s.
+- **Update:** v2 rewrote the Approach line (changed in the draft too), rewrote Phases (merged cleanly) and removed Open points. The merge counted 2 clean and 1 in conflict, which became one Plan changes thread. Round 2 took 63 s to update and re-import. Phases went from 2 to 3 items. 8 kept items were flagged as changed, 1 is new, and 3 were parked (two questions, one concern). Nothing was deleted.
+- **Run 1 failed:** its "no conflict" check fired ("Round 1 didn't change any line of the plan in the draft…"), because Claude's round-1 reply to "Use your recommendation, and keep it simple." changed nothing, so the Plan changes path never ran. The script now asks for a specific edit in round 1 and fails with "Claude didn't make the edit round 1 asked for" if it doesn't land. Run 2 is the one recorded above.
+- **Counter quirk, fixed:** run 2 printed 2 for "offered the update", "brought it in" and `"update":true`, but the round-2 transcript has two `dp_open` calls (the first returned `plan-changed`, the second, with `update: true`, returned `updated`). Each result and each input sits on one transcript line that carries it twice (the content and its copy), and `grep -o | wc -l` counted both. The runner now counts those lines (`grep -c`) and reads `update`/`fresh` from the `dp_open` call's own input. On that transcript it prints 1, 1 and `"update":true` 1, which the figures in the table use.
+- **Anything else:** no fixes to the product were needed.

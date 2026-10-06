@@ -1,13 +1,19 @@
 // Plays the user for scripts/smoke-claude.sh. It waits for the import, checks the drawings the importers wrote,
 // answers one question the way the browser would, and waits for Claude's reply. Then it finalizes: it applies pending
 // small edits, accepts Claude's proposals, parks whatever still blocks Finalize, starts it, waits for the finalizer's
-// final, accepts it into the scratch repo and checks the copy. Exits non-zero if anything doesn't happen in time, if a
-// visual type has items without drawings, or if the final didn't land.
+// final, accepts it into the scratch repo and checks the copy. Then the plan changes in the repo: it rewrites a line
+// round 1 changed in the draft, and a section the draft never changed, removes a small one, and asks the runner for a
+// second /dev-plumbing. It checks the update to v2, the merge, the re-import and the Plan changes threads, and accepts
+// Claude's merged version on each. Exits non-zero if anything doesn't happen in time, if a visual type has items
+// without drawings, or if the final or the update didn't land.
 import fs from 'node:fs';
 import path from 'node:path';
 
 const dir = process.env.DEV_PLUMBING_HOME;
 const long = process.env.DP_SMOKE_LONG === '1';
+// The runner watches for this file, then stops the Claude window and runs /dev-plumbing again.
+const round2 = process.env.DP_SMOKE_ROUND2;
+if (!round2) throw new Error('DP_SMOKE_ROUND2 is not set. Run this through scripts/smoke-claude.sh.');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (msg) => console.log(`[user ${new Date().toISOString().slice(11, 19)}] ${msg}`);
 const service = () => JSON.parse(fs.readFileSync(path.join(dir, 'run', 'service.json'), 'utf8'));
@@ -110,8 +116,14 @@ if (problems.length) throw new Error(`The drawings aren't right:\n- ${problems.j
 const target = home.inbox.find((e) => e.status === 'your_turn');
 if (!target) throw new Error('No thread is waiting for an answer.');
 const detail = (await call(`${P}/threads/${target.threadId}`)).body;
-const choice = detail.open?.options.find((o) => !o.change);
-const draft = choice ? { optionId: choice.id, note: 'Go with this, and keep it simple.' } : { text: 'Use your recommendation, and keep it simple.' };
+// Round 1 has to change the draft, or round 2 has nothing to conflict with. So the answer is an explicit edit request for
+// one line of the plan, in Approach, which round 2 neither removes nor rewrites cleanly. Any thread will do: Claude can
+// edit any line of the plan.
+const OLD_LINE = "A daily job finds subscriptions due in the next few days and sends a reminder. We haven't decided whether reminders go by SMS, email or both, or how many days before the due date to send them.";
+const NEW_LINE = 'A daily job finds subscriptions due in the next three days and sends an email reminder.';
+const planLine = (await call(`${P}/docs/draft`)).body.text.includes(OLD_LINE);
+if (!planLine) throw new Error("The scratch plan's Approach line isn't in the draft, so round 1 can't ask to change it.");
+const draft = { text: `Please change the plan's line "${OLD_LINE}" to "${NEW_LINE}". Nothing else.` };
 if (long) {
   log('Waiting 35 minutes before answering, to check the long wait survives...');
   await sleep(35 * 60_000);
@@ -132,6 +144,24 @@ const reply = await until("Claude's reply", async () => {
   return d.thread.messages.length > before && last?.author === 'claude' && d.thread.status !== 'with_claude' ? last : null;
 }, 15);
 log(`Claude replied in ${Math.round((Date.now() - sentAt) / 1000)} s: ${reply.text.slice(0, 160)}`);
+// The edit has to land in the draft: Claude applied it as a small edit (the default), or offered an option with a
+// change, which you accept, or left a small edit waiting, which you apply.
+const draftHas = async () => (await call(`${P}/docs/draft`)).body.text.includes(NEW_LINE);
+if (!(await draftHas())) {
+  const d = (await call(`${P}/threads/${target.threadId}`)).body;
+  const pick = d.open?.options.find((o) => o.id === d.open.recommended && o.change) ?? d.open?.options.find((o) => o.change);
+  if (pick) {
+    await call(`${P}/threads/${target.threadId}/draft`, 'PUT', { optionId: pick.id });
+    const r = await call(`${P}/submit`, 'POST', { scope: 'thread', threadId: target.threadId });
+    log(`  Accepted "${pick.label}" on "${target.itemTitle}": ${r.ok ? r.body.message : r.body.error}`);
+  }
+  for (const e of (await call(`${P}/changes`)).body.entries.filter((x) => x.kind === 'small-edit' && x.state === 'pending')) {
+    const r = await call(`${P}/changes/${e.id}/apply`, 'POST', {});
+    log(`  Applied the small edit "${e.summary}": ${r.ok ? 'ok' : r.body.error}`);
+  }
+}
+if (!(await draftHas())) throw new Error("Claude didn't make the edit round 1 asked for: the draft doesn't have the new Approach line.");
+log('Round 1 changed the Approach line in the draft.');
 // Finalize, clearing what blocks it the way you could in the app, so the run doesn't wait on more answers:
 // 1. a small edit waiting to be applied is applied;
 // 2. a proposal waiting for your answer is accepted, so its item stays in the final (often the thread answered above,
@@ -233,4 +263,189 @@ if (!listed) missing.push("The app home doesn't list the project under Finalized
 log(`  Next: ${accepted.body.nextCommand}`);
 if (accepted.body.nextCommand !== `writing-plans ${finalRel}`) missing.push(`The next command is "${accepted.body.nextCommand}", not "writing-plans ${finalRel}".`);
 if (missing.length) throw new Error(`Finalize didn't land:\n- ${missing.join('\n- ')}`);
+
+// Bring changes in. The plan changes in the repo, the way plans do after an import:
+// 1. a line round 1 changed in the draft gets new text in the repo too, so both sides changed it: a conflict;
+// 2. one section the draft never changed gets new text, which should merge cleanly;
+// 3. one small section the draft never changed is removed, and its items should be parked.
+// The runner then stops this Claude window and runs /dev-plumbing again, as you would, saying yes to "Update to v2?".
+const NEW_TEXT = {
+  Approach:
+    "A daily job at 9:00 in the customer's time zone finds subscriptions due in the next few days and sends a reminder. We haven't decided whether reminders go by SMS, email or both, or how many days before the due date to send them.",
+  Data: '- A new `RestockReminder` table logs each reminder: the subscription, the channel, when it was sent, whether it was delivered, and whether the customer reordered.\n- `Subscription` gains `remindDaysBefore` (default 3) and `remindersPaused`.',
+  Screens: 'A Restock settings card on the account page (`apps/web/app/account/page.tsx`) turns reminders on or off, sets how many days before, and shows when the next reminder goes out.',
+  Flow: 'The customer gets a reminder, taps Reorder, sees the order summary and confirms. A customer who paused reminders, or reordered in the last day, gets nothing.',
+  Phases: 'Ship the table and the daily job first, then the settings card, then one-tap reorder behind a feature flag.',
+  'Open points': '- Should customers be able to snooze a reminder for a week?\n- What happens if the daily job runs twice on the same day?',
+};
+/** A plan's `## ` sections, each from its heading line to the next heading. The text before the first one has heading ''. */
+const sectionsOf = (text) => text.split(/^(?=## )/m).map((body) => ({ heading: /^## (.+)$/m.exec(body)?.[1] ?? '', body }));
+/** A section with new text under its heading, keeping the blank line before the next heading. */
+const rewritten = (s) => `## ${s.heading}\n\n${NEW_TEXT[s.heading]}\n${s.body.endsWith('\n\n') ? '\n' : ''}`;
+/** Every item the app lists, with its type: id, title, thread, status, how it was made, flagged and removedIn. */
+async function itemRows() {
+  const h = (await call(P)).body;
+  const rows = [];
+  for (const t of h.types) {
+    const r = await call(`${P}/types/${t.id}`);
+    if (r.ok) rows.push(...r.body.items.map((i) => ({ ...i, type: t.id })));
+  }
+  return rows;
+}
+
+const planFile = path.join(clone, home.project.source.path);
+const v1Plan = fs.readFileSync(planFile, 'utf8');
+const v1Draft = (await call(`${P}/docs/draft`)).body.text;
+// Each section with where it starts and ends in the plan.
+let end = 0;
+const planSections = sectionsOf(v1Plan).map((s) => ({ ...s, start: end, end: (end += s.body.length) }));
+// The lines of the plan round 1 changed in the draft: the removed parts of the Changes view's diff (plan → draft),
+// each with where it starts in the plan. The first one under a ## heading is the one the repo rewrites too.
+let at = 0;
+const changedLines = [];
+for (const s of (await call(`${P}/changes`)).body.segments) {
+  if (s.kind === 'added') continue;
+  if (s.kind === 'removed' && s.text.trim()) changedLines.push({ at, text: s.text });
+  at += s.text.length;
+}
+const conflict = changedLines
+  .map((c) => ({ ...c, section: planSections.find((s) => c.at >= s.start && c.at < s.end) }))
+  .find((c) => c.section?.heading);
+const conflictSection = conflict?.section.heading ?? null;
+/** The lines as the repo's v2 has them: each one says something new. */
+const theirs = (text) => text.replace(/^(.*\S.*)$/gm, (line) => `${line.replace(/[.:]?\s*$/, '')}, as the repo's v2 now has it.`);
+// A section the draft changed no longer appears in it word for word.
+const touched = planSections.filter((s) => !v1Draft.includes(s.body)).map((s) => s.heading);
+const untouched = (h) => planSections.some((s) => s.heading === h) && !touched.includes(h);
+const removedSection = ['Open points', 'Flow', 'Screens'].find(untouched) ?? null;
+const cleanSection = ['Phases', 'Screens', 'Flow', 'Data', 'Approach'].find((h) => untouched(h) && h !== removedSection) ?? null;
+const v2Plan = planSections
+  .map((s) => {
+    if (s.heading === removedSection) return '';
+    if (s.heading === cleanSection) return rewritten(s);
+    if (!conflict || s !== conflict.section) return s.body;
+    // Only the part of the changed lines inside this section.
+    const from = conflict.at - s.start;
+    const lines = conflict.text.slice(0, s.end - conflict.at);
+    return s.body.slice(0, from) + theirs(lines) + s.body.slice(from + lines.length);
+  })
+  .join('');
+const rowsV1 = await itemRows();
+fs.writeFileSync(planFile, v2Plan);
+const edits = [
+  conflictSection ? `rewrote "${conflict.text.trim().split('\n')[0].slice(0, 60)}" in ${conflictSection}, which the draft changed too` : 'found no line round 1 changed in the draft',
+  cleanSection ? `rewrote ${cleanSection}, which the draft never changed` : 'found no section the draft never changed',
+  removedSection ? `removed ${removedSection}` : 'found no small section to remove',
+];
+log(`Changed the plan in the repo: ${edits.join('; ')}.`);
+fs.writeFileSync(round2, new Date().toISOString());
+log('Asked the runner to stop this Claude window and run /dev-plumbing again.');
+
+const updateAt = Date.now();
+await until('the update to v2 and its re-import', async () => {
+  const r = await call(P);
+  return r.ok && r.body.project.versions.length >= 2 && r.body.project.status !== 'importing';
+}, 25);
+log(`Updated to v2 and re-imported in ${Math.round((Date.now() - updateAt) / 1000)} s.`);
+await until('the Plan changes threads to come back from Claude', async () => {
+  const r = await call(P);
+  return r.ok && r.body.summary.counts.withClaude === 0;
+}, 15);
+
+const wrong = [];
+const v2Home = (await call(P)).body;
+const project = v2Home.project;
+const v2 = project.versions.find((v) => v.n === 2);
+log(`Versions: ${project.versions.map((v) => `v${v.n}${v.merge ? ` (merge: ${v.merge.clean} clean, ${v.merge.conflicts} in conflict)` : ''}`).join(', ')}`);
+log(`  Status: ${project.status}, import pending: ${project.importPending.join(', ') || 'none'}`);
+for (const t of v2Home.types) log(`  ${t.title}: ${t.importFailed ? "didn't finish" : t.noChanges ? 'no changes' : `${t.itemCount} items`}`);
+if (!v2) wrong.push('project.versions has no v2.');
+// The update changed the draft, so the finalized project is active again, and the Finalize page says v2 came in.
+if (project.status !== 'active') wrong.push(`The project is ${project.status} after the re-import. The update changed the draft, so it should be active.`);
+const sinceFinal = (await call(`${P}/finalize`)).body.planVersionSinceFinal;
+log(`  Finalize page: ${sinceFinal === null ? 'no newer version noted' : `"The plan's v${sinceFinal} came in since the last final."`}`);
+if (sinceFinal !== 2) wrong.push(`The Finalize page doesn't say the plan's v2 came in since the last final (planVersionSinceFinal is ${sinceFinal}).`);
+// The update has to have had a conflict to settle, or the most model-dependent part never ran.
+if (!conflictSection) wrong.push("Round 1 didn't change any line of the plan in the draft, so v2 had nothing to conflict with.");
+else if (v2 && !v2.merge?.conflicts) wrong.push(`v2 rewrote a line in ${conflictSection} that the draft changed too, but the merge found no conflict.`);
+if (project.reimporting) wrong.push('project.reimporting is still set.');
+if (project.importPending.length) wrong.push(`Still waiting for importers: ${project.importPending.join(', ')}.`);
+const versionList = (await call(`${P}/versions`)).body.versions;
+log(`  Versions list: ${versionList.map((v) => `v${v.n}${v.current ? ' (current)' : ''}`).join(', ')}`);
+if (versionList[0]?.n !== 2 || !versionList[0].current) wrong.push("The Versions list doesn't start with v2 as the current version.");
+const compared = (await call(`${P}/versions/compare?${new URLSearchParams({ from: '1', to: '2', which: 'original' })}`)).body.segments ?? [];
+log(`  v1 to v2: ${compared.filter((s) => s.kind === 'added').length} added and ${compared.filter((s) => s.kind === 'removed').length} removed passages`);
+
+// v1 is kept as it was, and the repo's text is the new original.
+const settings = JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8'));
+const v1Dir = path.join(settings.projectsFolder, 'acme-app', project.id, 'docs', 'versions', 'v1');
+const readOrNull = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null);
+const same = (saved, was) => (saved === null ? 'missing' : saved === was ? 'as it was' : 'different');
+const savedPlan = readOrNull(path.join(v1Dir, 'original.md'));
+const savedDraft = readOrNull(path.join(v1Dir, 'draft.md'));
+log(`  docs/versions/v1: plan ${same(savedPlan, v1Plan)}, draft ${same(savedDraft, v1Draft)}`);
+if (savedPlan !== v1Plan || savedDraft !== v1Draft) wrong.push("docs/versions/v1 doesn't hold the plan and the draft from before the update.");
+if ((await call(`${P}/docs/original`)).body.text !== v2Plan) wrong.push("original.md isn't the repo's new plan.");
+
+// The merge: the clean edit and the removal are in the draft, your text stays where both changed, and no markers.
+const v2Draft = (await call(`${P}/docs/draft`)).body.text;
+const yours = conflictSection ? sectionsOf(v1Draft).find((s) => s.heading === conflictSection)?.body : undefined;
+const markers = /^(<{7,}|\|{7,}|>{7,})( |$)|^={7,}$/m.test(v2Draft);
+log(
+  `  Draft: ${cleanSection ? `${cleanSection} edit ${v2Draft.includes(NEW_TEXT[cleanSection]) ? 'merged' : 'missing'}` : 'no clean edit'}, ${removedSection ? `${removedSection} ${v2Draft.includes(`## ${removedSection}\n`) ? 'still there' : 'gone'}` : 'nothing removed'}, ${yours ? `your ${conflictSection} ${v2Draft.includes(yours) ? 'kept' : 'not kept word for word'}` : 'no conflict section'}, conflict markers: ${markers ? 'yes' : 'none'}`,
+);
+if (cleanSection && !v2Draft.includes(NEW_TEXT[cleanSection])) wrong.push(`The draft doesn't have the repo's new ${cleanSection} text.`);
+if (removedSection && v2Draft.includes(`## ${removedSection}\n`)) wrong.push(`The draft still has the ${removedSection} section the repo removed.`);
+if (markers) wrong.push('The draft has conflict markers.');
+
+// The re-import: imported items keep their ids, changed ones are flagged, removed ones are parked (or flagged when
+// Claude had them), and nothing is deleted.
+const rowsV2 = await itemRows();
+const v2ById = new Map(rowsV2.map((r) => [r.id, r]));
+const imported = rowsV1.filter((r) => r.createdBy === 'import');
+const kept = imported.filter((r) => v2ById.has(r.id) && v2ById.get(r.id).removedIn === null);
+const lost = imported.filter((r) => !v2ById.has(r.id));
+const removedItems = rowsV2.filter((r) => r.removedIn !== null);
+const newItems = rowsV2.filter((r) => r.type !== 'plan-changes' && !rowsV1.some((x) => x.id === r.id));
+let changedCount = 0;
+for (const r of kept.filter((x) => v2ById.get(x.id).flagged)) {
+  const d = (await call(`${P}/threads/${r.threadId}`)).body;
+  if (d.item.flags?.some((f) => f.reason === "Changed in the plan's v2.")) changedCount++;
+}
+log(`Re-import: ${imported.length} imported items before. ${kept.length} kept their ids (${changedCount} flagged as changed in v2), ${newItems.length} new, ${removedItems.length} removed from the plan, ${lost.length} gone.`);
+for (const r of removedItems) log(`  Removed from the plan: "${r.title}" (${r.type}), ${r.status}${r.flagged ? ', flagged' : ''}, removedIn ${r.removedIn}`);
+if (removedSection && !removedItems.length) log(`  No item came only from ${removedSection}, so nothing was parked.`);
+if (imported.length && !kept.length) wrong.push('No imported item kept its id: the importers made everything again.');
+if (lost.length) wrong.push(`Items deleted by the re-import: ${lost.map((r) => r.title).join(', ')}.`);
+const loose = removedItems.filter((r) => r.status !== 'parked' && !r.flagged);
+if (loose.length) wrong.push(`Removed from the plan, but neither parked nor flagged: ${loose.map((r) => r.title).join(', ')}.`);
+// An item answered in round 1 is never taken out while its section is still in the plan.
+const v2Headings = new Set(sectionsOf(v2Plan).map((s) => s.heading).filter(Boolean));
+const answered = rowsV1.filter((r) => r.createdBy === 'import' && r.status === 'resolved');
+const takenOut = [];
+for (const r of answered.filter((x) => v2ById.get(x.id)?.removedIn != null)) {
+  const heading = (await call(`${P}/threads/${r.threadId}`)).body.item.mdAnchor?.heading;
+  if (heading && v2Headings.has(heading)) takenOut.push(`"${r.title}" (§ ${heading})`);
+}
+log(`  Answered in round 1: ${answered.length} items, ${takenOut.length} removed from the plan while their section is still there`);
+if (takenOut.length) wrong.push(`Answered items removed from the plan although their section is still in v2: ${takenOut.join(', ')}.`);
+
+// Plan changes: one thread per conflict. Claude proposed a merged version on each, and you accept it.
+const conflicts = rowsV2.filter((r) => r.type === 'plan-changes');
+log(`Plan changes: ${conflicts.length} thread${conflicts.length === 1 ? '' : 's'}`);
+if (v2?.merge && conflicts.length !== v2.merge.conflicts) wrong.push(`v2 counted ${v2.merge.conflicts} conflicts, but there are ${conflicts.length} Plan changes threads.`);
+for (const r of conflicts) {
+  const d = (await call(`${P}/threads/${r.threadId}`)).body;
+  const pick = d.open?.options.find((o) => o.id === d.open.recommended && o.change) ?? d.open?.options.find((o) => o.change);
+  if (!pick) {
+    log(`  "${r.title}": no merged version from Claude (${d.thread.status})`);
+    wrong.push(`Claude didn't propose a merged version on "${r.title}".`);
+    continue;
+  }
+  await call(`${P}/threads/${r.threadId}/draft`, 'PUT', { optionId: pick.id });
+  const accepted2 = await call(`${P}/submit`, 'POST', { scope: 'thread', threadId: r.threadId });
+  log(`  "${r.title}": accepted Claude's "${pick.label}": ${accepted2.ok ? accepted2.body.message : accepted2.body.error}`);
+  if (!accepted2.ok || accepted2.body.resolved !== 1) wrong.push(`Claude's merged version on "${r.title}" wasn't applied.`);
+}
+if (wrong.length) throw new Error(`The update didn't land:\n- ${wrong.join('\n- ')}`);
 log('Smoke test passed.');

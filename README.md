@@ -2,7 +2,7 @@
 
 Plumb a feature plan before you build it. dev-plumbing turns a plan (for example a Superpowers spec) into a local web app where every question, concern, diagram and schema change has its own thread with Claude.
 
-**Status:** the Claude loop, the visual screens and Finalize spec work. Bring changes in and Whiteboard Defense come next. The design is in [SPEC.md](SPEC.md), and the plans are in [docs/superpowers/plans](docs/superpowers/plans).
+**Status:** the Claude loop, the visual screens, Finalize spec and bringing in a changed plan work. Whiteboard Defense comes next. The design is in [SPEC.md](SPEC.md), and the plans are in [docs/superpowers/plans](docs/superpowers/plans).
 
 ## Requirements
 
@@ -38,6 +38,12 @@ Setup installs the Claude Code plugin for your user (skip it with `--no-plugin`)
 - **Import:** one subagent per plumbing type reads the plan, and the app opens on the plumbing project.
 - **Answer:** in the app, answer threads, then press **Send this thread** or **Submit all**. Claude answers each thread with a subagent and listens for more.
 - **Finalize:** once nothing blocks it, **Finalize spec** asks Claude to write the final spec from the draft and your decisions. Preview it, and see what changed since the last final, then **Accept**. The final is saved in the plumbing project and copied into the repo as `<name>.final.md`, next to the plan, with its mockups in `<name>.assets/`. The app then suggests the next command, such as `writing-plans docs/specs/my-feature.final.md`.
+- **The plan changed in the repo?** Run `/dev-plumbing docs/specs/my-feature.md` again. Claude says what changed and asks **Update to v2?** On yes:
+  - the version you had is kept, under **Documents → Versions**;
+  - the repo's changes are merged into your draft;
+  - the importers run again, keeping your items, threads and answers.
+
+  Where you and the repo both changed the same passage, your draft keeps your text, and a **Plan changes** thread offers Claude's merged version, the repo's version and your own, each one click to accept. When the repo's version is mostly a rewrite, Claude also offers **Start the draft from v2**. **Not now** opens the project as it was, and Claude asks again next time.
 - **Keep chatting:** after two minutes the listening call moves to the background, so you can keep using the Claude window.
 - **No arguments:** `/dev-plumbing` lists this repo's plumbing projects to reopen.
 - **Keep this checkout:** the plugin and the app both run from its build here. After you pull, run `pnpm build`, restart the app (`dev-plumbing stop`, then `dev-plumbing start`), and start a new Claude Code session.
@@ -53,6 +59,7 @@ Each plumbing type has its own screen in the app:
 - **UI changes:** each screen as a mockup built with your app's own design kit, on Desktop or Mobile, Before or After. **+ Pin** starts a thread on any part of it.
 - **Flows:** user flows as storyboards and system flows as sequence diagrams, or both, with matching step numbers.
 - **Phases & milestones:** a timeline of phases, each with its goal, its "done when" and its items.
+- **Plan changes:** after you bring in a new version of the plan, each passage that you and the repo both changed, with Claude's merged version, the repo's and yours to pick from. It's only there once an update finds one.
 
 Every thread also draws its item, and shows what a proposed change does to the drawing before you accept it.
 

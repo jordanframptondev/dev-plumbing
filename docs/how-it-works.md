@@ -44,8 +44,8 @@ An **agent** (a "subagent" when it runs) is a separate Claude with its own instr
 | Agent | When it runs | What it may use |
 |---|---|---|
 | `repo-setup` | The first time you use dev-plumbing in a repo, and again after **Detect again** in Settings → Repos. It looks around the repo (plan folders, schema file, apps) and saves a **repo profile**. | Read-only file tools, `dp_repo_profile` |
-| `importer` | Once per plumbing type, when a plan is imported. It reads the plan (and code, if the type's rules say so) and writes that type's items: questions, concerns, database changes and so on. | Read-only file tools, `dp_context`, `dp_write_items` |
-| `thread` | Once per thread (or group of linked threads) you send. It reads the thread and the code, then posts its reply. | Read-only file tools, `dp_context`, `dp_reply` |
+| `importer` | Once per plumbing type, when a plan is imported, and again when you bring in a new version of the plan. It reads the plan (and code, if the type's rules say so) and writes that type's items: questions, concerns, database changes and so on. | Read-only file tools, `dp_context`, `dp_write_items` |
+| `thread` | Once per thread (or group of linked threads) you send, and once per Plan changes thread after an update. It reads the thread and the code, then posts its reply. | Read-only file tools, `dp_context`, `dp_reply` |
 | `finalizer` | When you press **Start finalize**. It writes the final spec from the draft, the items and the decisions, following `outputs/finalize.md`. | Read-only file tools, `dp_context`, `dp_finalize` |
 
 None of the agents can edit files or run commands. The only way they can write anything is through the dp tools, and the service checks everything they send.
@@ -62,10 +62,10 @@ Which Claude model each agent uses is set in `~/.dev-plumbing/agents.json`. It a
 
 | Tool | Used by | What it does |
 |---|---|---|
-| `dp_open` | Main window | Opens a plumbing project: imports a new plan, reopens an existing one, or lists this repo's projects. It also reports when the repo needs a profile first. |
-| `dp_wait` | Main window | Listens until you press **Send this thread**, **Submit all** or **Start finalize**, or ask to **Detect again**. Then it returns the work (threads to answer, a final to write, or a repo profile to detect) and which model to use. |
+| `dp_open` | Main window | Opens a plumbing project: imports a new plan, reopens an existing one, or lists this repo's projects. It also reports when the repo needs a profile first. When the plan in this clone has changed since the project's current version, it says so (`plan-changed`) and changes nothing. Called again with `update: true`, it brings the new version in (`updated`), merging it into your draft, or, with `fresh: true` as well, starting the draft again from it; with `update: false`, it opens the project as it was. |
+| `dp_wait` | Main window | Listens until you press **Send this thread**, **Submit all** or **Start finalize**, or ask to **Detect again**. Then it returns the work (threads to answer, a final to write, or a repo profile to detect) and which model to use. After an update, it first hands out the Plan changes threads waiting for Claude. |
 | `dp_repo_profile` | repo-setup | Reads or saves the repo profile. |
-| `dp_context` | importer, thread, finalizer | Gets the "context pack" for one job: the plan text, the plumbing type's rules, the thread so far, past decisions and related items. The finalizer's pack has the draft, every item, the decisions with why, the defaults and the drawing tokens it may use. |
+| `dp_context` | importer, thread, finalizer | Gets the "context pack" for one job: the plan text, the plumbing type's rules, the thread so far, past decisions and related items. The finalizer's pack has the draft, every item, the decisions with why, the defaults and the drawing tokens it may use. When the plan is re-imported, an importer's pack also has what changed between the two versions, and its type's items with their keys and drawings. |
 | `dp_write_items` | importer | Saves everything one plumbing type found, all at once. If anything is wrong, nothing is saved and the error lists every problem. |
 | `dp_reply` | thread | Posts a reply to a thread: text, options for you to choose from, small edits to the draft, new items, or a resolution. It is also checked as a whole. |
 | `dp_finalize` | finalizer | Sends the final spec. The service replaces each drawing token with a block made from that item's data. If any token is wrong, the whole document is refused, with every problem listed. |
@@ -109,7 +109,7 @@ Two things to know:
 ```
 
 1. **Open.** You run `/dev-plumbing path/to/plan.md`. The main window calls `dp_open`.
-   - The service copies the plan into the project as `original.md`, which is never changed, and `draft.md`, which is where accepted changes go.
+   - The service copies the plan into the project as `original.md`, the plan as the repo has it, and `draft.md`, which is where accepted changes go.
    - The plan in your repo is never edited.
 2. **Repo profile, first time only.** If dev-plumbing hasn't seen this repo before, a `repo-setup` agent detects a profile: plan folders, schema file, conventions and apps. You can change it in **Settings → Repos**. That is also where you choose a separate projects folder for this repo; the agent isn't allowed to.
 3. **Import.** One `importer` agent runs per enabled plumbing type: Questions, Concerns, Database, Phases and so on. Several run at once.
@@ -205,6 +205,43 @@ When the threads that matter are answered, **Finalize spec** (in the project's h
    If anything the final is built from changed after the finalizer picked the request up (the draft, an item's drawing data such as a redrawn diagram, an item you park or unpark, or a decision, including one made while Claude is writing), Accept is refused: "The draft changed since Claude wrote this. Finalize again." You never accept a final that misses a later decision.
 7. **Next.** The page shows the next command to run, such as `writing-plans docs/specs/restock-reminders.final.md`, with a copy button. Later answers don't undo Finalized. **Finalize again** writes a new final, and replaces both copies once you accept it.
 
+## When the plan changes in the repo
+
+Plans change after they're imported: someone edits the spec, or you pull a newer one. dev-plumbing never notices by itself. You bring the changes in when you're ready.
+
+1. **Run `/dev-plumbing` again,** with the plan's path or by picking the project. The service compares the plan in this clone with the project's current version. If they differ, nothing is written yet, and Claude asks, for example: "The plan changed in the repo since v1 (12 lines added, 3 removed). Update to v2?"
+   - When this clone is on another branch than that version came from, the question names the branch. When this clone has a version the project already had, for example because it hasn't pulled yet, Claude says there's nothing to bring in.
+   - When merging would leave much of your draft to settle, because the repo's version is mostly a rewrite, or when only the formatting changed, Claude says so and offers a third answer, **Start the draft from v2**: the draft becomes the repo's new version, and the one you had stays under **Versions**.
+   - **Not now** opens the project as it was. Claude asks again the next time.
+   - The update waits while Claude has threads to answer in the project, or while an import or a finalize is under way. Then the project opens as usual, so Claude can finish that work first, and Claude tells you to run `/dev-plumbing` again afterwards.
+2. **Update to v2** brings the new version in, in one step:
+   - **The version you had is kept.** `original.md`, `draft.md` and the items are copied to `docs/versions/v1/` before anything else is written.
+   - **The new plan is merged into your draft.** It's a three-way merge with `git merge-file`, of the old plan, your draft and the repo's new plan. What only the repo changed goes into your draft. Where you and the repo both changed the same passage, your draft keeps your text, so you never see conflict markers, and that passage becomes a **Plan changes** item. The draft as the merge left it is kept too, for the version's page.
+   - **`original.md` becomes the repo's new plan,** and the project's title follows its first heading.
+
+   If any part of this fails, what it wrote is put back. If even that stops part-way, the next `/dev-plumbing` finishes putting it back before anything else. If your draft was changed in the meantime, it's kept, and the copy from before the update is set aside under `docs/versions/v<n>.unfinished-<stamp>/`.
+3. **Plan changes.** Each passage you both changed is one item, under **Plan changes**, first in the project's navigation. It's only there once an update finds such a passage.
+   - The item shows **Your draft**, **The repo (v2)** and **Before (v1)**. When the repo moved the passage elsewhere, it says where, since your draft then has both copies.
+   - Its thread goes straight to Claude. When a Claude window listens, a `thread` subagent offers three choices, each ready to accept in one click: a merged version (recommended), **Take the repo's version** and **Keep my draft**. Accept one, or answer, as in any thread.
+   - Until it's settled, it blocks Finalize: "Your draft and the repo's new version disagree here." It never appears in the final itself: what you decide is already in the draft.
+   - If a later version changes the same passage again before you settle it, the older thread is parked, and the new one links to it.
+4. **The importers run again,** for every enabled plumbing type, as at import time. Each one gets what changed between the two versions, plus its type's items with their keys and drawings. It sends what's new or changed, and lists the items whose part of the plan the new version took out:
+   - **an item it doesn't mention** is left alone, answered ones included;
+   - **an item that changed** keeps its id, its thread, your answers and your decisions. It's updated and marked "May need another look", with "Changed in the plan's v2.", and its thread says "Updated from the plan's v2.". A drawing is edited from where your threads left it, not redrawn;
+   - **something new** becomes a new item;
+   - **an item whose part of the plan was removed** is parked, never deleted, with "Removed from the plan in v2.". If Claude is working on its thread right then, it's marked "May need another look" instead, and parked once Claude's reply lands. The list shows "removed from the plan in v2" on it, and Finalize lists a parked one under "Parked: left out of the final". If a later version brings that part back, or you unpark it, it's back in the plan, and resolved again if its answer still stands;
+   - **items you or Claude added** are never touched.
+
+   A second listening window can't end a re-import early.
+
+   When they're done, the project is **Active** again. A **Finalized** project stays Finalized only when the update left its draft as it was; otherwise the Finalize page says "The plan's v2 came in since the last final."
+5. **Versions.** Once there's a v2, **Documents** shows **Original (v2)**, **Draft (v2)** and **Versions**.
+   - **Versions** lists every version, the current one first, with its date, its branch and commit, and what its merge did.
+   - Open one to read that version's plan and draft, and, for a version an update brought in, what that update changed in your draft.
+   - **Compare with** shows what changed in the plan between it and another version.
+
+## Where everything is stored
+
 ## Where everything is stored
 
 ```
@@ -217,9 +254,11 @@ When the threads that matter are answered, **Finalize spec** (in the project's h
   run/                           service.json (port and token), service.log, install info, detect.json (Detect again)
 
 <projects folder>/<repo>/<project>/
-  project.json                   the project's title, source plan and status
-  docs/original.md               the plan as imported, never changed
+  project.json                   the project's title, source plan, status and versions
+  docs/original.md               the plan as the repo had it, at the current version
   docs/draft.md                  the plan with accepted changes
+  docs/versions/v<n>/            each earlier version's original.md, draft.md and items, and merged.md:
+                                 the draft as the update to v<n> left it
   docs/final.proposed.md         Claude's final, waiting for your preview
   docs/final.md                  the final spec, saved when you accept it
   items/                         one file per item (question, concern, table, …)
@@ -242,6 +281,7 @@ Every write is atomic: the file is written in full or not at all. So a crash nev
 - **Read-only agents.** Agents get only read-only file tools plus their dp tools, so they can't edit your repo or run commands.
 - **You decide where files go.** A repo profile written by an agent can't choose where dev-plumbing writes files. Only you can set that.
 - **One write into your repo.** Accept copies the final into the clone you pick, as `<name>.final.md` and `<name>.assets/`, next to the plan. The clone must have this repo's remote, nothing is written through a symlink, and the plan itself is never touched.
+- **Updates only read your plan.** Bringing a new version in reads the plan in your clone, and writes only inside the plumbing project.
 - **Everything is checked.** The service checks every batch of items and every reply as a whole. If any part is wrong, nothing is saved.
 
 ## Common questions
@@ -253,6 +293,8 @@ Every write is atomic: the file is written in full or not at all. So a crash nev
 **What if I close the Claude window?** Nothing is lost. Your answers stay in the app. Anything you send is queued until a window listens again: run `/dev-plumbing` and reopen the project.
 
 **Can two Claude windows listen at once?** Yes. Each submission goes to one window. If a window disappears mid-answer, its unanswered threads come back to you.
+
+**I edited the plan in the repo. Does dev-plumbing pick it up?** Not by itself. Run `/dev-plumbing` with the plan again, and answer **Update to v2**. The version you had stays under **Versions**.
 
 **How do I see what the service is doing?** Run `dev-plumbing status`, or read `~/.dev-plumbing/run/service.log`.
 
@@ -269,6 +311,8 @@ Every write is atomic: the file is written in full or not at all. So a crash nev
 | Draft (answer) | Your saved but not yet sent answer to a thread. |
 | Draft (document) | `draft.md`: the plan with accepted changes applied. |
 | Final | `final.md`: the finished spec Finalize writes, also copied into your repo as `<name>.final.md`. |
+| Version | One state of the plan: v1 is the import, and each update adds the next. Earlier ones are kept under **Versions**. |
+| Plan changes | The passages that both you and the repo changed, one thread each, after an update. |
 | Submission | One Send or Submit all: the answers you sent, saved before Claude sees them. |
 | Repo profile | dev-plumbing's notes about one repo, such as where its plans and schema live. |
 | Skill | A set of instructions Claude follows when you run its command. |
