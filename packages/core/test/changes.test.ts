@@ -3,7 +3,7 @@ import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { applyPendingChange, recordChange, undoChange } from '../src/store/changes';
 import { activeDecisions, addDecision } from '../src/store/decisions';
-import { ConflictError, readDecisions, readHistory, readItem, writeItem } from '../src/store/io';
+import { ConflictError, readDecisions, readHistory, readItem, writeHistoryEntry, writeItem } from '../src/store/io';
 import { setReviewed } from '../src/store/reviewed';
 import { removeTempDirs } from '../../../testkit/tmp';
 import { DRAFT, pair, seedProject } from './fixtures';
@@ -120,6 +120,14 @@ describe('undo', () => {
     const q2 = await readItem(dir, 'q2');
     expect(q2.title).toBe('Question q2');
     expect('reviewedAt' in q2).toBe(false);
+  });
+
+  it('refuses, writing nothing, when the item kept in the history is damaged', async () => {
+    const dir = await seedProject({ pairs: [pair('q1')] });
+    const edit = await recordChange(dir, { threadId: 't-q1', kind: 'small-edit', summary: 's', change: { items: [{ itemId: 'q1', patch: { title: 'New' } }] }, apply: true });
+    await writeHistoryEntry(dir, { ...edit, itemsAfter: { q1: { id: 'q1', title: 'New' } } });
+    await expect(undoChange(dir, edit.id)).rejects.toThrow(ConflictError);
+    expect((await readItem(dir, 'q1')).title).toBe('New');
   });
 });
 

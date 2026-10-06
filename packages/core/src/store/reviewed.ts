@@ -36,12 +36,7 @@ export async function markReviewed(dir: string, itemIds: string[], now: Date = n
   const ids = [...new Set(itemIds)];
   const unknown = ids.filter((id) => !byId.has(id));
   if (unknown.length) throw new InputError(`There's no item ${unknown.map((id) => `"${id}"`).join(' or ')}. Nothing was marked.`);
-  let marked = 0;
-  for (const id of ids) {
-    const item = await readItem(dir, id);
-    if (item.reviewedAt) continue;
-    await writeItem(dir, { ...item, reviewedAt: now.toISOString() });
-    marked++;
-  }
-  return { marked };
+  const unmarked = ids.map((id) => byId.get(id)!).filter((item) => !item.reviewedAt);
+  for (const item of unmarked) await writeItem(dir, { ...item, reviewedAt: now.toISOString() });
+  return { marked: unmarked.length };
 }

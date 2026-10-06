@@ -143,7 +143,7 @@ export async function undoChange(dir: string, changeId: string, now: Date = new 
   const currentItems = new Map<string, Item>();
   for (const [id, after] of Object.entries(entry.itemsAfter)) {
     const current = await readItem(dir, id);
-    if (stable(withoutReviewed(current)) !== stable(withoutReviewed(itemSchema.parse(after)))) {
+    if (stable(withoutReviewed(current)) !== stable(withoutReviewed(after as Item))) {
       throw new ConflictError(`"${current.title}" has changed since, so this can't be undone.`);
     }
     currentItems.set(id, current);
