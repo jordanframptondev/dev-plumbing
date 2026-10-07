@@ -261,7 +261,12 @@ describe('the dp tools', () => {
   });
 
   it('returns whiteboard work, and passes back the request it finished', async () => {
-    const results: unknown[] = [{ kind: 'timeout' }, { kind: 'whiteboard', request: 'g-1', model: 'opus' }, { kind: 'submission', submission: 's-1' }];
+    const results: unknown[] = [
+      { kind: 'timeout' },
+      { kind: 'whiteboard', request: 'g-1', model: 'opus' },
+      { kind: 'submission', submission: 's-1' },
+      { kind: 'submission', submission: 's-2' },
+    ];
     const { client, calls } = fakeService({ '/wait': () => results.shift() });
     const mcp = await connect(createDpServer({ client, cwd: '/repo', windowId: 'w-1', retryMs: 1 }));
     const wait = async (finished?: Record<string, string>) =>
@@ -270,6 +275,11 @@ describe('the dp tools', () => {
     const failed = { whiteboard: 'g-1', whiteboardError: 'Failed: the request was cancelled or replaced.' };
     expect(await wait(failed)).toMatchObject({ kind: 'submission' });
     expect(calls.map((c) => c.body.finished ?? null)).toEqual([null, null, failed]);
+    // A long Failed: line goes through as it is, so it never fails the call: the service cuts it to 500 characters.
+    const long = { whiteboard: 'g-1', whiteboardError: `Failed: ${'the pack was too big to read. '.repeat(100)}` };
+    expect(long.whiteboardError.length).toBeGreaterThan(2000);
+    expect(await wait(long)).toMatchObject({ kind: 'submission', submission: 's-2' });
+    expect(calls.at(-1)?.body.finished).toEqual(long);
     const tool = (await mcp.listTools()).tools.find((t) => t.name === 'dp_wait')!;
     for (const s of ['Generate', 'kind whiteboard', '{ whiteboard: <request id> }', 'finished.whiteboard', 'whiteboardError']) expect(tool.description).toContain(s);
   });

@@ -151,7 +151,7 @@ export function createDpServer(o: { client: ServiceClient; cwd: string; windowId
             finalize: z.string().min(1).optional().describe('The finalize request you just handled'),
             detect: z.string().min(1).optional().describe('The repo whose profile you just detected again'),
             whiteboard: z.string().min(1).optional().describe('The Whiteboard Defense request you just handled'),
-            whiteboardError: z.string().max(2000).optional().describe("The whiteboard subagent's line, when it starts with Failed:"),
+            whiteboardError: z.string().optional().describe("The whiteboard subagent's line, when it starts with Failed:"),
           })
           .optional(),
       },
