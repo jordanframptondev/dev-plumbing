@@ -4,6 +4,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { describe, expect, it, vi } from 'vitest';
 import { ServiceError, type ServiceClient } from '../src/client';
 import { createDpServer, TOOL_NAMES } from '../src/tools';
+import { validDefenseInput } from '../../core/test/fixtures';
 
 type Handler = (body: Record<string, unknown>) => unknown;
 
@@ -30,10 +31,10 @@ async function connect(server: McpServer): Promise<Client> {
 const textOf = (r: unknown) => ((r as { content: { text: string }[] }).content[0]?.text ?? '');
 
 describe('the dp tools', () => {
-  it('offers exactly the seven dp tools', async () => {
+  it('offers exactly the eight dp tools', async () => {
     const { client } = fakeService({});
     const mcp = await connect(createDpServer({ client, cwd: '/repo', windowId: 'w-1' }));
-    const names = ['dp_context', 'dp_finalize', 'dp_open', 'dp_reply', 'dp_repo_profile', 'dp_wait', 'dp_write_items'];
+    const names = ['dp_context', 'dp_finalize', 'dp_open', 'dp_reply', 'dp_repo_profile', 'dp_wait', 'dp_whiteboard', 'dp_write_items'];
     expect([...TOOL_NAMES].sort()).toEqual(names);
     expect((await mcp.listTools()).tools.map((t) => t.name).sort()).toEqual(names);
   });
@@ -222,4 +223,54 @@ describe('the dp tools', () => {
     expect(tool.description).toContain('removed lists the keys of existing items');
   });
 
+  it("serves the whiteboard subagent's pack, sends its defense, and a bad basis is refused by the service with every problem listed", async () => {
+    const PROBLEMS = [
+      'Nothing was saved. Fix these and call dp_whiteboard again with the whole defense:',
+      "- sections.0.claims.0.basis: Invalid enum value. Expected 'known' | 'inferred' | 'unknown' | 'verify', received 'maybe'",
+      '- sections: walkthrough is missing.',
+    ].join('\n');
+    const { client, calls } = fakeService({
+      '/context': () => ({ rulesFile: '/config/outputs/whiteboard-defense.md' }),
+      '/whiteboard': (body) => {
+        if (JSON.stringify(body.defense).includes('"maybe"')) throw new ServiceError(400, PROBLEMS);
+        return { ok: true, request: 'g-1' };
+      },
+    });
+    const mcp = await connect(createDpServer({ client, cwd: '/repo', windowId: 'w-1' }));
+    const pack = await mcp.callTool({ name: 'dp_context', arguments: { repo: 'acme', project: 'restock-reminders', whiteboard: true } });
+    expect(JSON.parse(textOf(pack))).toEqual({ rulesFile: '/config/outputs/whiteboard-defense.md' });
+    const defense = validDefenseInput();
+    const sent = await mcp.callTool({ name: 'dp_whiteboard', arguments: { repo: 'acme', project: 'restock-reminders', request: 'g-1', defense } });
+    expect(sent.isError).toBeFalsy();
+    expect(calls).toEqual([
+      { path: '/context', body: { repo: 'acme', project: 'restock-reminders', whiteboard: true } },
+      { path: '/whiteboard', body: { repo: 'acme', project: 'restock-reminders', request: 'g-1', defense } },
+    ]);
+    // A bad basis is refused by the service with every problem listed, not by the MCP server with only its own.
+    const maybe = { ...defense, sections: defense.sections.filter((s) => s.id !== 'walkthrough').map((s, i) => (i === 0 ? { ...s, claims: [{ text: 'Perhaps.', basis: 'maybe' }] } : s)) };
+    const bad = await mcp.callTool({ name: 'dp_whiteboard', arguments: { repo: 'acme', project: 'restock-reminders', request: 'g-1', defense: maybe } });
+    expect(bad.isError).toBe(true);
+    expect(calls).toHaveLength(3);
+    expect(textOf(bad)).toContain(PROBLEMS);
+    const tools = (await mcp.listTools()).tools;
+    const context = tools.find((t) => t.name === 'dp_context')!;
+    expect(Object.keys(context.inputSchema.properties ?? {}).sort()).toEqual(['finalize', 'importType', 'project', 'repo', 'threadId', 'whiteboard']);
+    expect(context.description).toContain('whiteboard: true');
+    const whiteboard = tools.find((t) => t.name === 'dp_whiteboard')!;
+    expect(whiteboard.inputSchema.properties?.defense).toMatchObject({ type: 'object', description: 'The whole defense: see your instructions for its shape' });
+  });
+
+  it('returns whiteboard work, and passes back the request it finished', async () => {
+    const results: unknown[] = [{ kind: 'timeout' }, { kind: 'whiteboard', request: 'g-1', model: 'opus' }, { kind: 'submission', submission: 's-1' }];
+    const { client, calls } = fakeService({ '/wait': () => results.shift() });
+    const mcp = await connect(createDpServer({ client, cwd: '/repo', windowId: 'w-1', retryMs: 1 }));
+    const wait = async (finished?: Record<string, string>) =>
+      JSON.parse(textOf(await mcp.callTool({ name: 'dp_wait', arguments: { repo: 'acme', project: 'p', ...(finished ? { finished } : {}) } })));
+    expect(await wait()).toEqual({ kind: 'whiteboard', request: 'g-1', model: 'opus' });
+    const failed = { whiteboard: 'g-1', whiteboardError: 'Failed: the request was cancelled or replaced.' };
+    expect(await wait(failed)).toMatchObject({ kind: 'submission' });
+    expect(calls.map((c) => c.body.finished ?? null)).toEqual([null, null, failed]);
+    const tool = (await mcp.listTools()).tools.find((t) => t.name === 'dp_wait')!;
+    for (const s of ['Generate', 'kind whiteboard', '{ whiteboard: <request id> }', 'finished.whiteboard', 'whiteboardError']) expect(tool.description).toContain(s);
+  });
 });

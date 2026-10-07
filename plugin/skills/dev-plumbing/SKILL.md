@@ -10,7 +10,7 @@ You are the main window for dev-plumbing. The plan already exists: don't brainst
 
 **Keep your context small.** You only ever see ids, titles and one-line summaries. Never read the plan, items or threads, and never edit files in the repo. Subagents do the reading and writing through the dp tools.
 
-Your tools are `dp_open` and `dp_wait`. The subagents are `dev-plumbing:repo-setup`, `dev-plumbing:importer`, `dev-plumbing:thread` and `dev-plumbing:finalizer`.
+Your tools are `dp_open` and `dp_wait`. The subagents are `dev-plumbing:repo-setup`, `dev-plumbing:importer`, `dev-plumbing:thread`, `dev-plumbing:finalizer` and `dev-plumbing:whiteboard`.
 
 ## 1. Open
 
@@ -49,12 +49,13 @@ Each returns one line. A line starting with `Failed:` means that plumbing type w
 
 ## 3. Listen
 
-Call `dp_wait` with `repo` and `project`. It waits until the user presses **Send this thread**, **Submit all** or **Start finalize** in the app, or **Detect again** in Settings. Never call `dp_wait` while one is still running in the background for this project: that one is already listening.
+Call `dp_wait` with `repo` and `project`. It waits until the user presses **Send this thread**, **Submit all**, **Start finalize** or **Generate** (on the Whiteboard Defense page) in the app, or **Detect again** in Settings. Never call `dp_wait` while one is still running in the background for this project: that one is already listening.
 
 - If the call moves to the background (Claude Code does this after two minutes), that's expected. Tell the user once: "Listening for your answers in the app. You can keep chatting here." Then end your turn. When the result arrives, carry on below.
 - **kind: submission**: answer it (4).
 - **kind: finalize**: write the final (5).
 - **kind: detect-profile**: detect the repo profile again (6).
+- **kind: whiteboard**: write the Whiteboard Defense (7).
 - **kind: still-waiting**: call `dp_wait` again, without `finished`.
 - **kind: replaced**: a newer `dp_wait` for this project took over. Stop here: that one is listening.
 
@@ -86,10 +87,19 @@ The user pressed **Detect again** for this repo in Settings → Repos. The resul
 2. It returns one line. Tell the user that line, and that they can change the profile in Settings → Repos.
 3. Call `dp_wait` again with `finished: { detect: "<repo>" }`. Then go back to 3.
 
+## 7. Write the Whiteboard Defense
+
+The user pressed **Generate** (or **Regenerate**, or **Try again**) on the Whiteboard Defense page in the app. The result has `request`, the Whiteboard Defense request's id, and `model`.
+
+1. Start one `dev-plumbing:whiteboard` subagent with the result's `model`. Run it in the foreground and wait for its line: calling `dp_wait` before it returns fails the request. Prompt, filled in:
+   > Write the Whiteboard Defense for repo `<repo>`, plumbing project `<project>`, request `<request>`.
+2. It returns one line. Tell the user that line. If it starts with `Failed:`, also tell them they can press **Try again** or **Generate** on the Whiteboard Defense page. Don't look at anything else: the user studies and practises the defense in the app.
+3. Call `dp_wait` again with `finished: { whiteboard: "<the request id>" }`. If the line starts with `Failed:`, add it as `whiteboardError`, so the page shows why. Then go back to 3.
+
 ## Rules
 
 - Never read or edit the plan, the draft, the final or any plumbing file yourself, and never edit the repo.
-- Never answer a thread or write the final yourself. That's what the thread and finalizer subagents are for.
+- Never answer a thread, write the final or write the Whiteboard Defense yourself. That's what the thread, finalizer and whiteboard subagents are for.
 - Don't summarise threads to the user beyond the one-line results. The app shows everything.
 - If a tool call fails, tell the user the error in one line. If `dp_wait` fails, try once more. If it fails again, stop and tell the user to run `/dev-plumbing` again.
 - The user can talk to you while you listen. If they ask you to stop listening, stop calling `dp_wait`.

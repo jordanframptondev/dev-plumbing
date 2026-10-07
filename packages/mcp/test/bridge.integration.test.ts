@@ -7,7 +7,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { readRunFile } from '@dev-plumbing/core';
-import { makeRepo } from '../../core/test/fixtures';
+import { makeRepo, validDefenseInput } from '../../core/test/fixtures';
 import { removeTempDirs, tempDir } from '../../../testkit/tmp';
 
 const root = path.resolve(import.meta.dirname, '../../..');
@@ -132,4 +132,35 @@ it('asks before bringing a changed plan in, and brings it in on yes', async () =
   ]);
   // The question kept its id and its thread, which is still resolved.
   expect((await http(`${P}/threads/t-questions-channels`)).thread.status).toBe('resolved');
+}, 60_000);
+
+it('hands a Whiteboard Defense request to the window and takes the defense back', async () => {
+  // Continues from the tests above: the project is at v2, with a final proposed but not accepted, so it defends the draft.
+  const P = '/api/projects/acme-app/restock-reminders';
+  const generated = await http(`${P}/whiteboard`, { method: 'POST', body: '{}' });
+  expect(generated.request).toMatchObject({ state: 'requested' });
+  const wait = json(await mcp.callTool({ name: 'dp_wait', arguments: { repo: 'acme-app', project: 'restock-reminders' } }));
+  expect(wait).toMatchObject({ kind: 'whiteboard', request: generated.request.id, model: 'opus' });
+  const pack = json(await mcp.callTool({ name: 'dp_context', arguments: { repo: 'acme-app', project: 'restock-reminders', whiteboard: true } }));
+  // The subagent Reads the rules file and the document the pack names.
+  expect(fs.readFileSync(pack.rulesFile, 'utf8')).toMatch(/^# /);
+  expect(pack.basedOn).toEqual({ doc: 'draft', version: 2 });
+  expect(fs.readFileSync(pack.documentFile, 'utf8').length).toBeGreaterThan(0);
+  // A bad basis and a missing section come back from the service together, in one refusal.
+  const input = validDefenseInput();
+  const bad = { ...input, sections: input.sections.filter((s) => s.id !== 'summary').map((s) => (s.id === 'data' ? { ...s, claims: [{ text: 'Perhaps.', basis: 'maybe' }] } : s)) };
+  const refused = await mcp.callTool({ name: 'dp_whiteboard', arguments: { repo: 'acme-app', project: 'restock-reminders', request: generated.request.id, defense: bad } });
+  expect(refused.isError).toBe(true);
+  const problems = (refused as { content: { text: string }[] }).content[0]!.text;
+  expect(problems).toContain('Nothing was saved. Fix these and call dp_whiteboard again with the whole defense:');
+  expect(problems).toContain('- sections.2.claims.0.basis:');
+  expect(problems).toContain('- sections: summary is missing.');
+  const sent = await mcp.callTool({
+    name: 'dp_whiteboard',
+    arguments: { repo: 'acme-app', project: 'restock-reminders', request: generated.request.id, defense: input },
+  });
+  expect(sent.isError).toBeFalsy();
+  expect(json(sent)).toMatchObject({ ok: true, request: generated.request.id, questions: 3, concerns: 2 });
+  const view = await http(`${P}/whiteboard`);
+  expect(view).toMatchObject({ request: null, defense: { basedOn: { kind: 'plan', doc: 'draft', version: 2 } }, stale: null });
 }, 60_000);

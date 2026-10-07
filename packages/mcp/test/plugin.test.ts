@@ -27,6 +27,7 @@ describe('the plugin', () => {
       importer: ['dp_context', 'dp_write_items'],
       thread: ['dp_context', 'dp_reply'],
       finalizer: ['dp_context', 'dp_finalize'],
+      whiteboard: ['dp_context', 'dp_whiteboard'],
     };
     for (const [name, dp] of Object.entries(expected)) {
       const agent = parseFrontMatter(read(`plugin/agents/${name}.md`));
@@ -100,12 +101,65 @@ describe('the plugin', () => {
     }
   });
 
-  it('runs the finalizer and the detection subagent in the foreground, before listening again', () => {
+  it('runs the finalizer, the detection subagent and the whiteboard subagent in the foreground, before listening again', () => {
     const skill = parseFrontMatter(read('plugin/skills/dev-plumbing/SKILL.md')).content;
     const section = (from: string, to: string) => skill.slice(skill.indexOf(from), skill.indexOf(to));
     const foreground = 'Run it in the foreground and wait for its line: calling `dp_wait` before it returns fails the request.';
     expect(section('## 5. Write the final', '## 6.')).toContain(foreground);
-    expect(section('## 6. Detect the repo profile again', '## Rules')).toContain(foreground);
+    expect(section('## 6. Detect the repo profile again', '## 7.')).toContain(foreground);
+    expect(section('## 7. Write the Whiteboard Defense', '## Rules')).toContain(foreground);
+  });
+
+  it('has a whiteboard agent that writes the defense from its pack and sends it once through dp_whiteboard', () => {
+    const agent = parseFrontMatter(read('plugin/agents/whiteboard.md'));
+    expect(agent.data.color).toBe('green');
+    for (const s of [
+      'whiteboard: true',
+      '`rulesFile`',
+      '`documentFile`',
+      'Read it first',
+      '`file`',
+      '`sensitiveData`',
+      '`diagramItemIds`',
+      '`previous`',
+      'When a question or an unknown in `previous` still applies, keep its wording exactly',
+      '**Write from the pack only.**',
+      '`known`',
+      '`inferred`',
+      '`unknown`',
+      '`verify`',
+      'Mark a claim `known` only when the pack says it or you read it yourself.',
+      '**Pick the level**',
+      '**Fill every section in `sections`**',
+      '`diagramItemId`',
+      'one cell per column',
+      "Don't invent concerns to fill the section",
+      'Keep the whole defense under about 40,000 characters of JSON',
+      'send `checklist: []`, because the service copies the rules file\'s checklist',
+      'Call `dp_whiteboard` once',
+      'at most three times',
+      'Failed: the request was cancelled or replaced.',
+      'Whiteboard Defense written: level <n>, <q> questions, <c> concerns.',
+      'Failed: <what went wrong>',
+    ]) {
+      expect(agent.content).toContain(s);
+    }
+    const skill = parseFrontMatter(read('plugin/skills/dev-plumbing/SKILL.md')).content;
+    for (const s of [
+      'dev-plumbing:whiteboard',
+      '**kind: whiteboard**: write the Whiteboard Defense (7)',
+      '**Generate**',
+      '> Write the Whiteboard Defense for repo `<repo>`, plumbing project `<project>`, request `<request>`.',
+      'finished: { whiteboard:',
+      'whiteboardError',
+      'also tell them they can press **Try again** or **Generate** on the Whiteboard Defense page',
+      'Never answer a thread, write the final or write the Whiteboard Defense yourself.',
+    ]) {
+      expect(skill).toContain(s);
+    }
+    const thread = parseFrontMatter(read('plugin/agents/thread.md')).content;
+    expect(thread).toContain("In a Defense thread, answer from the pack's `defense` and never send `change` or `smallEdits`");
+    expect(thread).toContain('resolve the thread with your answer');
   });
 
   it("detects a repo profile again when the user asks, keeping the user's own settings", () => {

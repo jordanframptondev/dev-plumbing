@@ -5,9 +5,9 @@ import { ServiceError, type ServiceClient } from './client';
 
 /** Under the plugin's 12-hour per-call limit, so a long wait ends on our terms. */
 export const MAX_WAIT_MS = 11.5 * 60 * 60 * 1000;
-export const TOOL_NAMES = ['dp_open', 'dp_repo_profile', 'dp_write_items', 'dp_wait', 'dp_context', 'dp_reply', 'dp_finalize'] as const;
+export const TOOL_NAMES = ['dp_open', 'dp_repo_profile', 'dp_write_items', 'dp_wait', 'dp_context', 'dp_reply', 'dp_finalize', 'dp_whiteboard'] as const;
 /** dp_wait results that hand the window work. Anything else (a timeout) means keep listening. */
-export const WORK_KINDS: ReadonlySet<string> = new Set(['submission', 'finalize', 'detect-profile']);
+export const WORK_KINDS: ReadonlySet<string> = new Set(['submission', 'finalize', 'detect-profile', 'whiteboard']);
 
 type Result = { content: { type: 'text'; text: string }[]; isError?: boolean };
 const ok = (value: unknown): Result => ({ content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] });
@@ -89,8 +89,9 @@ export function createDpServer(o: { client: ServiceClient; cwd: string; windowId
   server.registerTool(
     'dp_context',
     {
-      description: 'Get the context pack for one thread (threadId), for importing one plumbing type (importType), or for writing the final spec (finalize: true).',
-      inputSchema: { ...project, threadId: z.string().optional(), importType: z.string().optional(), finalize: z.boolean().optional() },
+      description:
+        'Get the context pack for one thread (threadId), for importing one plumbing type (importType), for writing the final spec (finalize: true), or for writing the Whiteboard Defense (whiteboard: true).',
+      inputSchema: { ...project, threadId: z.string().optional(), importType: z.string().optional(), finalize: z.boolean().optional(), whiteboard: z.boolean().optional() },
     },
     async (args) => call('/context', args),
   );
@@ -121,10 +122,26 @@ export function createDpServer(o: { client: ServiceClient; cwd: string; windowId
   );
 
   server.registerTool(
+    'dp_whiteboard',
+    {
+      description:
+        'Send the whole Whiteboard Defense you wrote for a Whiteboard Defense request: the level and its reasons, every section with its claims (each tagged known, inferred, unknown or verify), the questions with their answers, the release concerns and the checklist. The defense is checked as a whole. If anything is wrong, nothing is saved and the error lists every problem: fix them all and call dp_whiteboard again with the whole defense.',
+      inputSchema: {
+        ...project,
+        request: z.string().min(1).describe('The Whiteboard Defense request id, from your prompt'),
+        // Checked by the service, not here: saveDefense lists every problem at once, the shape's with the project's
+        // (every section once, each with a claim, the tables, the diagram items, the size), so one resend fixes them all.
+        defense: z.record(z.unknown()).describe('The whole defense: see your instructions for its shape'),
+      },
+    },
+    async (args) => call('/whiteboard', args),
+  );
+
+  server.registerTool(
     'dp_wait',
     {
       description:
-        "Listen for the user. Waits until they press Send this thread, Submit all or Start finalize in the app, or Detect again in Settings, sending progress while it waits. Then returns one piece of work: kind submission (the threads to answer in groups, one thread subagent per group, with the model to use), kind finalize (a finalize request for one finalizer subagent) or kind detect-profile (a repo whose profile the repo-setup subagent detects again). When you call it again, pass finished with what you just did: { submission, conflicts } after a submission, { finalize: <request id> } after a finalize (finished.finalize), or { detect: <repo> } after a detect-profile (finished.detect). If it returns still-waiting, call it again. If it returns replaced, a newer dp_wait for this project took over: stop.",
+        "Listen for the user. Waits until they press Send this thread, Submit all, Start finalize or Generate (on the Whiteboard Defense page) in the app, or Detect again in Settings, sending progress while it waits. Then returns one piece of work: kind submission (the threads to answer in groups, one thread subagent per group, with the model to use), kind finalize (a finalize request for one finalizer subagent), kind detect-profile (a repo whose profile the repo-setup subagent detects again) or kind whiteboard (a Whiteboard Defense request for one whiteboard subagent). When you call it again, pass finished with what you just did: { submission, conflicts } after a submission, { finalize: <request id> } after a finalize (finished.finalize), { detect: <repo> } after a detect-profile (finished.detect), or { whiteboard: <request id> } after a whiteboard (finished.whiteboard), with whiteboardError: the subagent's line when it starts with Failed:. If it returns still-waiting, call it again. If it returns replaced, a newer dp_wait for this project took over: stop.",
       inputSchema: {
         ...project,
         finished: z
@@ -133,6 +150,8 @@ export function createDpServer(o: { client: ServiceClient; cwd: string; windowId
             conflicts: z.array(z.object({ threads: z.array(z.string()).min(1), text: z.string().min(1) })).optional(),
             finalize: z.string().min(1).optional().describe('The finalize request you just handled'),
             detect: z.string().min(1).optional().describe('The repo whose profile you just detected again'),
+            whiteboard: z.string().min(1).optional().describe('The Whiteboard Defense request you just handled'),
+            whiteboardError: z.string().max(2000).optional().describe("The whiteboard subagent's line, when it starts with Failed:"),
           })
           .optional(),
       },
