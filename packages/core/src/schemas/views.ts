@@ -3,6 +3,7 @@ import type { Item, PlanVersion, PlumbingProject, Thread } from './project';
 import type { Screen } from './plumbingType';
 import type { Anchor, DataKind } from './data';
 import type { FinalizeChecklist, FinalizeRequest, FinalizeState } from './finalize';
+import type { DefenseRefKind, Rating, WhiteboardDefense, WhiteboardRequest } from './whiteboard';
 
 export type ConfigProblem = { file: string; key?: string; message: string };
 export type RuleSummary = { file: string; id: string; title: string; order: number; screen: Screen; enabled: boolean };
@@ -195,3 +196,46 @@ export type FinalizeView = {
   /** The newest plan version that came in after the last final and changed the draft, or null. */
   planVersionSinceFinal: number | null;
 };
+
+/** A Defense thread asked about a part of the defense, or an item sent from it to Questions or Concerns. */
+export type DefenseLink = { kind: DefenseRefKind; ref: string; itemId: string; threadId: string; typeId: string; title: string; status: DisplayStatus };
+
+/** Practice for the current defense: your ratings and ticks by id, and how ready you are (spec §12). */
+export type PracticeView = {
+  /** By question id, for the current defense. */
+  ratings: Record<string, Rating>;
+  /** The checklist ids ticked. */
+  ticks: string[];
+  /**
+   * 0–100: round(100 × the mean of the scores there are): the cards' (could + shaky / 2) / cards and the checklist's
+   * ticked / lines. 0 with neither.
+   */
+  readiness: number;
+  counts: { could: number; shaky: number; couldnt: number; unrated: number; ticked: number; checklist: number };
+};
+
+/** The Whiteboard Defense page: GET /api/projects/:repo/:id/whiteboard. */
+export type WhiteboardView = {
+  request: WhiteboardRequest | null;
+  defense: WhiteboardDefense | null;
+  /** The Out of date line, or null while the defense is current (or there's none). */
+  stale: string | null;
+  /** Null with no defense. */
+  practice: PracticeView | null;
+  /** Defense threads about the current defense, oldest first. */
+  asked: DefenseLink[];
+  /** Questions and Concerns items sent from the current defense. */
+  sent: DefenseLink[];
+  /** False while the plan is importing, or while a request is requested or writing. */
+  canGenerate: boolean;
+  /** Why not, in the refusal's exact words. */
+  generateRefusal: string | null;
+  listening: ListeningState;
+  /** The clones this project was opened from that are still folders on this Mac, the source clone first. */
+  clones: { path: string; source: boolean }[];
+  /** `${dirname(sourcePath)}/${name}.whiteboard-defense.md`, relative to a clone. */
+  exportPath: string;
+};
+export type GenerateWhiteboardResponse = { request: WhiteboardRequest; listening: ListeningState; message: string };
+export type AskDefenseResponse = SubmitResponse & { threadId: string };
+export type SendFromDefenseResponse = { itemId: string; threadId: string; typeId: string; typeTitle: string; listening: ListeningState; message: string };

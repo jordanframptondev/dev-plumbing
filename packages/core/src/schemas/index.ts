@@ -11,3 +11,4 @@ export * from './patch';
 export * from './markdown';
 export * from './data';
 export * from './finalize';
+export * from './whiteboard';

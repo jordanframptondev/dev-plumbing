@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { anchorSchema } from './data';
 import { codeRefSchema, itemFlagSchema, mdAnchorSchema, messageSchema } from './loop';
+import { defenseRefSchema } from './whiteboard';
 
 export const threadStatusValues = ['idle', 'your_turn', 'with_claude', 'resolved', 'parked'] as const;
 export type ThreadStatus = (typeof threadStatusValues)[number];
@@ -87,6 +88,12 @@ export const itemSchema = z
     removedIn: z.number().int().min(2).optional(),
     /** A Plan changes item: the passage as your draft, the old plan and the repo's new version had it. */
     conflict: z.object({ ours: z.string(), base: z.string(), theirs: z.string() }).optional(),
+    /**
+     * Set on every item the Whiteboard Defense made: a Defense item (Ask Claude about this) or a Questions or Concerns
+     * item sent from it. `id` is the defense's id, and `kind` and `ref` name the part it came from.
+     * A malformed reference reads as none, so it can never hide the item.
+     */
+    fromDefense: defenseRefSchema.optional().catch(undefined),
   })
   .passthrough();
 export type Item = z.infer<typeof itemSchema>;

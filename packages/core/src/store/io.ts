@@ -68,6 +68,10 @@ export const projectFiles = (dir: string) => ({
   history: path.join(dir, 'history'),
   historyEntry: (id: string) => path.join(dir, 'history', `${id}.json`),
   finalize: path.join(dir, 'finalize.json'),
+  whiteboard: path.join(dir, 'whiteboard'),
+  whiteboardRequest: path.join(dir, 'whiteboard', 'request.json'),
+  defense: path.join(dir, 'whiteboard', 'defense.json'),
+  practice: path.join(dir, 'whiteboard', 'practice.json'),
 });
 
 let seq = 0;
