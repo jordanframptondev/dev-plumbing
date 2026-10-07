@@ -24,9 +24,12 @@ function blockingReason(item: Item, thread: Thread, status: DisplayStatus, pendi
   if (unresolved && item.type === PLAN_CHANGES) return CONFLICT_REASON;
   if (unresolved && item.fields?.blocking === 'true') return 'Blocking question, not resolved.';
   if (unresolved && HIGH_SEVERITY.has(item.fields?.severity?.trim().toLowerCase() ?? '')) return 'High-severity concern, not resolved.';
-  // A proposal is a reply that offers a change. The importer's opening options are the item's first choices, not a proposal.
+  // A proposal is a reply that offers a change, once you've written in the thread. The importer's opening options are
+  // the item's first choices, not a proposal, and so are Claude's suggestions on a thread the service handed it with no
+  // message from you (an unknown sent from the Whiteboard Defense, say). Plan changes threads were caught above.
   const open = latestOpen(thread);
-  if (open && !open.message.opening && open.options.some((o) => o.change)) return 'A proposal is waiting for your answer.';
+  const youWrote = thread.messages.some((m) => m.author === 'you');
+  if (open && !open.message.opening && youWrote && open.options.some((o) => o.change)) return 'A proposal is waiting for your answer.';
   if (pendingEdit) return 'A small edit is waiting to be applied.';
   return null;
 }
