@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { DEFENSE } from '../defenseType';
 import { diffText } from '../docDiff';
 import { availableTokens } from '../finalExport';
@@ -5,6 +6,7 @@ import { PLAN_CHANGES } from '../planChanges';
 import {
   dataKindOf,
   dataShapeDoc,
+  DEFENSE_SECTIONS,
   displayStatus,
   firstParagraph,
   headingsOf,
@@ -13,6 +15,7 @@ import {
   type ClaudeMessage,
   type CodeRef,
   type Decision,
+  type DefenseSectionId,
   type DisplayStatus,
   type Item,
   type Message,
@@ -25,10 +28,12 @@ import {
 } from '../schemas';
 import { finalizeChecklist } from './checklist';
 import { activeDecisions } from './decisions';
+import { defenseMarkdown } from './defenseMarkdown';
 import { finalName } from './finalize';
-import { docPath, readDecisions, readDocText, readItem, readItems, readProjectFile, readThread, readThreads, StoreError } from './io';
+import { docPath, projectFiles, readDecisions, readDocText, readItem, readItems, readProjectFile, readThread, readThreads, StoreError } from './io';
 import { presetLabel } from './threads';
 import { readVersionDoc } from './versions';
+import { defenseBasis, defenseDiagramItemIds, readDefense } from './whiteboard';
 
 export type ThreadPack = {
   project: { repo: string; id: string; title: string; summary: string };
@@ -45,6 +50,10 @@ export type ThreadPack = {
   /** The whole draft, for patches outside the item's section. Read it; never write it. */
   draftFile: string;
   conventions: string[];
+  /** For an item made from the Whiteboard Defense (a Defense thread, or one sent to plumbing): the whole defense as Markdown. Null otherwise. */
+  defense: string | null;
+  /** The accepted final, which a defense may explain, when the project has one. Read it; never write it. Null otherwise. */
+  finalFile: string | null;
 };
 
 export type ImportPack = {
@@ -148,6 +157,7 @@ export async function threadPack(o: { dir: string; threadId: string; types: Plum
         throw e;
       })
     : null;
+  const defense = item.fromDefense ? await readDefense(o.dir) : null;
   return {
     project: { repo: project.repo, id: project.id, title: project.title, summary: firstParagraph(draft) },
     type: {
@@ -172,6 +182,8 @@ export async function threadPack(o: { dir: string; threadId: string; types: Plum
     draftHeadings: headingsOf(draft).map((h) => `${'#'.repeat(h.level)} ${h.text}`),
     draftFile: docPath(o.dir, project.docs.draft),
     conventions: o.profile?.conventions ?? [],
+    defense: defense ? defenseMarkdown(defense, { title: project.title, itemTitles: Object.fromEntries(items.map((i) => [i.id, i.title])) }) : null,
+    finalFile: project.docs.final ? docPath(o.dir, project.docs.final) : null,
   };
 }
 
@@ -334,13 +346,25 @@ function decisionDetail(d: Decision, o: { threads: Map<string, Thread>; items: M
   };
 }
 
+
+/** The items that go into the final, and what the finalizer's and the whiteboard subagent's packs say about them. */
+type PlanItems = {
+  /** As stored, in plumbing-type order, then by title. */
+  items: Item[];
+  /** The same items, as the packs list them. */
+  listed: FinalizePack['items'];
+  decisions: FinalizePack['decisions'];
+  defaults: FinalizePack['defaults'];
+  openItems: FinalizePack['openItems'];
+  /** The ids of the items that block Finalize. */
+  blocking: Set<string>;
+};
+
 /**
- * What the finalizer receives: the output rules, the whole draft, every item that goes into the final with a summary of
- * its drawing, the decisions with their why, the defaults that will be used, the items still open, the repo's
- * conventions, the tokens it may place, and the previous final. `rules` is read by the service from the config folder.
+ * The items that go into the final, with their decisions, the defaults that will be used and the items still open.
+ * finalizePack and whiteboardPack both read the plan through this, so they always agree on what's in it.
  */
-export async function finalizePack(o: { dir: string; types: PlumbingType[]; profile?: RepoProfile; rules: string }): Promise<FinalizePack> {
-  const project = await readProjectFile(o.dir);
+async function planItems(o: { dir: string; types: PlumbingType[] }): Promise<PlanItems> {
   const { values: allItems } = await readItems(o.dir);
   const { values: threads } = await readThreads(o.dir);
   const threadById = new Map(threads.map((t) => [t.id, t]));
@@ -362,10 +386,8 @@ export async function finalizePack(o: { dir: string; types: PlumbingType[]; prof
   // A decision about an item left out of the final is left out with it. One about no item at all stays.
   const inPack = new Set(items.map((i) => i.id));
   return {
-    project: { repo: project.repo, id: project.id, title: project.title, sourcePath: project.source.path, name: finalName(project.source.path) },
-    rules: o.rules,
-    draft: await readDocText(o.dir, project.docs.draft),
-    items: items.map((i) => ({
+    items,
+    listed: items.map((i) => ({
       id: i.id,
       type: i.type,
       typeTitle: typeOf(i)?.title ?? i.type,
@@ -384,8 +406,120 @@ export async function finalizePack(o: { dir: string; types: PlumbingType[]; prof
     openItems: items
       .filter((i) => ['your_turn', 'draft'].includes(statusOf(i)) && !blocking.has(i.id))
       .map((i) => ({ itemId: i.id, title: i.title, typeTitle: typeOf(i)?.title ?? i.type })),
+    blocking,
+  };
+}
+
+/**
+ * What the finalizer receives: the output rules, the whole draft, every item that goes into the final with a summary of
+ * its drawing, the decisions with their why, the defaults that will be used, the items still open, the repo's
+ * conventions, the tokens it may place, and the previous final. `rules` is read by the service from the config folder.
+ */
+export async function finalizePack(o: { dir: string; types: PlumbingType[]; profile?: RepoProfile; rules: string }): Promise<FinalizePack> {
+  const project = await readProjectFile(o.dir);
+  const plan = await planItems(o);
+  return {
+    project: { repo: project.repo, id: project.id, title: project.title, sourcePath: project.source.path, name: finalName(project.source.path) },
+    rules: o.rules,
+    draft: await readDocText(o.dir, project.docs.draft),
+    items: plan.listed,
+    decisions: plan.decisions,
+    defaults: plan.defaults,
+    openItems: plan.openItems,
     conventions: o.profile?.conventions ?? [],
-    tokens: availableTokens(items, o.types),
+    tokens: availableTokens(plan.items, o.types),
     previousFinal: await readDocText(o.dir, project.docs.final ?? 'docs/final.md').catch(() => null),
+  };
+}
+
+/**
+ * What the whiteboard subagent reads. The big texts are files it Reads, not text in the pack, so the pack stays well
+ * under the size an MCP tool result may have, whatever the size of the plan.
+ */
+export type WhiteboardPack = {
+  project: { repo: string; id: string; title: string; sourcePath: string; name: string };
+  /** outputs/whiteboard-defense.md, or the shipped one when the user's is missing: the framework the defense follows. */
+  rulesFile: string;
+  /** What the defense explains (defenseBasis): the final while it's current, else the draft, at the plan's current version. */
+  basedOn: { doc: 'final' | 'draft'; version: number };
+  /** That document. */
+  documentFile: string;
+  /**
+   * finalizePack's items. `file` is the item's own JSON, to Read for anything cut short here. `body` is cut to 800
+   * characters. `data`, the drawing, is here only for a diagram, which diagramItemId may name; any other drawing has
+   * just its `dataSummary`.
+   */
+  items: (FinalizePack['items'][number] & { file: string; data: unknown })[];
+  decisions: FinalizePack['decisions'];
+  /** Questions nobody answered: the plan assumes their default. */
+  defaults: FinalizePack['defaults'];
+  /** Every item that isn't resolved or parked: the plan's open questions, with where each stands and whether it blocks Finalize. */
+  openItems: { itemId: string; title: string; typeTitle: string; status: DisplayStatus; blocking: boolean }[];
+  conventions: string[];
+  /** The repo profile's sensitive data tags. They raise the level. */
+  sensitiveData: string[];
+  /** The repo profile's database schema file and its apps, to Read when a section needs them. */
+  schema: { type: string; path: string } | null;
+  apps: { name: string; path: string }[];
+  /** The ten prose sections to fill, in order, with their numbers among the 13. */
+  sections: { id: DefenseSectionId; n: number; title: string }[];
+  /** The items a section's diagramItemId may name: exactly the ones saveDefense accepts (defenseDiagramItemIds). */
+  diagramItemIds: string[];
+  /**
+   * The saved defense's question texts, and the texts of its claims marked unknown or verify. A regenerate keeps the
+   * wording of those that still apply: Practice keeps ratings, and sending matches unknowns, by text. Null with none saved.
+   */
+  previous: { questions: string[]; unknowns: string[] } | null;
+};
+
+/**
+ * An item's body in the pack is cut to this many characters, and says where the rest is. 40 items of long bodies then
+ * stay under 60,000 characters of JSON, about 16,000 tokens, well inside an MCP tool result.
+ */
+const BODY_MAX = 800;
+const CLIPPED = '… (clipped: Read file for the rest)';
+
+/**
+ * What the whiteboard subagent receives: the framework and the document the defense is based on (as files to Read),
+ * every item that goes into the final, the decisions with their why, the defaults, the items still open, the repo's
+ * conventions, sensitive data, schema and apps, the sections to fill, the diagrams it may name, and the last defense's
+ * wording. `rulesFile` is the rules file the service picked: the user's, or the shipped one.
+ */
+export async function whiteboardPack(o: { dir: string; types: PlumbingType[]; profile?: RepoProfile; rulesFile: string }): Promise<WhiteboardPack> {
+  const project = await readProjectFile(o.dir);
+  const plan = await planItems(o);
+  const basis = await defenseBasis(o.dir);
+  const saved = await readDefense(o.dir);
+  const isDiagram = (item: Item) => {
+    const type = o.types.find((t) => t.id === item.type);
+    return type !== undefined && dataKindOf(type) === 'diagram';
+  };
+  const clipped = (body: string | null) => (body !== null && body.length > BODY_MAX ? `${body.slice(0, BODY_MAX)}${CLIPPED}` : body);
+  return {
+    project: { repo: project.repo, id: project.id, title: project.title, sourcePath: project.source.path, name: finalName(project.source.path) },
+    rulesFile: o.rulesFile,
+    basedOn: { doc: basis.doc, version: basis.version },
+    documentFile: docPath(o.dir, basis.doc === 'final' && project.docs.final ? project.docs.final : project.docs.draft),
+    items: plan.listed.map((entry, k) => {
+      const item = plan.items[k];
+      return { ...entry, body: clipped(entry.body), file: path.resolve(projectFiles(o.dir).item(item.id)), data: isDiagram(item) ? (item.data ?? null) : null };
+    }),
+    decisions: plan.decisions,
+    defaults: plan.defaults,
+    openItems: plan.listed
+      .filter((i) => i.status !== 'resolved')
+      .map((i) => ({ itemId: i.id, title: i.title, typeTitle: i.typeTitle, status: i.status, blocking: plan.blocking.has(i.id) })),
+    conventions: o.profile?.conventions ?? [],
+    sensitiveData: o.profile?.sensitiveData ?? [],
+    schema: o.profile?.schema ?? null,
+    apps: (o.profile?.apps ?? []).map((a) => ({ name: a.name, path: a.path })),
+    sections: DEFENSE_SECTIONS.map((s) => ({ id: s.id, n: s.n, title: s.title })),
+    diagramItemIds: await defenseDiagramItemIds(o.dir, o.types),
+    previous: saved
+      ? {
+          questions: saved.questions.map((q) => q.q),
+          unknowns: saved.sections.flatMap((s) => s.claims.filter((c) => c.basis === 'unknown' || c.basis === 'verify').map((c) => c.text)),
+        }
+      : null,
   };
 }

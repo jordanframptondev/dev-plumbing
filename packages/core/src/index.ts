@@ -39,3 +39,4 @@ export * from './store/accept';
 export * from './store/detect';
 export * from './store/update';
 export * from './store/whiteboard';
+export * from './store/defenseMarkdown';
