@@ -5,9 +5,11 @@
 # proposals, parks whatever still blocks Finalize, starts it, waits for the finalizer's final, accepts it into the
 # scratch repo and checks the copy. Then it changes the plan in the scratch repo, and this script stops Claude and
 # runs /dev-plumbing again: Claude asks to update to v2, merges, re-imports, and answers the Plan changes threads. It
-# fails when an importable type got no saved dp_write_items batch in the re-import.
+# fails when an importable type got no saved dp_write_items batch in the re-import. Last, the user script generates the
+# Whiteboard Defense: the second window writes it with a whiteboard subagent, then answers a question about it and
+# suggests answers for one of its unknowns, sent to Questions.
 # It uses a temporary dev-plumbing home and leaves your real ~/.dev-plumbing alone. It makes real model calls.
-#   scripts/smoke-claude.sh                   about 30 minutes (the finalizer runs on opus)
+#   scripts/smoke-claude.sh                   about 45 minutes (the finalizer and the whiteboard subagent run on opus)
 #   DP_SMOKE_LONG=1 scripts/smoke-claude.sh   waits 35 minutes before answering, to check the long wait
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -175,7 +177,7 @@ if [ -e "$work/transcript-2.jsonl" ]; then
   grep -c 'kind[\\"]*:[ \\"]*updated' "$t2" || true
   echo "dp_open calls from the main window with update or fresh:"
   grep -h '"parent_tool_use_id":null' "$t2" | grep -o '"name":"mcp__plugin_dev-plumbing_dp__dp_open","input":{[^}]*}' | grep -oE '"(update|fresh)":(true|false)' | sort | uniq -c || true
-  echo "Thread subagents started by the main window (one per Plan changes group):"
+  echo "Thread subagents started by the main window (one per Plan changes group, plus the Defense question and the unknown sent to Questions):"
   grep -h '"parent_tool_use_id":null' "$t2" | grep -o '"name":"Agent","input":{[^}]*"subagent_type":"dev-plumbing:thread"' | wc -l | tr -d ' ' || true
   # Every importable type has to get a batch in the re-import: items, removed or noChanges. A type whose importer never
   # wrote keeps its items as they were, and the import still ends once the main window calls dp_wait, so nothing else
@@ -207,5 +209,45 @@ if [ -e "$work/transcript-2.jsonl" ]; then
     echo "Couldn't read $t2 to check."
     status=1
   fi
+  # The Whiteboard Defense, written in the second window. These are read from the transcript's JSON, not grepped: the
+  # skill's own text, which the transcript carries, says "kind: whiteboard" too. A refused dp_whiteboard is fixed by
+  # sending the whole defense again, so refusals are reported, not failed: the user script checks what was saved.
+  echo "== The Whiteboard Defense, in round 2's window"
+  node -e '
+    const fs = require("fs");
+    const DP = "mcp__plugin_dev-plumbing_dp__";
+    const calls = new Map();
+    const results = new Map();
+    for (const line of fs.readFileSync(process.argv[1], "utf8").split("\n")) {
+      let entry;
+      try { entry = JSON.parse(line); } catch { continue; }
+      const blocks = Array.isArray(entry.message?.content) ? entry.message.content : [];
+      for (const b of blocks) {
+        if (b.type === "tool_use") calls.set(b.id, { name: b.name, input: b.input ?? {}, main: entry.parent_tool_use_id === null });
+        if (b.type === "tool_result") {
+          const text = typeof b.content === "string" ? b.content : (Array.isArray(b.content) ? b.content : []).map((c) => c.text ?? "").join("");
+          results.set(b.tool_use_id, { text, error: b.is_error === true });
+        }
+      }
+    }
+    const all = [...calls].map(([id, c]) => ({ ...c, result: results.get(id) }));
+    const kindOf = (c) => { try { return JSON.parse(c.result?.text ?? "").kind; } catch { return null; } };
+    const waits = all.filter((c) => c.main && c.name === DP + "dp_wait");
+    const agents = all.filter((c) => c.main && c.name === "Agent" && c.input.subagent_type === "dev-plumbing:whiteboard");
+    const saves = all.filter((c) => c.name === DP + "dp_whiteboard");
+    const refused = saves.filter((c) => c.result?.error);
+    console.log("dp_wait results that handed out the Whiteboard Defense (kind whiteboard): " + waits.filter((c) => kindOf(c) === "whiteboard").length);
+    console.log("Whiteboard subagents started by the main window: " + agents.length + (agents.length ? " (model " + agents.map((c) => c.input.model ?? "not given").join(", ") + ")" : ""));
+    console.log("dp_whiteboard calls: " + saves.length + ", refused: " + refused.length);
+    for (const c of refused) console.log("  refused: " + c.result.text.replace(/\s+/g, " ").slice(0, 300));
+    console.log("JSON characters in the last dp_whiteboard defense: " + (saves.length ? JSON.stringify(saves.at(-1).input.defense ?? null).length : 0));
+    const packs = all.filter((c) => c.name === DP + "dp_context" && c.input.whiteboard === true);
+    console.log("JSON characters in the whiteboard dp_context result: " + (packs.length ? (packs.at(-1).result?.text ?? "").length : 0));
+    console.log("dp_wait calls from the main window with finished.whiteboard: " + waits.filter((c) => c.input.finished?.whiteboard).length);
+    // A Defense thread reply that tried to change the draft, add another kind of item, or resolve another item.
+    const defenseRefused = all.filter((c) => c.name === DP + "dp_reply" && c.result?.error && c.result.text.includes("A Defense thread can"));
+    console.log("dp_reply refusals on a Defense thread: " + defenseRefused.length);
+    for (const c of defenseRefused) console.log("  refused: " + c.result.text.replace(/\s+/g, " ").slice(0, 300));
+  ' "$t2" || echo "Couldn't read $t2 to count them."
 fi
 exit "$status"

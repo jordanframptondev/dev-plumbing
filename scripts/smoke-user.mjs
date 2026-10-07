@@ -4,8 +4,10 @@
 // final, accepts it into the scratch repo and checks the copy. Then the plan changes in the repo: it rewrites a line
 // round 1 changed in the draft, and a section the draft never changed, removes a small one, and asks the runner for a
 // second /dev-plumbing. It checks the update to v2, the merge, the re-import and the Plan changes threads, and accepts
-// Claude's merged version on each. Exits non-zero if anything doesn't happen in time, if a visual type has items
-// without drawings, or if the final or the update didn't land.
+// Claude's merged version on each. Last, it generates the Whiteboard Defense, checks it against the rules file, asks
+// Claude about its Security model and sends one of its unknowns to Questions. Exits non-zero if anything doesn't happen
+// in time, if a route answers with an error, if a visual type has items without drawings, or if the final, the update
+// or the Whiteboard Defense didn't land.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -25,7 +27,15 @@ async function call(route, method = 'GET', body) {
     headers: { 'content-type': 'application/json', 'x-dev-plumbing-token': run.token },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
-  return { ok: res.ok, body: await res.json() };
+  return { ok: res.ok, status: res.status, body: await res.json() };
+}
+
+/** A route answered with an error where it had to work: waiting longer won't fix it. */
+class RouteError extends Error {}
+/** The body of a route that has to work, or a RouteError with the route and its status. */
+function must(route, r) {
+  if (!r.ok) throw new RouteError(`${route} answered ${r.status}: ${r.body?.error ?? 'no message'}`);
+  return r.body;
 }
 
 /** A route that answers with a document rather than JSON, such as a mockup. */
@@ -41,8 +51,9 @@ async function until(what, fn, minutes) {
     try {
       const value = await fn();
       if (value) return value;
-    } catch {
-      // The service may not be up yet.
+    } catch (e) {
+      // A route that answered with an error fails at once. Anything else may be the service not being up yet.
+      if (e instanceof RouteError) throw e;
     }
     await sleep(3000);
   }
@@ -447,5 +458,178 @@ for (const r of conflicts) {
   log(`  "${r.title}": accepted Claude's "${pick.label}": ${accepted2.ok ? accepted2.body.message : accepted2.body.error}`);
   if (!accepted2.ok || accepted2.body.resolved !== 1) wrong.push(`Claude's merged version on "${r.title}" wasn't applied.`);
 }
+
 if (wrong.length) throw new Error(`The update didn't land:\n- ${wrong.join('\n- ')}`);
+
+// The Whiteboard Defense. The user generates it in the app, and this window (round 2's) hands the request to one
+// whiteboard subagent on opus, which can take ten minutes or more. The user then checks it against the rules file, asks
+// Claude about its Security model, and sends one claim it marks Unknown or Verify before release to Questions (or, with
+// none, its first release concern to Concerns). The Defense thread may never reach the Finalize checklist, and the
+// question may not make the defense out of date unless Claude added a Questions or Concerns item.
+const W = `${P}/whiteboard`;
+// As SPEC §12 and the defense's schema have them.
+const SECTION_IDS = ['summary', 'diagram', 'walkthrough', 'data', 'security', 'failure', 'tradeoffs', 'complexity', 'readiness', 'unknowns'];
+const LEVEL_NAMES = { 1: 'Lightweight', 2: 'Standard', 3: 'High risk' };
+const BASIS_LABELS = { known: 'Known', inferred: 'Inferred', unknown: 'Unknown', verify: 'Verify before release' };
+const SEVERITIES = ['critical', 'high', 'medium', 'low', 'info'];
+const flaws = [];
+const whiteboardView = async () => must(W, await call(W));
+/** A thread once Claude is done with it. Its last message has to be Claude's reply. */
+async function claudeReply(what, threadId) {
+  const route = `${P}/threads/${threadId}`;
+  const d = await until(what, async () => {
+    const detail = must(route, await call(route));
+    return detail.thread.status !== 'with_claude' ? detail : null;
+  }, 15);
+  if (d.thread.messages.at(-1)?.author !== 'claude') throw new Error(`"${d.item.title}" came back from Claude without a reply (${d.thread.status}).`);
+  return d;
+}
+/** A Defense thread is in no group of the Finalize checklist, whatever its status. */
+async function notOnFinalize(when, threadId) {
+  const c = (await finalizeView()).checklist;
+  const groups = ['blocking', 'defaults', 'parked', 'unreviewed'].filter((g) => c[g].some((e) => e.threadId === threadId));
+  log(`  Finalize ${when}: ${c.blocking.length} blocking, the Defense thread ${groups.length ? `listed under ${groups.join(', ')}` : 'not listed'}`);
+  if (groups.length) flaws.push(`The Finalize checklist lists the Defense thread ${when}, under ${groups.join(', ')}.`);
+}
+
+const firstView = await whiteboardView();
+log(`Whiteboard Defense: ${firstView.defense ? 'one saved already' : 'none yet'}, can generate: ${firstView.canGenerate ? 'yes' : `no (${firstView.generateRefusal})`}`);
+if (!firstView.canGenerate) throw new Error(`The Whiteboard Defense can't be generated: ${firstView.generateRefusal}`);
+// Which document it should explain: the final while it's current, else the draft, as the Finalize page tells them apart.
+// Round 1 accepted a final, but v2 changed the draft and its Plan changes were applied, so here it's the draft.
+const finalNow = await finalizeView();
+const currentVersion = project.versions.at(-1)?.n;
+const finalCurrent = Boolean(project.docs.final) && finalNow.changesSinceFinal === 0 && finalNow.planVersionSinceFinal === null;
+const expectDoc = finalCurrent ? 'final' : 'draft';
+log(`  The final ${project.docs.final ? `is ${finalCurrent ? 'current' : 'behind'} (${finalNow.changesSinceFinal} changes since Accept, plan version since: ${finalNow.planVersionSinceFinal ?? 'none'})` : "isn't there"}, so it should explain the ${expectDoc} (v${currentVersion})`);
+const generated = must(W, await call(W, 'POST', {}));
+log(`Asked for the Whiteboard Defense: ${generated.message}`);
+const generatedAt = Date.now();
+let pickedUp = false;
+const defenseView = await until("Claude's Whiteboard Defense", async () => {
+  const v = await whiteboardView();
+  if (v.request?.state === 'writing' && !pickedUp) {
+    pickedUp = true;
+    log(`  A Claude window picked it up after ${Math.round((Date.now() - generatedAt) / 1000)} s.`);
+  }
+  return v.request?.state === 'failed' || (v.defense && v.defense.id !== firstView.defense?.id) ? v : null;
+}, 15);
+if (defenseView.request?.state === 'failed') throw new Error(`The whiteboard subagent gave up: ${defenseView.request.reason}`);
+const generatedIn = Math.round((Date.now() - generatedAt) / 1000);
+
+// What the subagent wrote: a level with reasons, the ten prose sections in order, each with claims, every statement
+// marked, at least five questions, and the checklist, which the service copies from the rules file, where each line is
+// "[ ] <line>".
+const defense = defenseView.defense;
+/** Every claim, with its ref (`<section id>.<index>`) and its section. */
+const claims = defense.sections.flatMap((s) => s.claims.map((c, i) => ({ ...c, ref: `${s.id}.${i}`, section: s })));
+const byBasis = (list) => Object.keys(BASIS_LABELS).map((b) => `${b} ${list.filter((x) => x.basis === b).length}`).join(', ');
+const diagramSection = defense.sections.find((s) => s.id === 'diagram');
+const ruleLines = [...fs.readFileSync(path.join(dir, 'outputs', 'whiteboard-defense.md'), 'utf8').matchAll(/^\[ \] (.+)$/gm)].map((m) => m[1].trim());
+const checklistLines = defense.checklist.map((k) => k.text);
+const firstDiff = [...Array(Math.max(ruleLines.length, checklistLines.length)).keys()].find((i) => checklistLines[i] !== ruleLines[i]);
+const quoted = (text) => (text === undefined ? 'nothing' : `"${text}"`);
+log(`Claude's Whiteboard Defense arrived in ${generatedIn} s: level ${defense.level} (${LEVEL_NAMES[defense.level] ?? 'no such level'}), based on the ${defense.basedOn.doc} (v${defense.basedOn.version})`);
+for (const reason of defense.levelReasons) log(`  Level reason: ${reason}`);
+log(`  Sections: ${defense.sections.map((s) => `${s.id} ${s.claims.length}`).join(', ')}`);
+log(`  Claims: ${claims.length} (${byBasis(claims)}), ${defense.sections.reduce((n, s) => n + s.tables.length, 0)} tables`);
+log(`  Diagram: ${diagramSection?.diagramItemId ? `drawn from ${diagramSection.diagramItemId}` : 'no project diagram'}, ${diagramSection?.diagram ? `${diagramSection.diagram.split('\n').length} lines of text` : 'no text diagram'}`);
+log(`  Questions: ${defense.questions.length} (${byBasis(defense.questions)})`);
+log(`  Concerns: ${defense.concerns.length} (${SEVERITIES.map((s) => `${s} ${defense.concerns.filter((c) => c.severity === s).length}`).join(', ')})`);
+log(`  Checklist: ${checklistLines.length} lines, ${firstDiff === undefined ? 'as the rules file has them' : `not as the rules file has them from line ${firstDiff + 1}`}`);
+log(`  Out of date when saved: ${defenseView.stale ?? 'no'}`);
+if (![1, 2, 3].includes(defense.level) || !defense.levelReasons.length) flaws.push(`The level is ${defense.level}, with ${defense.levelReasons.length} reasons.`);
+if (defense.sections.map((s) => s.id).join() !== SECTION_IDS.join()) flaws.push(`The sections are ${defense.sections.map((s) => s.id).join(', ')}, not the ten in order.`);
+for (const s of defense.sections.filter((x) => !x.claims.length)) flaws.push(`${s.title} has no claims.`);
+const bases = [...claims, ...defense.questions, ...defense.concerns].map((x) => x.basis);
+if (bases.some((b) => !Object.hasOwn(BASIS_LABELS, b))) flaws.push(`Some statements are marked ${[...new Set(bases.filter((b) => !Object.hasOwn(BASIS_LABELS, b)))].join(', ')}.`);
+if (defense.concerns.some((c) => !SEVERITIES.includes(c.severity))) flaws.push(`Some concerns have a severity that isn't one of ${SEVERITIES.join(', ')}.`);
+if (defense.questions.length < 5) flaws.push(`The defense has ${defense.questions.length} questions; the run expects at least five.`);
+if (ruleLines.length !== 20) flaws.push(`The rules file has ${ruleLines.length} checklist lines, not 20.`);
+if (firstDiff !== undefined) flaws.push(`The checklist isn't the rules file's: line ${firstDiff + 1} is ${quoted(checklistLines[firstDiff])}, where the rules have ${quoted(ruleLines[firstDiff])}.`);
+if (defense.basedOn.doc !== expectDoc || defense.basedOn.version !== currentVersion) {
+  flaws.push(`The defense is based on the ${defense.basedOn.doc} (v${defense.basedOn.version}), not the ${expectDoc} (v${currentVersion}).`);
+}
+if (defenseView.stale) flaws.push(`The defense was out of date as soon as it was saved: ${defenseView.stale}`);
+
+// Ask Claude about 5. Security model, as "Ask Claude about this" does. The question is the thread's first message,
+// sent like Send this thread. Claude answers in a Defense thread, which never offers to change the draft. When the answer
+// needs nothing more, Claude resolves the thread itself.
+const QUESTION = "What stops one customer from seeing or changing another customer's reminders? Say what the plan settles and what it leaves open.";
+const askResult = must(`${W}/ask`, await call(`${W}/ask`, 'POST', { defenseId: defense.id, kind: 'section', ref: 'security', question: QUESTION }));
+const askThread = askResult.threadId;
+log(`Asked Claude about 5. Security model: ${askResult.message}`);
+if (askResult.sent !== 1) flaws.push(`Asking sent ${askResult.sent} threads to Claude, not 1.`);
+await notOnFinalize('while Claude answers', askThread);
+const askAt = Date.now();
+const answer = await claudeReply("Claude's answer about the Security model", askThread);
+const fromClaude = answer.thread.messages.filter((m) => m.author === 'claude');
+const offered = fromClaude.flatMap((m) => m.options ?? []);
+const withChange = offered.filter((o) => o.change);
+const smallEdits = fromClaude.flatMap((m) => m.smallEdits ?? []);
+const addedItems = fromClaude.flatMap((m) => m.newItemIds ?? []);
+log(`Claude answered in ${Math.round((Date.now() - askAt) / 1000)} s: ${fromClaude.at(-1).text.slice(0, 160)}`);
+log(`  ${answer.type.title} item, made by ${answer.item.createdBy}, ${answer.thread.status.replace('_', ' ')}: ${offered.length} options, ${withChange.length} with a change, ${smallEdits.length} small edits, ${addedItems.length} new items`);
+if (answer.item.type !== 'defense' || answer.item.createdBy !== 'whiteboard') flaws.push(`Asking made a ${answer.item.type} item made by ${answer.item.createdBy}, not a Defense item made by the whiteboard.`);
+if (answer.type.title !== 'Defense questions') flaws.push(`The Defense type is called "${answer.type.title}", not "Defense questions".`);
+// Resolved when the answer needed nothing more from the user, else waiting for them.
+if (!['resolved', 'your_turn'].includes(answer.thread.status)) flaws.push(`The Defense thread came back ${answer.thread.status}, not resolved or your turn.`);
+if (withChange.length || smallEdits.length) {
+  const changes = [...withChange.map((o) => `option "${o.label}"`), ...smallEdits.map((e) => `small edit "${e.summary}"`)];
+  flaws.push(`Claude's answer in the Defense thread changes the draft: ${changes.join(', ')}.`);
+}
+// What Claude added from a Defense thread can only be a Questions or a Concerns item.
+for (const id of addedItems) {
+  const route = `${P}/threads/t-${id}`;
+  const added = must(route, await call(route));
+  log(`  Added from the Defense thread: ${added.type.title} item "${added.item.title}"`);
+  if (!['questions', 'concerns'].includes(added.item.type)) flaws.push(`Claude added "${added.item.title}" (${added.type.title}) from a Defense thread, which may add only Questions or Concerns items.`);
+}
+const navTypes = must(P, await call(P)).types.map((t) => t.id);
+log(`  Defense questions in the nav: ${navTypes.includes('defense') ? 'yes' : 'no'}`);
+if (!navTypes.includes('defense')) flaws.push("The nav doesn't show Defense questions, though it has a thread.");
+await notOnFinalize('after Claude answered', askThread);
+// A question about the defense doesn't make it out of date. A Questions or Concerns item Claude added to the plan in
+// its answer would: that's a plan item like any other.
+const afterAsk = await whiteboardView();
+log(`  Out of date after asking Claude: ${afterAsk.stale ?? 'no'}${addedItems.length ? ` (Claude added ${addedItems.length} items to the plan)` : ''}`);
+if (afterAsk.stale && !addedItems.length) flaws.push(`Asking Claude made the defense out of date: ${afterAsk.stale}`);
+
+// Send the first claim marked Unknown or Verify before release to Questions; with none, the first release concern to
+// Concerns. Its thread starts with Claude, which suggests answers with no message from the user. Those suggestions
+// don't hold up Finalize until the user has written in the thread.
+const unknownClaim = claims.find((c) => c.basis === 'unknown' || c.basis === 'verify');
+const firstConcern = defense.concerns[0];
+const toSend = unknownClaim
+  ? { kind: 'claim', ref: unknownClaim.ref, text: unknownClaim.text, what: `${unknownClaim.section.title}, ${BASIS_LABELS[unknownClaim.basis]}`, typeId: 'questions' }
+  : firstConcern
+    ? { kind: 'concern', ref: firstConcern.id, text: firstConcern.text, what: `release concern, ${firstConcern.severity}`, typeId: 'concerns' }
+    : null;
+let sentThread = null;
+if (!toSend) flaws.push('Nothing could be sent: no claim is marked Unknown or Verify before release, and there are no release concerns.');
+else {
+  if (!unknownClaim) log('No claim is marked Unknown or Verify before release, so the first release concern goes to Concerns instead.');
+  const sendResult = must(`${W}/send`, await call(`${W}/send`, 'POST', { defenseId: defense.id, kind: toSend.kind, ref: toSend.ref }));
+  sentThread = sendResult.threadId;
+  log(`Sent "${toSend.text.slice(0, 80)}" (${toSend.what}) to ${sendResult.typeTitle}: ${sendResult.message}`);
+  if (sendResult.typeId !== toSend.typeId) flaws.push(`It went to ${sendResult.typeTitle}, not ${toSend.typeId}.`);
+  const sendAt = Date.now();
+  const suggested = await claudeReply("Claude's suggested answers for what was sent", sentThread);
+  const options = suggested.open?.options ?? [];
+  const recommended = options.find((o) => o.id === suggested.open?.recommended);
+  log(`Claude suggested answers in ${Math.round((Date.now() - sendAt) / 1000)} s: ${options.length} options${recommended ? `, recommended "${recommended.label}"` : ''}. ${suggested.thread.messages.at(-1).text.slice(0, 120)}`);
+  if (!options.length) flaws.push(`Claude replied on "${suggested.item.title}" without suggesting answers.`);
+  if (suggested.item.createdBy !== 'whiteboard' || suggested.item.fromDefense?.ref !== toSend.ref) flaws.push(`The item "${suggested.item.title}" doesn't say it came from the Whiteboard Defense.`);
+  const blockedBy = (await finalizeView()).checklist.blocking.find((e) => e.threadId === sentThread)?.reason;
+  log(`  Finalize with Claude's suggestions waiting: ${blockedBy ? `blocked: ${blockedBy}` : 'not blocked'}`);
+  if (blockedBy === 'A proposal is waiting for your answer.') flaws.push("Claude's first suggestions on what was sent hold up Finalize before the user has answered.");
+}
+
+// The page links both threads to the parts they came from, and Finalize still leaves the Defense thread out.
+const endView = await whiteboardView();
+if (!endView.asked.some((l) => l.threadId === askThread)) flaws.push("The page doesn't list the thread that asked about the Security model.");
+if (sentThread && !endView.sent.some((l) => l.threadId === sentThread)) flaws.push("The page doesn't show what was sent as sent.");
+await notOnFinalize('at the end', askThread);
+log(`Whiteboard Defense: written in ${generatedIn} s, level ${defense.level}, ${defense.questions.length} questions, ${defense.concerns.length} concerns, ${claims.length} claims; asked ${endView.asked.length}, sent ${endView.sent.length}; out of date: ${endView.stale ?? 'no'}`);
+if (flaws.length) throw new Error(`The Whiteboard Defense isn't right:\n- ${flaws.join('\n- ')}`);
 log('Smoke test passed.');

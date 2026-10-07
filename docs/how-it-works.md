@@ -8,7 +8,7 @@ This guide explains, in plain terms, what each part of dev-plumbing does, how it
   - **The app:** a small program on your Mac, plus a web page. It stores your plumbing projects and lets you read and answer threads.
   - **The plugin:** an add-on for **Claude Code** that lets Claude work with that app.
 - **`/dev-plumbing` is a Claude Code command, not a terminal command.** You type it inside a Claude Code session (the `claude` CLI, the desktop app or an IDE extension). A plain shell doesn't know it.
-- **Claude never edits your plan or your code.** It reads them, and writes only into dev-plumbing's own files, through a few dedicated tools. The only things that land in your repo are the final spec and its mockups in `<name>.assets/`, and only when you accept it.
+- **Claude never edits your plan or your code.** It reads them, and writes only into dev-plumbing's own files, through a few dedicated tools. The only things that land in your repo are the final spec and its mockups in `<name>.assets/`, when you accept the final, and the Whiteboard Defense as `<name>.whiteboard-defense.md`, when you export it.
 - **Your main Claude window stays light.** It hands every real piece of work to **subagents**: helper Claudes, each with its own fresh memory. It only ever sees one-line summaries.
 - **The app works without Claude.** You can read, answer and save drafts any time. You only need a Claude window listening for Claude to reply.
 
@@ -19,7 +19,7 @@ This guide explains, in plain terms, what each part of dev-plumbing does, how it
 | **The service** | A small Node program that holds everything together. It reads and writes your projects, serves the web app, and answers the plugin's requests. It only listens on your own Mac (`127.0.0.1`, port 4545 by default). | Runs from this checkout's build. `dev-plumbing start`, `stop` and `status` control it. |
 | **The web app** | The pages you use in the browser: projects, threads, lists, drawings, the Draft and Settings. It gets live updates from the service, so replies appear without reloading. | Served by the service at `http://127.0.0.1:4545`. |
 | **The CLI** | The `dev-plumbing` command in your terminal. `setup` creates your config, installs the plugin, and can turn on start-at-login. | `packages/cli` |
-| **The plugin** | The Claude Code add-on: one skill, four agents and one MCP server, all explained below. | `plugin/` in this repo. Claude Code loads it from here. |
+| **The plugin** | The Claude Code add-on: one skill, five agents and one MCP server, all explained below. | `plugin/` in this repo. Claude Code loads it from here. |
 | **Your config** | Settings, models, repo profiles, and the rules for each plumbing type, all in plain files you can edit (or edit in the app). | `~/.dev-plumbing/` |
 | **Your projects** | One folder per plumbing project: the plan's copies, items, threads and history. | The projects folder from Settings (default `~/dev-plumbing-projects`), or the one a repo profile sets. |
 
@@ -45,8 +45,9 @@ An **agent** (a "subagent" when it runs) is a separate Claude with its own instr
 |---|---|---|
 | `repo-setup` | The first time you use dev-plumbing in a repo, and again after **Detect again** in Settings → Repos. It looks around the repo (plan folders, schema file, apps) and saves a **repo profile**. | Read-only file tools, `dp_repo_profile` |
 | `importer` | Once per plumbing type, when a plan is imported, and again when you bring in a new version of the plan. It reads the plan (and code, if the type's rules say so) and writes that type's items: questions, concerns, database changes and so on. | Read-only file tools, `dp_context`, `dp_write_items` |
-| `thread` | Once per thread (or group of linked threads) you send, and once per Plan changes thread after an update. It reads the thread and the code, then posts its reply. | Read-only file tools, `dp_context`, `dp_reply` |
+| `thread` | Once per thread (or group of linked threads) you send, once per Plan changes thread after an update, and once per unknown or concern you send from the Whiteboard Defense. It reads the thread and the code, then posts its reply. | Read-only file tools, `dp_context`, `dp_reply` |
 | `finalizer` | When you press **Start finalize**. It writes the final spec from the draft, the items and the decisions, following `outputs/finalize.md`. | Read-only file tools, `dp_context`, `dp_finalize` |
+| `whiteboard` | When you press **Generate**, **Regenerate** or **Try again** on the Whiteboard Defense page. It writes the Whiteboard Defense from the final (or the draft), the items, the decisions and the repo profile, following `outputs/whiteboard-defense.md`. | Read-only file tools, `dp_context`, `dp_whiteboard` |
 
 None of the agents can edit files or run commands. The only way they can write anything is through the dp tools, and the service checks everything they send.
 
@@ -63,12 +64,13 @@ Which Claude model each agent uses is set in `~/.dev-plumbing/agents.json`. It a
 | Tool | Used by | What it does |
 |---|---|---|
 | `dp_open` | Main window | Opens a plumbing project: imports a new plan, reopens an existing one, or lists this repo's projects. It also reports when the repo needs a profile first. When the plan in this clone has changed since the project's current version, it says so (`plan-changed`) and changes nothing. Called again with `update: true`, it brings the new version in (`updated`), merging it into your draft, or, with `fresh: true` as well, starting the draft again from it; with `update: false`, it opens the project as it was. |
-| `dp_wait` | Main window | Listens until you press **Send this thread**, **Submit all** or **Start finalize**, or ask to **Detect again**. Then it returns the work (threads to answer, a final to write, or a repo profile to detect) and which model to use. After an update, it first hands out the Plan changes threads waiting for Claude. |
+| `dp_wait` | Main window | Listens until you press **Send this thread**, **Submit all**, **Start finalize** or **Generate** on the Whiteboard Defense page, or ask to **Detect again**. Then it returns the work (threads to answer, a final to write, a Whiteboard Defense to write, or a repo profile to detect) and which model to use. After an update, it first hands out the Plan changes threads waiting for Claude. |
 | `dp_repo_profile` | repo-setup | Reads or saves the repo profile. |
-| `dp_context` | importer, thread, finalizer | Gets the "context pack" for one job: the plan text, the plumbing type's rules, the thread so far, past decisions and related items. The finalizer's pack has the draft, every item, the decisions with why, the defaults and the drawing tokens it may use. When the plan is re-imported, an importer's pack also has what changed between the two versions, and its type's items with their keys and drawings. |
+| `dp_context` | importer, thread, finalizer, whiteboard | Gets the "context pack" for one job: the plan text, the plumbing type's rules, the thread so far, past decisions and related items. The finalizer's pack has the draft, every item, the decisions with why, the defaults and the drawing tokens it may use. When the plan is re-imported, an importer's pack also has what changed between the two versions, and its type's items with their keys and drawings. The whiteboard subagent's pack names the rules file and the document (the final or the draft) for it to read, so it stays small on a big plan, and has every item with its own file (a diagram's drawing comes inline), the decisions, the defaults, the open items, the repo profile's conventions, sensitive data, schema and apps, and the last defense's questions and unknowns; a Defense thread's pack also has the whole Whiteboard Defense. |
 | `dp_write_items` | importer | Saves everything one plumbing type found, all at once. If anything is wrong, nothing is saved and the error lists every problem. |
 | `dp_reply` | thread | Posts a reply to a thread: text, options for you to choose from, small edits to the draft, new items, or a resolution. It is also checked as a whole. |
 | `dp_finalize` | finalizer | Sends the final spec. The service replaces each drawing token with a block made from that item's data. If any token is wrong, the whole document is refused, with every problem listed. |
+| `dp_whiteboard` | whiteboard | Sends the Whiteboard Defense as structured data: the level and its reasons, ten sections of statements, each marked known, inferred, unknown or verify, the questions with their answers and the release concerns. The service adds the titles and ids, and copies the rules file's checklist. If anything is wrong, the whole defense is refused, with every problem listed, and the last one saved stays as it was. |
 
 ### How the plugin gets installed
 
@@ -240,6 +242,37 @@ Plans change after they're imported: someone edits the spec, or you pull a newer
    - Open one to read that version's plan and draft, and, for a version an update brought in, what that update changed in your draft.
    - **Compare with** shows what changed in the plan between it and another version.
 
+## Whiteboard Defense
+
+"If you ship it, you should be able to explain it." The Whiteboard Defense is Claude's defense of the plan: how it works, what could fail and what's still unknown. You study it, and practise explaining it, before you build. It follows `~/.dev-plumbing/outputs/whiteboard-defense.md`, which you can edit on the Plumbing rules page.
+
+1. **Generate.** The header's **Whiteboard Defense** button, or the **Defense** tab on a phone, opens its page. **Generate** saves a request in the project, as **Start finalize** does. A listening Claude window picks it up through `dp_wait`, after any threads waiting for Claude and any finalize, and starts one `whiteboard` subagent, on the model `agents.json` sets for it (opus by default). Writing it can take ten minutes or more.
+   - With no window listening, the request waits, and the page says "No Claude window is listening. Run /dev-plumbing in any clone."
+   - While it's written, that window is busy: the page says "Claude is writing the Whiteboard Defense. Threads you send now wait until it's done.", and so does what you send meanwhile.
+   - If the window goes away, the request goes back in the queue for another window. If the subagent comes back without a defense, the page says why (its own "Failed: …" line, or "The whiteboard subagent didn't send a Whiteboard Defense.") and offers **Try again**, or **Dismiss** to keep the defense you had.
+   - **Cancel** clears the request, whatever its state. One is written at a time, and none while the plan is importing.
+2. **Write.** The subagent reads its context pack. The rules and the document it explains are files it reads, so the pack stays small whatever the size of the plan: the final while it's current (nothing changed and no newer plan version since you accepted it), else the draft. A defense written while a final waits for you to accept it is based on the draft, and goes Out of date once you accept. The pack also has every item, the decisions, the defaults and every open question, the repo profile's conventions and sensitive data, which raise the review level, and the last defense's questions and unknowns, whose wording it keeps where they still apply. It may read the code in the clone to check a statement. It sends the defense with `dp_whiteboard`:
+   - a review level, 1 **Lightweight**, 2 **Standard** or 3 **High risk**, with its reasons;
+   - the 13 sections, from **Executive summary** to **Checklist**: ten of statements, the questions you should be able to answer with their answers, and the release concerns from **Critical** to **Informational**. The service adds the checklist, copied word for word from the rules file;
+   - every statement marked **Known**, **Inferred**, **Unknown** or **Verify before release**. What isn't known is marked Unknown, not made up.
+
+   The service checks the whole defense: every section there once, each with at least one statement, a cell for every column of a table, a diagram that names a real drawing, no question twice, and the size. If anything is wrong, nothing is saved, the subagent is told every problem at once and sends it again, and the defense you had stays as it was. A saved one replaces it.
+3. **Study.** The page shows the 13 sections as a readable page, with a table of contents, tables, the diagram (drawn from the project's own data, or as text) and each statement's mark. It says what it was written from, for example "Based on the draft (v2)".
+4. **Practice.** One flashcard per question: show the answer, then rate yourself **Could explain it**, **Shaky** or **Couldn't**, and the next card comes up. Space or Enter shows the answer, 1 to 3 rate it, and the arrow keys move. **Only shaky and couldn't** keeps just the cards you rated so when you turn it on. The readiness meter is half flashcards and half checklist: the cards you could explain and half the shaky ones, out of all the cards, and the checklist lines you ticked, out of all the lines. Ratings and ticks are kept by their text, so a regenerated defense keeps the ones that still apply.
+5. **Ask Claude about this.** Any section, question or release concern can start a thread: type your question, and it goes to Claude as **Send this thread** sends one.
+   - The thread is an item of **Defense questions**, a plumbing type built into the app. It appears in the navigation once you've asked something.
+   - Its `thread` subagent gets the whole defense in its pack, and answers from the plan, the decisions and the code. When the answer needs nothing more from you, Claude resolves the thread with it, so it doesn't wait in your Inbox: reply to carry on.
+   - A Defense thread never changes the draft, never blocks Finalize and never goes into the final, and what's decided in it stays there: other threads never see it. When an answer shows a gap in the plan, Claude adds a Questions or Concerns item instead (it can add no other kind). That item is part of the plan like any other.
+6. **Send to Questions or Concerns.** A statement marked Unknown or Verify before release can go to **Questions**, and a release concern to **Concerns**, in one click.
+   - It becomes an ordinary item, and its thread goes straight to Claude, which suggests answers. Those suggestions don't hold up Finalize until you've answered in the thread.
+   - A sent concern keeps its weight: critical and high become high, so it blocks Finalize until it's resolved, like any high concern.
+   - Each part is sent once, even after **Regenerate**: one with the same text shows as sent, linked to its thread.
+7. **Out of date.** The defense remembers what it was written from. When the plan changes, the page says "Out of date: the plan changed since this was generated.", or "Out of date: a final was accepted since this was generated." when it was written from the draft and would now be written from a final, and **Regenerate** becomes the main button.
+   - **These make it out of date:** a change to the document it was written from, an item added or changed, a thread parked or unparked, and a new decision. So does answering a question you sent from it, since that adds a decision, and a Questions or Concerns item Claude adds while answering a Defense thread. A defense of the final also goes out of date once the final isn't current: a change applied, or a newer plan version.
+   - **These don't:** asking Claude about it, and anything decided in those Defense threads; sending to Questions or Concerns; practising; review marks and flags.
+   - The old defense stays readable, and Practice keeps working, until a new one is saved.
+8. **Export .md.** Pick a clone, as for Accept. The defense is written into it as `<name>.whiteboard-defense.md`, next to the plan, saying what it was written from and when, with the diagram it names drawn in Mermaid. A later export replaces it (the form says so), nothing else is written, and it works when the defense is out of date too.
+
 ## Where everything is stored
 
 ```
@@ -248,7 +281,7 @@ Plans change after they're imported: someone edits the spec, or you pull a newer
   agents.json                    which model each agent uses, how many run at once
   repos/<name>.json              repo profiles
   plumbing/<type>.md             the rules for each plumbing type (add a file to add a type)
-  outputs/                       rules for Finalize (finalize.md) and, later, Whiteboard Defense
+  outputs/                       rules for Finalize (finalize.md) and the Whiteboard Defense (whiteboard-defense.md)
   run/                           service.json (port and token), service.log, install info, detect.json (Detect again)
 
 <projects folder>/<repo>/<project>/
@@ -266,6 +299,9 @@ Plans change after they're imported: someone edits the spec, or you pull a newer
   history/                       every change made to the draft, for Undo and the Changes view
   finalize.json                  the finalize request under way, if there is one
   finals/                        earlier finals, kept when you finalize again
+  whiteboard/request.json        the Whiteboard Defense request under way, if there is one
+  whiteboard/defense.json        the Whiteboard Defense
+  whiteboard/practice.json       your flashcard ratings and checklist ticks
 ```
 
 Every write is atomic: the file is written in full or not at all. So a crash never leaves a half-written file.
@@ -278,7 +314,7 @@ Every write is atomic: the file is written in full or not at all. So a crash nev
   - Requests with an unexpected `Host` are refused, which blocks DNS-rebinding tricks.
 - **Read-only agents.** Agents get only read-only file tools plus their dp tools, so they can't edit your repo or run commands.
 - **You decide where files go.** A repo profile written by an agent can't choose where dev-plumbing writes files. Only you can set that.
-- **One write into your repo.** Accept copies the final into the clone you pick, as `<name>.final.md` and `<name>.assets/`, next to the plan. The clone must have this repo's remote, nothing is written through a symlink, and the plan itself is never touched.
+- **Two writes into your repo, both when you ask.** Accept copies the final into the clone you pick, as `<name>.final.md` and `<name>.assets/`, next to the plan. **Export .md** writes the Whiteboard Defense there as `<name>.whiteboard-defense.md`, and nothing else. Either way, the clone must have this repo's remote, nothing is written through a symlink, and the plan itself is never touched.
 - **Updates only read your plan.** Bringing a new version in reads the plan in your clone, and writes only inside the plumbing project.
 - **Everything is checked.** The service checks every batch of items and every reply as a whole. If any part is wrong, nothing is saved.
 
@@ -293,6 +329,8 @@ Every write is atomic: the file is written in full or not at all. So a crash nev
 **Can two Claude windows listen at once?** Yes. Each submission goes to one window. If a window disappears mid-answer, its unanswered threads come back to you.
 
 **I edited the plan in the repo. Does dev-plumbing pick it up?** Not by itself. Run `/dev-plumbing` with the plan again, and answer **Update to v2**. The version you had stays under **Versions**.
+
+**Does asking Claude about the Whiteboard Defense hold up Finalize?** No. Defense threads never block Finalize and never go into the final. An unknown or a concern you send to Questions or Concerns does count, like any other item there, and so does a Questions or Concerns item Claude adds while answering.
 
 **How do I see what the service is doing?** Run `dev-plumbing status`, or read `~/.dev-plumbing/run/service.log`.
 
@@ -311,6 +349,8 @@ Every write is atomic: the file is written in full or not at all. So a crash nev
 | Final | `final.md`: the finished spec Finalize writes, also copied into your repo as `<name>.final.md`. |
 | Version | One state of the plan: v1 is the import, and each update adds the next. Earlier ones are kept under **Versions**. |
 | Plan changes | The passages that both you and the repo changed, one thread each, after an update. |
+| Whiteboard Defense | Claude's defense of the plan, to study and practise explaining before you build: a review level, 13 sections, flashcards and a checklist. |
+| Defense questions | The plumbing type for your questions to Claude about the Whiteboard Defense, one thread each. It never blocks Finalize or goes into the final. |
 | Submission | One Send or Submit all: the answers you sent, saved before Claude sees them. |
 | Repo profile | dev-plumbing's notes about one repo, such as where its plans and schema live. |
 | Skill | A set of instructions Claude follows when you run its command. |

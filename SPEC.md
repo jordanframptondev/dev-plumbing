@@ -299,6 +299,7 @@ Every setting is defined once in code, as a Zod schema with a description. `dev-
     decisions.json
     submissions/<timestamp>.json           # what was sent, and when Claude picked it up
     history/<timestamp>.json               # every applied change, for Undo
+    whiteboard/request.json                # a Whiteboard Defense being asked for
     whiteboard/defense.json                # the generated Whiteboard Defense
     whiteboard/practice.json               # your flashcard ratings and checklist ticks
 ```
@@ -309,7 +310,7 @@ Every setting is defined once in code, as a Zod schema with a description. `dev-
   - `original.md` is the plan exactly as imported
   - `draft.md` is where every accepted change lands
   - `final.md` is written by Finalize.
-- **The only write into your repo** is Finalize's copy of the final: `<name>.final.md` and `<name>.assets/`, next to the plan. It goes to the source clone by default, and you can pick another.
+- **The only writes into your repo** are Finalize's copy of the final, `<name>.final.md` and `<name>.assets/`, and the Whiteboard Defense's **Export .md**, `<name>.whiteboard-defense.md`, both next to the plan. Each goes to the source clone by default, and you can pick another.
 
 ---
 
@@ -692,16 +693,19 @@ type Submission = { id: string; at: string; scope: "thread" | "all";
 type Claim = { text: string; basis: "known" | "inferred" | "unknown" | "verify" };
 
 type WhiteboardDefense = {
-  generatedAt: string;
-  basedOn: { kind: "plan" | "code"; decisionsVersion: string; branch?: string; commit?: string };
+  id: string; generatedAt: string;
+  basedOn: { kind: "plan"; doc: "final" | "draft"; version: number; inputsHash: string };   // "code": defend the code, Phase 2
   level: 1 | 2 | 3; levelReasons: string[];
-  sections: { id: string; title: string; claims: Claim[]; tables?: unknown[]; diagramId?: string }[];
-  presenter: { chapters: { id: string; title: string;
+  sections: { id: string; title: string; claims: Claim[];                  // the ten prose sections, in order
+              tables: { title: string; columns: string[]; rows: string[][] }[];
+              diagram: string | null; diagramItemId: string | null }[];
+  presenter?: { chapters: { id: string; title: string;                      // Present (Plan 7)
                steps: { caption: string; reveal: string[];                // node/edge ids
                         notes?: { near: string; text: string; ink: "ink" | "slate" | "seal" | "moss" }[] }[] }[] };
   questions: { id: string; q: string; a: string; basis: Claim["basis"] }[];
-  concerns: { severity: "critical" | "high" | "medium" | "low" | "info"; text: string }[];
+  concerns: { id: string; severity: "critical" | "high" | "medium" | "low" | "info"; text: string; basis: Claim["basis"] }[];
   checklist: { id: string; text: string }[];
+  exportedTo?: { clone: string; path: string; at: string };
 };
 ```
 
