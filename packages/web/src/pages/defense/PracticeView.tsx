@@ -20,6 +20,9 @@ const SHAKY = "Only shaky and couldn't";
 
 /** True when a key press is typing into a field, not practising: the keys are the field's then. */
 const typing = (e: KeyboardEvent) => e.target instanceof Element && e.target.closest('input, textarea, select') !== null;
+/** True when the focus is on a control that Space or Enter activates: the key is the control's then, not "show answer". */
+const onControl = (e: KeyboardEvent) =>
+  e.target instanceof Element && e.target.closest('button, a, input, textarea, select, [role=switch], [role=tab], [contenteditable]') !== null;
 
 /**
  * Practice: how ready you are, one card at a time, and the checklist. Show answer (or Space or Enter) reveals the
@@ -77,15 +80,16 @@ export function PracticeView({ view, repo, project, place, onPlace }: PracticeVi
     const onKey = (e: KeyboardEvent) => {
       if (!q || e.metaKey || e.ctrlKey || e.altKey || typing(e)) return;
       if ((e.key === ' ' || e.key === 'Enter') && !shown) {
+        if (onControl(e)) return;
         // So a focused button isn't pressed too.
         e.preventDefault();
         setShown(true);
       } else if (shown && !rate.isPending && ['1', '2', '3'].includes(e.key)) {
         const value = RATINGS[Number(e.key) - 1]!.value;
         rateCard(p.ratings[q.id] === value ? null : value);
-      } else if (e.key === 'ArrowLeft' && at > 0) {
+      } else if (e.key === 'ArrowLeft' && at > 0 && !rate.isPending) {
         go(at - 1);
-      } else if (e.key === 'ArrowRight' && at < n - 1) {
+      } else if (e.key === 'ArrowRight' && at < n - 1 && !rate.isPending) {
         go(at + 1);
       }
     };
@@ -114,7 +118,7 @@ export function PracticeView({ view, repo, project, place, onPlace }: PracticeVi
       ) : (
         <>
           <div className="mt-6 flex items-center gap-2.5">
-            <Switch id="practice-shaky" checked={place.deck !== null} onChange={toggleDeck} label={SHAKY} />
+            <Switch id="practice-shaky" checked={place.deck !== null} onChange={toggleDeck} label={SHAKY} disabled={rate.isPending} />
             <label htmlFor="practice-shaky" className="text-[13px] text-ink-2">
               {SHAKY}
             </label>
@@ -138,10 +142,10 @@ export function PracticeView({ view, repo, project, place, onPlace }: PracticeVi
                   asked={view.asked}
                 />
                 <div className="mt-3 flex gap-2">
-                  <Button size="sm" disabled={at === 0} onClick={() => go(at - 1)}>
+                  <Button size="sm" disabled={at === 0 || rate.isPending} onClick={() => go(at - 1)}>
                     Previous
                   </Button>
-                  <Button size="sm" disabled={at >= n - 1} onClick={() => go(at + 1)}>
+                  <Button size="sm" disabled={at >= n - 1 || rate.isPending} onClick={() => go(at + 1)}>
                     Next
                   </Button>
                 </div>

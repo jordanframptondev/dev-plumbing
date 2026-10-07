@@ -221,4 +221,45 @@ describe('Practice', () => {
     expect(screen.queryByRole('switch')).toBeNull();
     expect(screen.getByTestId('defense-checklist')).toBeTruthy();
   });
+
+  it('leaves a focused control alone: Space or Enter on Next moves, and Space on the switch toggles it', async () => {
+    show(view({ practice: practice(RATED) }));
+    const next = await screen.findByRole('button', { name: 'Next' });
+    next.focus();
+    fireEvent.keyDown(next, { key: 'Enter' });
+    fireEvent.keyDown(next, { key: ' ' });
+    expect(screen.queryByTestId('flashcard-answer')).toBeNull();
+    // The browser turns Enter or Space on a button into a click.
+    fireEvent.click(next);
+    expect(card().textContent).toContain('Card 2 of 3');
+    expect(screen.queryByTestId('flashcard-answer')).toBeNull();
+    const only = screen.getByRole('switch', { name: "Only shaky and couldn't" });
+    only.focus();
+    fireEvent.keyDown(only, { key: ' ' });
+    expect(screen.queryByTestId('flashcard-answer')).toBeNull();
+    fireEvent.click(only);
+    expect(only.getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('holds the card and the deck while a rating is saving, then moves on in the same deck', async () => {
+    show(view({ practice: practice(RATED) }));
+    let done!: (p: ReturnType<typeof practice>) => void;
+    vi.spyOn(api, 'ratePractice').mockReturnValue(new Promise((r) => (done = r)));
+    const only = await screen.findByRole('switch', { name: "Only shaky and couldn't" });
+    fireEvent.click(only);
+    fireEvent.click(screen.getByTestId('show-answer'));
+    fireEvent.click(screen.getByRole('button', { name: 'Could explain it' }));
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Next' }) as HTMLButtonElement).disabled).toBe(true));
+    expect((screen.getByRole('button', { name: 'Previous' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((only as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    fireEvent.click(only);
+    fireEvent.keyDown(window, { key: 'ArrowRight' });
+    fireEvent.keyDown(window, { key: 'ArrowLeft' });
+    expect(card().textContent).toContain('Card 1 of 2');
+    expect(only.getAttribute('aria-checked')).toBe('true');
+    done(practice({ ...RATED, ratings: { ...RATED.ratings, q2: 'could' } }));
+    await waitFor(() => expect(card().textContent).toContain('Card 2 of 2'));
+    expect(card().textContent).toContain('Who can change the lead time?');
+  });
 });
