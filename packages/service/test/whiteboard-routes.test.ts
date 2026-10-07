@@ -1,7 +1,8 @@
+import { readFileSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { readProjectFile, writeProjectFile } from '@dev-plumbing/core';
+import { projectFiles, readProjectFile, writeProjectFile } from '@dev-plumbing/core';
 import { makeRepo, validDefenseInput } from '../../core/test/fixtures';
 import { removeTempDirs } from './helpers';
 import { base, P, setup, type Json, type Setup } from './whiteboardSetup';
@@ -217,6 +218,32 @@ describe('the Whiteboard Defense page over HTTP', () => {
     await fs.appendFile(path.join(t.dir, 'docs', 'draft.md'), '\nReminders stop when the subscription is paused.\n');
     expect((await t.send('GET', W)).body).toMatchObject({ stale: 'Out of date: the plan changed since this was generated.', canGenerate: true });
     expect((await t.send('GET', P)).body.defense).toEqual({ ready: true, stale: true, state: null });
+  });
+
+  it("still answers when the plan can't be read, and Generate fails with Try again rather than wedging the window", async () => {
+    const t = await setup();
+    const { defense } = await saved(t);
+    await fs.rm(path.join(t.dir, 'docs', 'draft.md'));
+    const view = await t.send('GET', W);
+    expect(view.status).toBe(200);
+    expect(view.body).toMatchObject({ defense: { id: defense.id }, stale: null, canGenerate: true });
+
+    const generated = await t.send('POST', W, {});
+    expect(generated.status).toBe(200);
+    // The request's state each time the page is told the project changed.
+    const told: string[] = [];
+    const off = t.rt.events.on((e) => {
+      if (e.type === 'project') told.push(JSON.parse(readFileSync(projectFiles(t.dir).whiteboardRequest, 'utf8')).state);
+    });
+    // dp_wait carries on: nothing to hand out, and the request fails with why, which the page is told.
+    expect((await t.claude('/wait', { ...base, windowId: 'w-a', timeoutSeconds: 0 })).body).toEqual({ kind: 'timeout' });
+    off();
+    expect(told.at(-1)).toBe('failed');
+    expect((await t.send('GET', W)).body).toMatchObject({
+      request: { id: generated.body.request.id, state: 'failed', reason: "The Whiteboard Defense couldn't read the plan: docs/draft.md can't be read." },
+      canGenerate: true,
+      generateRefusal: null,
+    });
   });
 
   it('needs the token or the same origin', async () => {

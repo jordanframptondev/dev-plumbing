@@ -265,6 +265,26 @@ describe('generating a Whiteboard Defense', () => {
     expect(await pickUpWhiteboard(dir, 'w-a', T2)).toMatchObject({ id: request.id, state: 'writing', pickedUpAt: T2.toISOString(), pickedUpBy: 'w-a' });
   });
 
+  it("fails, rather than throwing, when the plan it would explain can't be read", async () => {
+    // A final recorded as accepted whose file is gone.
+    const dir = await seed();
+    await acceptFinal(dir);
+    await fs.rm(path.join(dir, 'docs', 'final.md'));
+    const request = await requestWhiteboard(dir, { now: T0 });
+    const failed = await pickUpWhiteboard(dir, 'w-a', T1);
+    expect(failed).toEqual({ ...request, state: 'failed', failedAt: T1.toISOString(), reason: "The Whiteboard Defense couldn't read the plan: docs/final.md can't be read." });
+    expect(await readWhiteboardRequest(dir)).toEqual(failed);
+    // A failed request is finished: nothing to pick up, and Try again asks for a new one.
+    expect(await pickUpWhiteboard(dir, 'w-a', T2)).toBeNull();
+    expect((await requestWhiteboard(dir, { now: T2 })).state).toBe('requested');
+
+    // The reason is cut to 500 characters.
+    await writeProjectFile(dir, { ...(await readProjectFile(dir)), docs: { ...(await readProjectFile(dir)).docs, final: `docs/${'gone/'.repeat(120)}final.md` } });
+    const reason = (await pickUpWhiteboard(dir, 'w-a', T3))?.reason ?? '';
+    expect(reason).toHaveLength(500);
+    expect(reason).toMatch(/^The Whiteboard Defense couldn't read the plan: docs\/gone\/gone\/.*…$/);
+  });
+
   it("won't save for another request, or for one that isn't being written", async () => {
     const dir = await seed();
     const request = await requestWhiteboard(dir);

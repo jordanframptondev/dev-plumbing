@@ -81,7 +81,8 @@ export function whiteboardRoutes(ctx: AppContext, rt: Runtime): Hono {
     const view: WhiteboardView = {
       request,
       defense,
-      stale: defense ? await defenseStale(ref.dir, defense) : null,
+      // When the document it explains can't be read, the page still loads, and Generate fails with why (pickUpWhiteboard).
+      stale: defense ? await defenseStale(ref.dir, defense).catch(() => null) : null,
       practice: defense ? practiceView(defense, await readPractice(ref.dir)) : null,
       ...(defense ? await defenseLinks(ref.dir, defense) : { asked: [], sent: [] }),
       canGenerate: generateRefusal === null,

@@ -579,6 +579,11 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
           const request = await pickUpFinalize(ref.dir, body.windowId);
           if (request) return { kind: 'finalize' as const, request };
           const whiteboard = await pickUpWhiteboard(ref.dir, body.windowId);
+          // One whose plan can't be read failed instead: nothing to hand out, but the page offers Try again.
+          if (whiteboard?.state === 'failed') {
+            changed(ref);
+            return null;
+          }
           return whiteboard ? { kind: 'whiteboard' as const, request: whiteboard } : null;
         });
         if (picked) {

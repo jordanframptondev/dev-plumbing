@@ -23,7 +23,7 @@ import { stable } from './changes';
 import { changesSinceFinal } from './checklist';
 import { activeDecisions } from './decisions';
 import { draftHash } from './finalize';
-import { ConflictError, newId, projectFiles, readDecisions, readDocText, readHistory, readItems, readJsonFile, readProjectFile, readThreads } from './io';
+import { ConflictError, newId, projectFiles, readDecisions, readDocText, readHistory, readItems, readJsonFile, readProjectFile, readThreads, StoreError } from './io';
 import { planVersionSinceFinal } from './update';
 import { nothingSaved } from './validate';
 import { currentVersion } from './versions';
@@ -89,8 +89,13 @@ export const MAX_DEFENSE_CHARS = 120_000;
 /** A defense keeps at most this many checklist lines, each at most this long (defenseInputSchema's limits). */
 const CHECKLIST_MAX = 40;
 const LINE_MAX = 300;
-/** A failed request's reason, when it's the subagent's own line, is cut to this many characters. */
+/** A failed request's reason, when it's the subagent's own line or why the plan couldn't be read, is cut to this many characters. */
 const REASON_MAX = 500;
+/** A failed request's reason when the document the defense would explain can't be read, before the read's own message. */
+const UNREADABLE_PLAN = "The Whiteboard Defense couldn't read the plan:";
+
+/** A failed request's reason, cut to REASON_MAX characters with "…". */
+const clipReason = (reason: string) => (reason.length <= REASON_MAX ? reason : `${reason.slice(0, REASON_MAX - 1)}…`);
 
 type DefenseBasis = { doc: 'final' | 'draft'; version: number; text: string };
 
@@ -159,18 +164,31 @@ export async function requestWhiteboard(dir: string, o: { now?: Date } = {}): Pr
  * document (the final, else the draft), the plan version and defenseInputsHash. Null when there's nothing to take, and
  * while the plan is importing: a request made before a plan update waits out its re-import, so it's never written from
  * a half re-imported project.
+ *
+ * When that document can't be read (a final recorded as accepted whose file is gone, say), the request fails with the
+ * reason, so dp_wait carries on and the page offers Try again, and the failed request is returned: there's nothing for
+ * the window to write.
  */
 export async function pickUpWhiteboard(dir: string, windowId: string, now: Date = new Date()): Promise<WhiteboardRequest | null> {
   const current = await readWhiteboardRequest(dir);
   if (current?.state !== 'requested' || (await readProjectFile(dir)).status === 'importing') return null;
-  const { doc, version } = await defenseBasis(dir);
+  let read: { basis: DefenseBasis; inputsHash: string };
+  try {
+    const basis = await defenseBasis(dir);
+    read = { basis, inputsHash: await inputsHashFor(dir, basis) };
+  } catch (e) {
+    if (!(e instanceof StoreError)) throw e;
+    const failed: WhiteboardRequest = { ...current, state: 'failed', failedAt: now.toISOString(), reason: clipReason(`${UNREADABLE_PLAN} ${e.message}`) };
+    await writeWhiteboardRequest(dir, failed);
+    return failed;
+  }
   const next: WhiteboardRequest = {
     ...current,
     state: 'writing',
     pickedUpAt: now.toISOString(),
     pickedUpBy: windowId,
-    inputsHash: await defenseInputsHash(dir),
-    basedOn: { doc, version },
+    inputsHash: read.inputsHash,
+    basedOn: { doc: read.basis.doc, version: read.basis.version },
   };
   await writeWhiteboardRequest(dir, next);
   return next;
@@ -334,7 +352,7 @@ export async function finishWhiteboard(dir: string, o: { requestId: string; wind
   const current = await readWhiteboardRequest(dir);
   if (current?.id !== o.requestId || current.state !== 'writing' || current.pickedUpBy !== o.windowId) return;
   const error = o.error?.trim();
-  const reason = !error ? WHITEBOARD_GAVE_UP : error.length <= REASON_MAX ? error : `${error.slice(0, REASON_MAX - 1)}…`;
+  const reason = error ? clipReason(error) : WHITEBOARD_GAVE_UP;
   await writeWhiteboardRequest(dir, { ...current, state: 'failed', failedAt: (o.now ?? new Date()).toISOString(), reason });
 }
 
