@@ -2,12 +2,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { writeFileAtomic } from '../atomic';
 import { mockupAssetHtml, mockupAssetName } from '../finalExport';
-import { gitInfo } from '../git';
 import { expandHome } from '../paths';
-import { dataKindOf, normalizeRemote, parseData, type PlumbingProject, type PlumbingType, type RepoProfile } from '../schemas';
-import { discardProposal, finalInputsHash, finalName, readFinalize } from './finalize';
+import { dataKindOf, parseData, type PlumbingProject, type PlumbingType, type RepoProfile } from '../schemas';
+import { checkClone, checkTarget, planFolder, readOrNull, within } from './cloneTarget';
+import { discardProposal, finalInputsHash, readFinalize } from './finalize';
 import { ConflictError, docPath, InputError, readItems, readProjectFile, writeProjectFile } from './io';
-import { matchProfile, tildify } from './open';
+import { tildify } from './open';
 
 type ExportedTo = NonNullable<PlumbingProject['docs']['exportedTo']>;
 type Asset = { name: string; html: string };
@@ -22,68 +22,21 @@ const ASSET_NAME = /^[a-z0-9][a-z0-9-]*\.(after|before)\.html$/;
 const quiet = () => undefined;
 /** What's at p, without following a link, or null when nothing is. */
 const lstat = (p: string) => fs.lstat(p).catch(() => null);
-/** A file's contents, or null when there is no such file. Any other failure to read it stops Accept before it writes. */
-async function readOrNull(file: string, label: string): Promise<Buffer | null> {
-  try {
-    return await fs.readFile(file);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
-    throw new InputError(`${label} couldn't be read (${error instanceof Error ? error.message : String(error)}). Fix that, then accept again.`);
-  }
-}
-/** p is root, or inside it. */
-const within = (root: string, p: string) => {
-  const rel = path.relative(root, p);
-  return !rel.startsWith('..') && !path.isAbsolute(rel);
-};
-
-/** The clone's real path, once it's known to be the top of a git clone whose remote is one of the profile's. */
-async function checkClone(clone: string, profile: RepoProfile, home: string | undefined): Promise<string> {
-  if (!(clone === '~' || clone.startsWith('~/') || path.isAbsolute(clone))) throw new InputError('Pick a clone by its full path.');
-  const root = await fs.realpath(expandHome(clone, home)).catch(() => null);
-  const stat = root ? await fs.stat(root).catch(() => null) : null;
-  if (!root || !stat?.isDirectory()) throw new InputError(`${clone} isn't a folder on this Mac.`);
-  const git = await gitInfo(root).catch(() => null);
-  if (!git) throw new InputError(`${clone} isn't a git clone. Copy into a clone of ${profile.name}.`);
-  if ((await fs.realpath(git.root).catch(() => git.root)) !== root) throw new InputError(`${clone} is a folder inside a clone. Pick the clone itself.`);
-  if (!matchProfile(git.remote, [profile])) {
-    const wanted = profile.match.map(normalizeRemote).join(' or ');
-    throw new InputError(
-      git.remote ? `${clone} is a clone of ${normalizeRemote(git.remote)}, not ${wanted}.` : `${clone} has no git remote, so it can't be checked against ${wanted}.`,
-    );
-  }
-  return root;
-}
-
-/** A target may be missing, or be a real file (or folder). A link is never written through, wherever it points. */
-async function checkTarget(clone: string, file: string, rel: string, kind: 'file' | 'folder'): Promise<void> {
-  const stat = await lstat(file);
-  if (!stat) return;
-  if (stat.isSymbolicLink()) throw new InputError(`${rel} in ${clone} is a link. Accept won't write through it: remove the link, then accept again.`);
-  if (kind === 'file' ? !stat.isFile() : !stat.isDirectory()) throw new InputError(`${rel} in ${clone} isn't a ${kind}.`);
-}
 
 /**
- * Where the copy goes: <name>.final.md and <name>.assets/, in the plan's own folder. That folder must really be inside
- * the clone, with no link anywhere on the way, so a link can't send the copy somewhere else.
+ * Where the copy goes: <name>.final.md and <name>.assets/, in the plan's own folder (planFolder checks that it's really
+ * inside the clone). Neither may be a link.
  */
 async function checkPlace(clone: string, root: string, sourcePath: string): Promise<Place> {
-  const name = finalName(sourcePath);
-  const planRel = path.posix.dirname(sourcePath);
-  const planDir = path.resolve(root, planRel);
-  if (!name || !within(root, planDir)) throw new InputError(`The plan's path, ${sourcePath}, doesn't give a place inside the clone for the copy.`);
-  const real = await fs.realpath(planDir).catch(() => null);
-  if (!real) throw new InputError(`${clone} has no ${planRel} folder, where the plan lives.`);
-  if (real !== planDir) throw new InputError(`${planRel} in ${clone} is or goes through a link. Accept writes only into real folders inside the clone.`);
-  if (!(await fs.stat(planDir)).isDirectory()) throw new InputError(`${planRel} in ${clone} isn't a folder.`);
+  const { name, planRel, planDir } = await planFolder(clone, root, sourcePath, 'Accept');
   const place: Place = {
     finalRel: path.posix.join(planRel, `${name}.final.md`),
     finalFile: path.join(planDir, `${name}.final.md`),
     assetsRel: path.posix.join(planRel, `${name}.assets`),
     assetsDir: path.join(planDir, `${name}.assets`),
   };
-  await checkTarget(clone, place.finalFile, place.finalRel, 'file');
-  await checkTarget(clone, place.assetsDir, place.assetsRel, 'folder');
+  await checkTarget(clone, place.finalFile, place.finalRel, 'file', 'Accept');
+  await checkTarget(clone, place.assetsDir, place.assetsRel, 'folder', 'Accept');
   return place;
 }
 
@@ -160,7 +113,7 @@ export async function acceptFinal(o: {
   const root = await checkClone(o.clone, o.profile, o.home);
   const place = await checkPlace(o.clone, root, project.source.path);
   const assets = await mockupAssets({ dir: o.dir, assets: proposal.assets, types: o.types, profile: o.profile });
-  for (const a of assets) await checkTarget(o.clone, path.join(place.assetsDir, a.name), `${place.assetsRel}/${a.name}`, 'file');
+  for (const a of assets) await checkTarget(o.clone, path.join(place.assetsDir, a.name), `${place.assetsRel}/${a.name}`, 'file', 'Accept');
   const stale = await staleAssets({ previous: project.docs.exportedTo, root, place, keep: assets, home: o.home });
   const earlier = await readOrNull(docPath(o.dir, FINAL), FINAL);
   const stamp = at.replace(/[:.]/g, '-');

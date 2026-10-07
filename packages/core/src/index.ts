@@ -41,3 +41,6 @@ export * from './store/update';
 export * from './store/whiteboard';
 export * from './store/defenseMarkdown';
 export * from './store/defenseItems';
+export * from './store/practice';
+export * from './store/cloneTarget';
+export * from './store/defenseExport';
