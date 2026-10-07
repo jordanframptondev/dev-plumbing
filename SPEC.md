@@ -554,7 +554,7 @@ The default structure:
 
 **How it's generated.**
 - **The subagent:** the **whiteboard** subagent follows `outputs/whiteboard-defense.md`.
-- **What it reads:** the plumbing project (items, decisions, diagram data, schema diffs, flows), the draft (or the final, once it exists), and the repo profile, whose `sensitiveData` tags raise the review level.
+- **What it reads:** the plumbing project (items, decisions, diagram data, schema diffs, flows), the document it explains (the draft, or the final while it's current), and the repo profile, whose `sensitiveData` tags raise the review level.
 - **Now:** based on the plan.
 - **Later (Phase 2):** **Defend the code** re-runs it against the branch's real diff, to defend what was actually built.
 
@@ -625,6 +625,8 @@ type Item = {
   data?: DiagramData | TableDiff | Mockup | Flow | PhaseData;
   threadId: string;
   createdBy: "import" | "claude" | "you" | "whiteboard";
+  // the part of the Whiteboard Defense it came from; text on items sent to Questions or Concerns
+  fromDefense?: { id: string; kind: "section" | "question" | "concern" | "claim"; ref: string; text?: string };
 };
 
 type DiagramData = {
@@ -730,7 +732,7 @@ The subagent may read more files but can't change the repo. Its only write path 
 | `dp_repo_profile` | repo-setup | Read the repo profile, or propose one for you to confirm |
 | `dp_write_items` | importer | Add or change items, or mark the type "no changes". Validated as a batch that fully succeeds or fully fails. |
 | `dp_wait` | main window | Wait for the next submission, with a heartbeat. Returns the threads, linked groups and models from `agents.json`. |
-| `dp_context` | thread | Get the context pack |
+| `dp_context` | thread, whiteboard | Get the context pack |
 | `dp_reply` | thread | Post Claude's reply |
 | `dp_finalize` | finalizer | Submit the proposed final `.md` for your review |
 | `dp_whiteboard` | whiteboard | Save a generated Whiteboard Defense |

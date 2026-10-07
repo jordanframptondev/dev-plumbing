@@ -78,7 +78,7 @@ export const whiteboardDefenseSchema = z.object({
   /** newId('w', now) */
   id: z.string().min(1),
   generatedAt: z.string(),
-  /** What it was written from: the final if there was one, else the draft, and defenseInputsHash at the time. */
+  /** What it was written from: the final while it's current, else the draft, and defenseInputsHash at the time. */
   basedOn: z.object({ kind: z.literal('plan'), doc: z.enum(['final', 'draft']), version: z.number().int().min(1), inputsHash: z.string() }),
   level: z.union([z.literal(1), z.literal(2), z.literal(3)]),
   levelReasons: z.array(z.string()),
