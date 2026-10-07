@@ -3,6 +3,7 @@ import path from 'node:path';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import {
+  checklistLines,
   claimImport,
   currentVersion,
   expandHome,
@@ -13,6 +14,7 @@ import {
   finishFinalize,
   finishImport,
   finishSubmission,
+  finishWhiteboard,
   finishWindowSubmissions,
   formatZodError,
   gitHead,
@@ -32,6 +34,7 @@ import {
   pendingSubmissions,
   pickUp,
   pickUpFinalize,
+  pickUpWhiteboard,
   planChange,
   postReply,
   readFinalize,
@@ -39,6 +42,7 @@ import {
   readProjectFile,
   readSubmission,
   readThread,
+  readWhiteboardRequest,
   recordClone,
   relevantDecisions,
   replySchema,
@@ -46,7 +50,9 @@ import {
   repoProjectsFolder,
   requeueFinalize,
   requeueUnfinished,
+  requeueWhiteboard,
   resolvePlan,
+  saveDefense,
   saveProposal,
   StoreError,
   suggestRepoName,
@@ -54,6 +60,7 @@ import {
   threadPack,
   updatePlan,
   updateRefusal,
+  whiteboardPack,
   writeImportBatch,
   writeJsonAtomic,
   type FinalizeRequest,
@@ -63,6 +70,7 @@ import {
   type ProjectRef,
   type Submission,
   type UpdateResult,
+  type WhiteboardRequest,
 } from '@dev-plumbing/core';
 import type { AppContext } from '../context';
 import { cloneOf } from '../checker';
@@ -120,22 +128,32 @@ const itemsBody = importBatchSchema.merge(projectBody).extend({ type: z.string()
 const waitBody = projectBody.extend({
   windowId: z.string().min(1),
   timeoutSeconds: z.number().min(0).max(600).optional(),
-  // What the window just finished: a submission (with any conflicts it found), a finalize request (its id), or a
-  // Detect again (the repo).
+  // What the window just finished: a submission (with any conflicts it found), a finalize request (its id), a
+  // Detect again (the repo), or a Whiteboard Defense request (its id, and the subagent's Failed: line if it gave up).
   finished: z
     .object({
       submission: z.string().min(1).optional(),
       conflicts: z.array(z.object({ threads: z.array(z.string()).min(1), text: z.string().min(1) })).default([]),
       finalize: z.string().min(1).optional(),
       detect: z.string().min(1).optional(),
+      whiteboard: z.string().min(1).optional(),
+      // The whiteboard subagent's own "Failed: …" line, when it gave up: the request's reason.
+      whiteboardError: z.string().optional(),
     })
     .optional(),
 });
 const aliveBody = z.object({ windowId: z.string().min(1) });
-const contextBody = projectBody.extend({ threadId: z.string().optional(), importType: z.string().optional(), finalize: z.boolean().optional() });
+const contextBody = projectBody.extend({
+  threadId: z.string().optional(),
+  importType: z.string().optional(),
+  finalize: z.boolean().optional(),
+  whiteboard: z.boolean().optional(),
+});
 const replyBody = replySchema.merge(projectBody).extend({ cwd: z.string().optional() });
 // The 1–500,000 character limit is saveProposal's, so its message is the one Claude reads.
 const finalizeBody = projectBody.extend({ request: z.string().min(1), markdown: z.string() });
+// The defense is checked by saveDefense, which lists every problem in its own words, so it's taken as it comes here.
+const whiteboardBody = projectBody.extend({ request: z.string().min(1), defense: z.unknown() });
 
 async function parse<S extends z.ZodTypeAny>(c: Context, schema: S): Promise<z.infer<S>> {
   const body = await readJsonObject(c);
@@ -160,6 +178,11 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
   /** outputs/finalize.md from the config folder, or the shipped default when the user's copy is missing. */
   const finalizeRules = () =>
     fs.readFile(path.join(ctx.configDir, 'outputs', 'finalize.md'), 'utf8').catch(() => fs.readFile(path.join(ctx.defaultsDir, 'outputs', 'finalize.md'), 'utf8'));
+  /** outputs/whiteboard-defense.md in the config folder, or the shipped default when the user's copy is missing. */
+  const whiteboardRulesFile = async () => {
+    const mine = path.resolve(ctx.configDir, 'outputs', 'whiteboard-defense.md');
+    return (await fs.access(mine).then(() => true, () => false)) ? mine : path.resolve(ctx.defaultsDir, 'outputs', 'whiteboard-defense.md');
+  };
   /** A window that comes back (it opens a project, or listens again) is done with any Detect again it was handed. */
   const cameBack = (windowId: string) => {
     for (const h of rt.detects.values()) if (h.windowId === windowId) h.back = true;
@@ -287,6 +310,7 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
           // Work that a window which is gone had picked up goes back in the queue first, so this one can take it.
           await requeueUnfinished(ref.dir, isAlive);
           await requeueFinalize(ref.dir, isAlive);
+          await requeueWhiteboard(ref.dir, isAlive);
           const refused = await updateRefusal(ref.dir);
           if (refused) return { kind: 'tell' as const, line: `The plan changed in the repo since v${change.from}. ${refused}` };
           if (!body.update) return { kind: 'ask' as const, change, title: project.title, branch: git.branch === current.branch ? null : git.branch };
@@ -327,6 +351,7 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
         await recordClone(ref.dir, git.root, ctx.home);
         await requeueUnfinished(ref.dir, isAlive);
         await requeueFinalize(ref.dir, isAlive);
+        await requeueWhiteboard(ref.dir, isAlive);
         // This window runs the importers, so it's the one whose dp_wait may end the import.
         const { importPending } = await readProjectFile(ref.dir);
         if (body.windowId && importableTypes(cfg.types).some((t) => importPending.includes(t.id))) await claimImport(ref.dir, body.windowId);
@@ -472,6 +497,17 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
     };
   }
 
+  /** What dp_wait returns for a Whiteboard Defense request: one whiteboard subagent, with the whiteboard model. */
+  function describeWhiteboard(ref: ProjectRef, request: WhiteboardRequest, cfg: LoadedConfig) {
+    const model = cfg.agents.models.whiteboard;
+    return {
+      kind: 'whiteboard' as const,
+      request: request.id,
+      model,
+      next: `Start one dev-plumbing:whiteboard subagent (model ${model}) with the prompt "Write the Whiteboard Defense for repo ${ref.repo}, plumbing project ${ref.id}, request ${request.id}." When it returns, call dp_wait with finished: { whiteboard: "${request.id}" }.`,
+    };
+  }
+
   /** What dp_wait returns for a Detect again request: one repo-setup subagent, looking at the project's clone. */
   function describeDetect(repo: string, clone: string, cfg: LoadedConfig) {
     const model = cfg.agents.models.repoSetup;
@@ -517,8 +553,16 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
         if (held?.state === 'writing' && held.pickedUpBy === body.windowId && (!alreadyWaiting || finished?.finalize === held.id)) {
           await finishFinalize(ref.dir, { requestId: held.id, windowId: body.windowId });
         }
+        // The same for a Whiteboard Defense: a window back without one fails its request, so the page offers Try again,
+        // with the subagent's own Failed: line when the window passes it on.
+        const writing = await readWhiteboardRequest(ref.dir);
+        if (writing?.state === 'writing' && writing.pickedUpBy === body.windowId && (!alreadyWaiting || finished?.whiteboard === writing.id)) {
+          const error = finished?.whiteboard === writing.id ? finished.whiteboardError : undefined;
+          await finishWhiteboard(ref.dir, { requestId: writing.id, windowId: body.windowId, error });
+        }
         await requeueUnfinished(ref.dir, isAlive);
         await requeueFinalize(ref.dir, isAlive);
+        await requeueWhiteboard(ref.dir, isAlive);
         // Only the window that runs the importers ends the import, or this one once that window is gone.
         return finishImport(ref.dir, { windowId: body.windowId, isAlive: (w) => rt.listeners.isAlive(w) });
       });
@@ -527,18 +571,21 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
 
       const timeoutMs = Math.min(body.timeoutSeconds ?? cfg.agents.waitHeartbeatSeconds, MAX_POLL_SECONDS) * 1000;
       for (let round = 0; round < 2; round++) {
-        // Submissions first, oldest first. Then a requested finalize.
+        // Submissions first, oldest first. Then a requested finalize, then a requested Whiteboard Defense.
         const picked = await rt.withLock(key, async () => {
           if (c.req.raw.signal.aborted) return null;
           const next = (await pendingSubmissions(ref.dir))[0];
           if (next) return { kind: 'submission' as const, submission: await pickUp(ref.dir, next.id, body.windowId) };
           const request = await pickUpFinalize(ref.dir, body.windowId);
-          return request ? { kind: 'finalize' as const, request } : null;
+          if (request) return { kind: 'finalize' as const, request };
+          const whiteboard = await pickUpWhiteboard(ref.dir, body.windowId);
+          return whiteboard ? { kind: 'whiteboard' as const, request: whiteboard } : null;
         });
         if (picked) {
           rt.listeners.setBusy(body.windowId, true);
           changed(ref);
-          return c.json(picked.kind === 'submission' ? await describeSubmission(ref, picked.submission, cfg) : describeFinalize(ref, picked.request, cfg));
+          if (picked.kind === 'submission') return c.json(await describeSubmission(ref, picked.submission, cfg));
+          return c.json(picked.kind === 'finalize' ? describeFinalize(ref, picked.request, cfg) : describeWhiteboard(ref, picked.request, cfg));
         }
         // Then a Detect again request for this repo. The subagent looks at the project's clone.
         const clone = c.req.raw.signal.aborted ? null : await cloneOf(ctx, ref);
@@ -571,7 +618,8 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
       if (body.threadId) return c.json(await threadPack({ dir: ref.dir, threadId: body.threadId, types: cfg.types, profile }));
       if (body.importType) return c.json(await importPack({ dir: ref.dir, typeId: body.importType, types: cfg.types, profile }));
       if (body.finalize) return c.json(await finalizePack({ dir: ref.dir, types: cfg.types, profile, rules: await finalizeRules() }));
-      throw new InputError('Give threadId (for a thread), importType (for an importer) or finalize: true (for the finalizer).');
+      if (body.whiteboard) return c.json(await whiteboardPack({ dir: ref.dir, types: cfg.types, profile, rulesFile: await whiteboardRulesFile() }));
+      throw new InputError('Give threadId (for a thread), importType (for an importer), finalize: true (for the finalizer) or whiteboard: true (for the whiteboard subagent).');
     }),
   );
 
@@ -611,6 +659,30 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
         request: saved.id,
         length: saved.proposal?.length ?? body.markdown.length,
         next: 'Saved. The user previews the final in the app and accepts it there. Reply with your one line.',
+      });
+    }),
+  );
+
+  // The whiteboard subagent's defense. saveDefense checks it whole, or refuses it with every problem and keeps the
+  // request writing, so the subagent can send it again. The checklist is the rules file's, copied here, so the user's
+  // ticks always match it; only rules with no checklist need the subagent's.
+  r.post(
+    '/whiteboard',
+    handle(async (c) => {
+      const body = await parse(c, whiteboardBody);
+      const { cfg, ref } = await locateProject(ctx, body.repo, body.project);
+      const checklist = checklistLines(await fs.readFile(await whiteboardRulesFile(), 'utf8').catch(() => ''));
+      const saved = await rt.withLock(projectKey(ref.repo, ref.id), () =>
+        saveDefense(ref.dir, { requestId: body.request, defense: body.defense, types: cfg.types, checklist }),
+      );
+      changed(ref);
+      return c.json({
+        ok: true,
+        request: body.request,
+        level: saved.level,
+        questions: saved.questions.length,
+        concerns: saved.concerns.length,
+        next: 'Saved. The user reads it in the app. Reply with your one line.',
       });
     }),
   );
