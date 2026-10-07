@@ -91,14 +91,16 @@ describe('config API', () => {
     expect(types.find((t) => t.id === 'ideas')?.title).toBe('Ideas and wishes');
   });
 
-  it('leaves the built-in Plan changes type out of the rules and settings lists', async () => {
+  it('leaves the built-in Plan changes and Defense types out of the rules and settings lists', async () => {
     const { ctx } = await makeContext();
     const app = createApp(ctx);
     const ids = async (route: string) => ((await (await call(app, route)).json()) as { types: { id: string }[] }).types.map((t) => t.id);
     expect(await ids('/api/rules')).toHaveLength(10);
-    expect(await ids('/api/rules')).not.toContain('plan-changes');
-    expect(await ids('/api/config')).not.toContain('plan-changes');
-    expect((await call(app, '/api/rules/plan-changes.md')).status).toBe(404);
+    for (const id of ['plan-changes', 'defense']) {
+      expect(await ids('/api/rules')).not.toContain(id);
+      expect(await ids('/api/config')).not.toContain(id);
+      expect((await call(app, `/api/rules/${id}.md`)).status).toBe(404);
+    }
   });
 
   it('lists rules files that are broken on disk', async () => {

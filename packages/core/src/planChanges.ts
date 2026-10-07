@@ -1,3 +1,4 @@
+import { DEFENSE } from './defenseType';
 import { splitSections } from './rules';
 import type { PlumbingType } from './schemas';
 
@@ -54,8 +55,9 @@ export const PLAN_CHANGES_TYPE: PlumbingType = {
 
 /**
  * The types an import (or a re-import) runs an importer for: the enabled ones that aren't built in. Plan changes items
- * are made by an update, never by an importer, so a user's own plan-changes.md isn't imported either.
+ * are made by an update and Defense items by the Whiteboard Defense page, never by an importer, so a user's own
+ * plan-changes.md or defense.md isn't imported either.
  */
 export function importableTypes(types: PlumbingType[]): PlumbingType[] {
-  return types.filter((t) => t.enabled && !t.builtIn && t.id !== PLAN_CHANGES);
+  return types.filter((t) => t.enabled && !t.builtIn && t.id !== PLAN_CHANGES && t.id !== DEFENSE);
 }

@@ -1,3 +1,4 @@
+import { DEFENSE } from '../defenseType';
 import type { Decision, Thread } from '../schemas';
 import { newId, readDecisions, readItems, writeDecisions } from './io';
 
@@ -26,8 +27,9 @@ export async function addDecision(dir: string, o: { text: string; threadId: stri
 
 /**
  * The active decisions a submission's threads need: those made in one of the threads, and those about the
- * threads' items or the items linked to them (either direction). `total` counts every active decision, so
- * the main window knows the rest exist without being sent them.
+ * threads' items or the items linked to them (either direction). A decision made in a Defense thread is about the
+ * Whiteboard Defense, not the plan, so it goes only with its own thread, never with an item it names or one linked to
+ * it. `total` counts every active decision, so the main window knows the rest exist without being sent them.
  */
 export async function relevantDecisions(dir: string, threadIds: string[]): Promise<{ decisions: string[]; total: number }> {
   const active = activeDecisions(await readDecisions(dir));
@@ -39,6 +41,9 @@ export async function relevantDecisions(dir: string, threadIds: string[]): Promi
     if (own.has(i.id)) for (const l of i.links ?? []) touched.add(l);
     else if (i.links?.some((l) => own.has(l))) touched.add(i.id);
   }
-  const decisions = active.filter((d) => threads.has(d.threadId) || d.itemIds.some((id) => touched.has(id))).map((d) => d.text);
+  const defenseThreads = new Set(items.filter((i) => i.type === DEFENSE).map((i) => i.threadId));
+  const decisions = active
+    .filter((d) => threads.has(d.threadId) || (!defenseThreads.has(d.threadId) && d.itemIds.some((id) => touched.has(id))))
+    .map((d) => d.text);
   return { decisions, total: active.length };
 }

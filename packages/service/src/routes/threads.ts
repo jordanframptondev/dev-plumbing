@@ -127,7 +127,8 @@ export function threadRoutes(ctx: AppContext, rt: Runtime): Hono {
         if (!anchored) throw new InputError(`There's no item ${body.anchor.itemId} to ask about.`);
         if (anchored.type !== body.type) throw new InputError('Pins start an item of the same plumbing type.');
       }
-      const type = cfg.types.find((t) => t.id === body.type && t.enabled);
+      // Built-in types (Plan changes, Defense) are only ever made by dev-plumbing itself.
+      const type = cfg.types.find((t) => t.id === body.type && t.enabled && !t.builtIn);
       if (!type) throw new InputError(`"${body.type}" isn't an enabled plumbing type.`);
       const { thread } = await addOwnItem(ref.dir, { type, title: body.title, text: body.text, fields: body.fields, anchor: body.anchor });
       return { threadId: thread.id, result: await submit(ref.dir, { scope: 'thread', threadId: thread.id, types: cfg.types }) };

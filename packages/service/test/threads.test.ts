@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { afterAll, describe, expect, it, vi } from 'vitest';
-import { readItem, readThread, writeJsonAtomic } from '@dev-plumbing/core';
+import { readItem, readItems, readThread, writeJsonAtomic } from '@dev-plumbing/core';
 import { createApp } from '../src/app';
 import { createRuntime } from '../src/runtime';
 import { makeRepo } from '../../core/test/fixtures';
@@ -115,6 +115,16 @@ describe('thread routes', () => {
     expect(thread.status).toBe('with_claude');
     expect(thread.messages[0]).toMatchObject({ author: 'you', text: 'Does every email need one?' });
     expect((await t.send('POST', `${P}/items`, { type: 'nope', title: 'x', text: 'y' })).status).toBe(400);
+  });
+
+  it("won't make an item of a built-in type: dev-plumbing makes those itself", async () => {
+    const t = await setup();
+    for (const type of ['defense', 'plan-changes']) {
+      const r = await t.send('POST', `${P}/items`, { type, title: 'Is the link signed?', text: 'Does the unsubscribe link need a token?' });
+      expect(r.status).toBe(400);
+      expect(r.body.error).toBe(`"${type}" isn't an enabled plumbing type.`);
+    }
+    expect((await readItems(t.dir)).values.map((i) => i.type).sort()).toEqual(['questions', 'questions']);
   });
 
   it('shows the Draft changes, and undoes and re-applies a small edit', async () => {

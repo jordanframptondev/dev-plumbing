@@ -163,7 +163,8 @@ export function configRoutes(ctx: AppContext, rt: Runtime): Hono {
     const target = path.join(ctx.configDir, 'plumbing', file);
     if (await exists(target)) return c.json({ error: `${file} already exists.` }, 409);
     const cfg = await loadConfig(ctx.configDir);
-    const order = Math.max(0, ...cfg.types.map((t) => t.order)) + 1;
+    // After the rules files you have. Built-in types (Defense's order is 100) don't count.
+    const order = Math.max(0, ...cfg.types.filter((t) => !t.builtIn).map((t) => t.order)) + 1;
     await writeFileAtomic(target, newRulesFileTemplate(id, title, order));
     changed();
     return c.json({ file }, 201);

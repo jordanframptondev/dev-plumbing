@@ -3,7 +3,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ZodError } from 'zod';
 import { writeFileAtomic, writeJsonAtomic } from './atomic';
-import { PLAN_CHANGES, PLAN_CHANGES_TYPE } from './planChanges';
+import { DEFENSE_TYPE } from './defenseType';
+import { PLAN_CHANGES_TYPE } from './planChanges';
 import { parseRulesFile, resolveTypes, type RulesFileResult } from './rules';
 import {
   agentsFields,
@@ -104,8 +105,11 @@ export async function loadConfig(dir: string): Promise<LoadedConfig> {
     // A rules file is the user's, so it's never built in, whatever its header says.
     results.push(parsed.ok ? { ...parsed, type: { ...parsed.type, builtIn: false } } : parsed);
   }
-  // Plan changes ships in code. The user's own plumbing/plan-changes.md, when it loads, replaces it.
-  if (!results.some((r) => r.ok && r.type.id === PLAN_CHANGES)) results.push({ ok: true, type: PLAN_CHANGES_TYPE });
+  // Plan changes and Defense ship in code. The user's own plumbing/plan-changes.md or plumbing/defense.md, when it
+  // loads, replaces the built-in one.
+  for (const builtIn of [PLAN_CHANGES_TYPE, DEFENSE_TYPE]) {
+    if (!results.some((r) => r.ok && r.type.id === builtIn.id)) results.push({ ok: true, type: builtIn });
+  }
   const { types, errors } = resolveTypes(results);
   errors.forEach((e) => problems.push({ file: `plumbing/${e.file}`, message: e.error }));
 

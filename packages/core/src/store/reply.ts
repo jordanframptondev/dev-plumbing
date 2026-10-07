@@ -1,3 +1,4 @@
+import { DEFENSE, DEFENSE_CHANGE_REFUSAL, DEFENSE_NEW_ITEM_TYPES, DEFENSE_NEW_ITEMS_REFUSAL, DEFENSE_RESOLVE_REFUSAL } from '../defenseType';
 import { importableTypes } from '../planChanges';
 import { applyMdPatches, dataKindOf, dataProblems, type ClaudeMessage, type HistoryEntry, type PlumbingType, type ReplyInput, type Thread } from '../schemas';
 import { recordChange } from './changes';
@@ -30,7 +31,9 @@ export async function postReply(
   const draft = await readDocText(dir, project.docs.draft);
   const { values: items } = await readItems(dir);
   const itemIds = new Set(items.map((i) => i.id));
-  // The types Claude may add an item of: the enabled ones, but never a built-in one (Plan changes comes from updates).
+  const threadItem = items.find((i) => i.id === thread.itemId);
+  // The types Claude may add an item of: the enabled ones, but never a built-in one (Plan changes comes from updates,
+  // Defense from the Whiteboard Defense page).
   const enabled = new Map(importableTypes(o.types).map((t) => [t.id, t]));
   const newItems = r.newItems ?? [];
   // New items' ids are worked out up front, so data in this reply may name them.
@@ -44,6 +47,13 @@ export async function postReply(
   const problems: string[] = [];
   if (r.resolve && r.options) problems.push('Send options or resolve, not both.');
   if (r.recommended && !r.options) problems.push('recommended needs options.');
+  // A Defense thread is a question about the Whiteboard Defense: it never changes the draft, and its decision is about
+  // the defense, never another item. A gap it shows becomes a Questions or Concerns item through newItems instead.
+  if (threadItem?.type === DEFENSE) {
+    if (r.options?.some((op) => op.change) || r.smallEdits?.length) problems.push(DEFENSE_CHANGE_REFUSAL);
+    if (newItems.some((n) => !DEFENSE_NEW_ITEM_TYPES.includes(n.type))) problems.push(DEFENSE_NEW_ITEMS_REFUSAL);
+    if (r.resolve?.itemIds?.some((id) => id !== thread.itemId)) problems.push(DEFENSE_RESOLVE_REFUSAL);
+  }
 
   // Small edits are checked in order, each against the draft as the ones before it leave it.
   let edited = draft;
@@ -143,7 +153,7 @@ export async function postReply(
   if (r.resolve) await addDecision(dir, { text: r.resolve.decision, threadId: thread.id, itemIds: r.resolve.itemIds ?? [thread.itemId], now });
   // An update took this item out of the plan while Claude was working on it: once the reply lands, the thread is parked,
   // so the item stays out of the final. The reply, and any decision, are kept.
-  const removedIn = items.find((i) => i.id === thread.itemId)?.removedIn;
+  const removedIn = threadItem?.removedIn;
   const messages = [...thread.messages, message];
   if (removedIn !== undefined) messages.push({ id: newId('m', now), at, author: 'system', text: `Parked, because it was removed from the plan in v${removedIn}.` });
   await writeThread(dir, { ...thread, status: removedIn !== undefined ? 'parked' : r.resolve ? 'resolved' : 'your_turn', messages });

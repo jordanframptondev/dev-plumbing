@@ -1,3 +1,4 @@
+import { DEFENSE } from '../defenseType';
 import { CONFLICT_REASON, PLAN_CHANGES } from '../planChanges';
 import {
   changeState,
@@ -34,14 +35,17 @@ function blockingReason(item: Item, thread: Thread, status: DisplayStatus, pendi
  * The Finalize checklist from items, threads and history already read. Items are listed by plumbing type order,
  * then title, and each appears at most once: parked, else blocking, else (unless resolved) on a default, else
  * unreviewed when nobody has answered, unless you marked it reviewed (then it's only counted, in `reviewed`). Items
- * of disabled types are left out, as the app doesn't show them.
+ * of disabled types are left out, as the app doesn't show them. So are Defense items: a question about the Whiteboard
+ * Defense never holds up Finalize, whatever state its thread is in.
  */
 export function checklistFrom(o: { items: Item[]; threads: Thread[]; history: HistoryEntry[]; types: PlumbingType[] }): FinalizeChecklist {
   const threadById = new Map(o.threads.map((t) => [t.id, t]));
   const typeById = new Map(o.types.map((t) => [t.id, t]));
   const pendingEdits = new Set(o.history.filter((h) => h.kind === 'small-edit' && changeState(h) === 'pending').map((h) => h.threadId));
   const order = (i: Item) => typeById.get(i.type)?.order ?? Number.MAX_SAFE_INTEGER;
-  const items = o.items.filter((i) => typeById.get(i.type)?.enabled !== false).sort((a, b) => order(a) - order(b) || a.title.localeCompare(b.title));
+  const items = o.items
+    .filter((i) => typeById.get(i.type)?.enabled !== false && i.type !== DEFENSE)
+    .sort((a, b) => order(a) - order(b) || a.title.localeCompare(b.title));
   const list: FinalizeChecklist = { blocking: [], defaults: [], parked: [], unreviewed: [], reviewed: 0, canStart: true };
   for (const item of items) {
     const thread = threadById.get(item.threadId);

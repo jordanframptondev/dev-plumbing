@@ -2,7 +2,9 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { writeJsonAtomic } from '../atomic';
+import { DEFENSE } from '../defenseType';
 import { expandTokens } from '../finalExport';
+import { PLAN_CHANGES } from '../planChanges';
 import { displayStatus, finalizeRequestSchema, type FinalizeRequest, type Item, type PlumbingType } from '../schemas';
 import { stable } from './changes';
 import { finalizeChecklist } from './checklist';
@@ -28,19 +30,26 @@ export function draftHash(text: string): string {
  * The fingerprint of everything a final is built from: the draft, every item (its data draws the diagrams, schema
  * blocks and mockups), which items are parked (they're left out of the final) and the active decisions. A proposal
  * records it as `draftHash`, so a final can't be accepted once any of them changed, even by an accept that only
- * redrew an item's data.
+ * redrew an item's data. Defense items and the decisions made in their threads are questions about the Whiteboard
+ * Defense, never part of the final, so asking one never makes a proposal stale.
  */
 export async function finalInputsHash(dir: string): Promise<string> {
   const project = await readProjectFile(dir);
   const draft = await readDocText(dir, project.docs.draft);
   const [{ values }, { values: threads }] = await Promise.all([readItems(dir), readThreads(dir)]);
+  const defenseThreads = new Set(values.filter((i) => i.type === DEFENSE).map((i) => i.threadId));
   // flags ("May need another look") and the reviewed mark are review marks, not content: setting or clearing one
   // mustn't make a proposal stale.
-  const items = values.sort((a, b) => a.id.localeCompare(b.id)).map(({ flags: _flags, reviewedAt: _reviewedAt, ...content }) => content);
+  const items = values
+    .filter((i) => i.type !== DEFENSE)
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map(({ flags: _flags, reviewedAt: _reviewedAt, ...content }) => content);
   // As in saveProposal: an item is parked when its thread is.
   const statusByThread = new Map(threads.map((t) => [t.id, displayStatus(t)]));
   const parked = items.filter((i) => statusByThread.get(i.threadId) === 'parked').map((i) => i.id);
-  const decisions = activeDecisions(await readDecisions(dir)).map((d) => ({ text: d.text, threadId: d.threadId }));
+  const decisions = activeDecisions(await readDecisions(dir))
+    .filter((d) => !defenseThreads.has(d.threadId))
+    .map((d) => ({ text: d.text, threadId: d.threadId }));
   return draftHash(stable({ draft, items, parked, decisions }));
 }
 
@@ -99,10 +108,10 @@ function parkedProblem(problem: string, parked: Map<string, Item>): string {
 
 /**
  * The finalizer's document. Every token is checked and expanded first; any problem refuses the whole document and
- * saves nothing. Tokens can't name parked items or items of disabled types. Plan changes items aren't left out here, as
- * they are from the finalizer's pack, but a token can't name one either: every token needs a drawing, and they have
- * none. Otherwise the expanded final goes to docs/final.proposed.md, and the request records finalInputsHash (the
- * current draft, items and decisions) and the mockups the final links to. `name` is finalName(project.source.path).
+ * saves nothing. Tokens can't name parked items, items of disabled types, Plan changes items or Defense items: as in
+ * the finalizer's pack, none of them goes into the final. Otherwise the expanded final goes to
+ * docs/final.proposed.md, and the request records finalInputsHash (the current draft, items and decisions) and the
+ * mockups the final links to. `name` is finalName(project.source.path).
  */
 export async function saveProposal(
   dir: string,
@@ -115,13 +124,13 @@ export async function saveProposal(
   if (o.markdown.length > MAX_FINAL_CHARS) {
     throw nothingSaved([`The final is ${o.markdown.length.toLocaleString('en-US')} characters; it can be at most 500,000.`], RETRY);
   }
-  // As in the checklist and the finalizer's pack, parked items and items of disabled plumbing types can't be named.
-  // Plan changes items, which the pack also leaves out, are refused by expandTokens: they have no drawing.
+  // As in the checklist and the finalizer's pack, parked items, items of disabled plumbing types, Plan changes items and
+  // Defense items can't be named.
   const [{ values: items }, { values: threads }] = await Promise.all([readItems(dir), readThreads(dir)]);
   const statusByThread = new Map(threads.map((t) => [t.id, displayStatus(t)]));
-  const enabled = (i: Item) => o.types.find((t) => t.id === i.type)?.enabled !== false;
-  const parked = new Map(items.filter((i) => enabled(i) && statusByThread.get(i.threadId) === 'parked').map((i) => [i.id, i]));
-  const inFinal = items.filter((i) => enabled(i) && !parked.has(i.id));
+  const inPlan = (i: Item) => o.types.find((t) => t.id === i.type)?.enabled !== false && i.type !== PLAN_CHANGES && i.type !== DEFENSE;
+  const parked = new Map(items.filter((i) => inPlan(i) && statusByThread.get(i.threadId) === 'parked').map((i) => [i.id, i]));
+  const inFinal = items.filter((i) => inPlan(i) && !parked.has(i.id));
   const expanded = expandTokens(o.markdown, { items: inFinal, types: o.types, assetsDir: `${o.name}.assets` });
   if (!expanded.ok) throw nothingSaved(expanded.problems.map((p) => parkedProblem(p, parked)), RETRY);
   const next: FinalizeRequest = {

@@ -1,3 +1,4 @@
+import { DEFENSE } from '../defenseType';
 import { diffText } from '../docDiff';
 import { availableTokens } from '../finalExport';
 import { PLAN_CHANGES } from '../planChanges';
@@ -51,7 +52,10 @@ export type ImportPack = {
   type: { id: string; title: string; screen: Screen; timeline: boolean; fields: string[]; answerPresets: string[]; rules: string; dataShape: string | null };
   draft: string;
   profile: { name: string; schema?: RepoProfile['schema']; conventions: string[]; apps: { name: string; path: string; kitFiles: string[] }[]; planFolders: string[] } | null;
-  /** Every item but the Plan changes ones, which aren't part of the plan. One whose part of the plan was removed says so. */
+  /**
+   * Every item but the Plan changes and Defense ones, which aren't part of the plan. One whose part of the plan was
+   * removed says so.
+   */
   existingItems: { id: string; type: string; title: string; removed?: true }[];
   /**
    * Set while a new version of the plan is re-imported, null at first import. `changes` is how the plan changed from
@@ -133,6 +137,7 @@ export async function threadPack(o: { dir: string; threadId: string; types: Plum
   const item = await readItem(o.dir, thread.itemId);
   const draft = await readDocText(o.dir, project.docs.draft);
   const { values: items } = await readItems(o.dir);
+  const defenseThreads = new Set(items.filter((i) => i.type === DEFENSE).map((i) => i.threadId));
   const type = o.types.find((t) => t.id === item.type);
   const linkedIds = new Set([...(item.links ?? []), ...items.filter((i) => i.links?.includes(item.id)).map((i) => i.id)]);
   const section = item.mdAnchor ? sectionFor(draft, item.mdAnchor.heading) : null;
@@ -159,7 +164,10 @@ export async function threadPack(o: { dir: string; threadId: string; types: Plum
     anchored,
     thread: { id: thread.id, status: thread.status, messages: thread.messages },
     linked: items.filter((i) => linkedIds.has(i.id)).map((i) => ({ id: i.id, type: i.type, title: i.title, summary: i.summary })),
-    decisions: activeDecisions(await readDecisions(o.dir)).map((d) => d.text),
+    // Decisions made in Defense threads are about the Whiteboard Defense, not the plan: only a Defense thread sees them.
+    decisions: activeDecisions(await readDecisions(o.dir))
+      .filter((d) => item.type === DEFENSE || !defenseThreads.has(d.threadId))
+      .map((d) => d.text),
     draftSection: section !== null && item.mdAnchor ? { heading: item.mdAnchor.heading, text: section } : null,
     draftHeadings: headingsOf(draft).map((h) => `${'#'.repeat(h.level)} ${h.text}`),
     draftFile: docPath(o.dir, project.docs.draft),
@@ -227,7 +235,7 @@ export async function importPack(o: { dir: string; typeId: string; types: Plumbi
           planFolders: p.planFolders,
         }
       : null,
-    existingItems: items.filter((i) => i.type !== PLAN_CHANGES).map((i) => ({ id: i.id, type: i.type, title: i.title, ...(i.removedIn !== undefined ? { removed: true as const } : {}) })),
+    existingItems: items.filter((i) => i.type !== PLAN_CHANGES && i.type !== DEFENSE).map((i) => ({ id: i.id, type: i.type, title: i.title, ...(i.removedIn !== undefined ? { removed: true as const } : {}) })),
     reimport,
   };
 }
@@ -238,8 +246,9 @@ export type FinalizePack = {
   rules: string;
   draft: string;
   /**
-   * Every item that goes into the final, in plumbing-type order. Parked items, items of disabled types and Plan changes
-   * items (what they settled is already in the draft) are left out of the final, so they aren't here.
+   * Every item that goes into the final, in plumbing-type order. Parked items, items of disabled types, Plan changes
+   * items (what they settled is already in the draft) and Defense items (questions about the Whiteboard Defense) are
+   * left out of the final, so they aren't here.
    */
   items: {
     id: string;
@@ -342,10 +351,10 @@ export async function finalizePack(o: { dir: string; types: PlumbingType[]; prof
   };
   const order = (item: Item) => typeOf(item)?.order ?? Number.MAX_SAFE_INTEGER;
   // Parked items and items of disabled plumbing types don't go into the final (saveProposal refuses their tokens).
-  // Nor do Plan changes items: what they settled is already in the draft. saveProposal doesn't leave them out, but
-  // a token can't name one anyway, since every token needs a drawing and they have none.
+  // Nor do Plan changes items, since what they settled is already in the draft, or Defense items, which are questions
+  // about the Whiteboard Defense. Leaving an item out leaves out the decisions about it too.
   const items = allItems
-    .filter((i) => statusOf(i) !== 'parked' && typeOf(i)?.enabled !== false && i.type !== PLAN_CHANGES)
+    .filter((i) => statusOf(i) !== 'parked' && typeOf(i)?.enabled !== false && i.type !== PLAN_CHANGES && i.type !== DEFENSE)
     .sort((a, b) => order(a) - order(b) || a.title.localeCompare(b.title));
   const checklist = await finalizeChecklist(o.dir, o.types);
   const blocking = new Set(checklist.blocking.map((e) => e.itemId));

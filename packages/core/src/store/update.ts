@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { writeFileAtomic, writeJsonAtomic } from '../atomic';
 import { diffText } from '../docDiff';
 import { MergeError, mergePlan, type MergeConflict, type MergeResult } from '../merge';
+import { DEFENSE } from '../defenseType';
 import { importableTypes, PLAN_CHANGES } from '../planChanges';
 import { titleFromMarkdown, type Item, type Message, type PlanVersion, type PlumbingProject, type PlumbingType, type Submission, type Thread } from '../schemas';
 import { readFinalize } from './finalize';
@@ -277,12 +278,13 @@ function conflictBody(c: MergeConflict, n: number): string {
 
 /**
  * Why an update can't start now, or null. Each one is work in progress that the update would pull the draft out from
- * under: an import, threads queued for Claude, or a finalize.
+ * under: an import, threads queued for Claude (but not Defense threads, which can't change the draft), or a finalize.
  */
 export async function updateRefusal(dir: string): Promise<string | null> {
   const project = await readProjectFile(dir);
   if (project.status === 'importing') return "This project is still importing. Run /dev-plumbing again once that's done.";
-  const waiting = (await readThreads(dir)).values.filter((t) => t.status === 'with_claude').length;
+  const defenseThreads = new Set((await readItems(dir)).values.filter((i) => i.type === DEFENSE).map((i) => i.threadId));
+  const waiting = (await readThreads(dir)).values.filter((t) => t.status === 'with_claude' && !defenseThreads.has(t.id)).length;
   if (waiting === 1) return "Claude has 1 thread to answer in this project first. Run /dev-plumbing again once it's answered.";
   if (waiting > 1) return `Claude has ${waiting} threads to answer in this project first. Run /dev-plumbing again once they're answered.`;
   const finalize = await readFinalize(dir);
