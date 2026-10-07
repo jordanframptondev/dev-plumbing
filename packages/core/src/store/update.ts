@@ -63,6 +63,15 @@ export function changedDraft(v: PlanVersion): boolean {
   return v.merge !== undefined && (v.merge.clean > 0 || v.merge.conflicts > 0 || v.merge.fresh === true);
 }
 
+/**
+ * The newest plan version that came in after the last final was accepted and changed the draft, or null. Such a version
+ * makes that final out of date: the Finalize page says it came in, and the Whiteboard Defense explains the draft.
+ */
+export function planVersionSinceFinal(project: PlumbingProject): number | null {
+  const finalAt = project.docs.exportedTo?.at;
+  return finalAt ? (projectVersions(project).filter((v) => v.at > finalAt && changedDraft(v)).at(-1)?.n ?? null) : null;
+}
+
 // The update's journal. Before it writes anything else, an update writes docs/versions/v<n>/update.json (n is the
 // version it replaces) with every path it's going to create, and the sha256 of the text it writes as docs/draft.md and
 // docs/original.md. Once project.json is written, the journal is deleted. A journal still there means an update

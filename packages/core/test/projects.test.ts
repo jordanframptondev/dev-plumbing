@@ -17,7 +17,7 @@ import {
   type ProjectRef,
 } from '../src/store/projects';
 import { IMPORT_DID_NOT_FINISH } from '../src/store/importItems';
-import { listType, pair, seedProject, TYPES } from './fixtures';
+import { listType, pair, seedProject, storedDefense, TYPES } from './fixtures';
 import { removeTempDirs, tempDir } from '../../../testkit/tmp';
 
 afterAll(removeTempDirs);
@@ -356,5 +356,25 @@ describe('the project home for Plan changes', () => {
     expect(home.types[0]).toMatchObject({ title: 'Plan changes', order: 0, itemCount: 1, withClaude: 1, noChanges: null, answerPresets: ['Keep my draft', "Take the repo's version"] });
     expect(home.inbox.find((e) => e.itemId === 'plan-changes-v2-1')?.typeTitle).toBe('Plan changes');
     expect((await loadTypeItems(restock, types, 'plan-changes'))?.items.map((i) => i.id)).toEqual(['plan-changes-v2-1']);
+  });
+});
+
+describe('the project home for the Whiteboard Defense', () => {
+  it("says there's no Whiteboard Defense yet, and whether one is being asked for", async () => {
+    const dir = await seedProject();
+    const defenseOf = async () => (await loadProjectHome({ repo: 'acme', id: 'restock', dir }, TYPES)).defense;
+    expect(await defenseOf()).toEqual({ ready: false, stale: false, state: null });
+    await writeJsonAtomic(path.join(dir, 'whiteboard', 'request.json'), { id: 'g-1', state: 'requested', requestedAt: '2026-10-06T09:00:00.000Z' });
+    expect(await defenseOf()).toEqual({ ready: false, stale: false, state: 'requested' });
+  });
+
+  it("still loads when the defense's document can't be read, and counts the defense current", async () => {
+    const dir = await seedProject();
+    await writeJsonAtomic(path.join(dir, 'whiteboard', 'defense.json'), storedDefense());
+    // A final recorded as accepted, whose file is gone.
+    const project = await readProjectFile(dir);
+    const exportedTo = { clone: '/tmp/acme', path: 'docs/specs/restock.final.md', at: '2026-10-06T08:00:00.000Z', assets: [] };
+    await writeProjectFile(dir, { ...project, docs: { ...project.docs, final: 'docs/final.md', exportedTo } });
+    expect((await loadProjectHome({ repo: 'acme', id: 'restock', dir }, TYPES)).defense).toEqual({ ready: true, stale: false, state: null });
   });
 });

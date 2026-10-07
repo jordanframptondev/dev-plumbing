@@ -8,8 +8,9 @@ import { readFinalize } from './finalize';
 import { IMPORT_DID_NOT_FINISH } from './importItems';
 import { docPath, readDecisions, readHistory, readItems, readJsonFile, readThreads } from './io';
 import { openOptions } from './threads';
-import { changedDraft } from './update';
+import { planVersionSinceFinal } from './update';
 import { currentVersion, projectVersions } from './versions';
+import { defenseStatus } from './whiteboard';
 import type { DataChecker } from './checks';
 import {
   countThreads,
@@ -249,10 +250,10 @@ export async function loadProjectHome(ref: ProjectRef, types: PlumbingType[]): P
     state: (await readFinalize(ref.dir))?.state ?? null,
     changesSinceFinal: changesSinceFinal(history, finalAt),
     // A version that came in after the last final and changed the draft makes that final out of date too.
-    planVersionSinceFinal: finalAt ? (projectVersions(project).filter((v) => v.at > finalAt && changedDraft(v)).at(-1)?.n ?? null) : null,
+    planVersionSinceFinal: planVersionSinceFinal(project),
   };
   const version = { current: currentVersion(project).n, count: projectVersions(project).length };
-  return { summary, project, types: typeEntries, inbox, documents, version, finalize };
+  return { summary, project, types: typeEntries, inbox, documents, version, finalize, defense: await defenseStatus(ref.dir) };
 }
 
 const byTitle = (a: TypeItemRow, b: TypeItemRow) => a.title.localeCompare(b.title);

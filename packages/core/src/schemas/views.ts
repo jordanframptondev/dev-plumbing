@@ -3,7 +3,7 @@ import type { Item, PlanVersion, PlumbingProject, Thread } from './project';
 import type { Screen } from './plumbingType';
 import type { Anchor, DataKind } from './data';
 import type { FinalizeChecklist, FinalizeRequest, FinalizeState } from './finalize';
-import type { DefenseRefKind, Rating, WhiteboardDefense, WhiteboardRequest } from './whiteboard';
+import type { DefenseRefKind, Rating, WhiteboardDefense, WhiteboardRequest, WhiteboardState } from './whiteboard';
 
 export type ConfigProblem = { file: string; key?: string; message: string };
 export type RuleSummary = { file: string; id: string; title: string; order: number; screen: Screen; enabled: boolean };
@@ -104,6 +104,11 @@ export type ProjectHome = {
    * the newest plan version that came in after the last Accept and changed the draft, or null.
    */
   finalize: { canStart: boolean; blockingCount: number; state: FinalizeState | null; changesSinceFinal: number; planVersionSinceFinal: number | null };
+  /**
+   * For the header and the navigation's Whiteboard Defense: whether one is saved, whether it's out of date, and the
+   * state of the request for a new one, or null when none is waiting, being written or failed.
+   */
+  defense: { ready: boolean; stale: boolean; state: WhiteboardState | null };
 };
 
 /** One version in the Versions list (GET …/versions, newest first). `current` marks the one the working files hold. */
