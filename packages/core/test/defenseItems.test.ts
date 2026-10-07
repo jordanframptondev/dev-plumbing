@@ -224,6 +224,41 @@ describe('sending the Whiteboard Defense to plumbing', () => {
     expect((await sendFromDefense(dir, { defenseId: 'w-again', kind: 'concern', ref: 'c1', types, now: T3 })).typeTitle).toBe('Concerns');
   });
 
+  it('shows a sent part as sent at every part of the defense with the same text, so Send is never offered and then refused', async () => {
+    const dir = await seed();
+    // The same unknown in Security model and, spaced differently, in Unknowns; the same concern twice.
+    const d = defense();
+    const repeated: WhiteboardDefense = {
+      ...d,
+      sections: d.sections.map((s) => (s.id === 'unknowns' ? { ...s, claims: [...s.claims, { text: ` ${WHO.replace(/ /g, '  ')} `, basis: 'unknown' as const }] } : s)),
+      concerns: [...d.concerns, { id: 'c3', severity: 'low', text: RERUN, basis: 'inferred' }],
+    };
+    await writeDefense(dir, repeated);
+    const claim = await sendFromDefense(dir, { defenseId: 'w-test', kind: 'claim', ref: 'security.1', types, now: T1 });
+    const concern = await sendFromDefense(dir, { defenseId: 'w-test', kind: 'concern', ref: 'c3', types, now: T2 });
+    await refused(dir, () => sendFromDefense(dir, { defenseId: 'w-test', kind: 'claim', ref: 'unknowns.1', types }), ConflictError, "That's already in Questions.");
+    await refused(dir, () => sendFromDefense(dir, { defenseId: 'w-test', kind: 'concern', ref: 'c1', types }), ConflictError, "That's already in Concerns.");
+    const asClaim = { kind: 'claim', itemId: claim.itemId, threadId: claim.threadId, typeId: 'questions', title: WHO, status: 'with_claude' };
+    const asConcern = { kind: 'concern', itemId: concern.itemId, threadId: concern.threadId, typeId: 'concerns', title: RERUN, status: 'with_claude' };
+    // Oldest first, and each item at its parts in the defense's order.
+    expect((await defenseLinks(dir, repeated)).sent).toEqual([
+      { ...asClaim, ref: 'security.1' },
+      { ...asClaim, ref: 'unknowns.1' },
+      { ...asConcern, ref: 'c1' },
+      { ...asConcern, ref: 'c3' },
+    ]);
+
+    // An item sent from an earlier defense, too.
+    const regenerated: WhiteboardDefense = { ...repeated, id: 'w-again' };
+    await writeDefense(dir, regenerated);
+    expect((await defenseLinks(dir, regenerated)).sent).toEqual([
+      { ...asClaim, ref: 'security.1' },
+      { ...asClaim, ref: 'unknowns.1' },
+      { ...asConcern, ref: 'c1' },
+      { ...asConcern, ref: 'c3' },
+    ]);
+  });
+
   it('refuses a known claim, a part sent before, a missing part, or a target type that is off or missing', async () => {
     const dir = await seed();
     const send = (kind: 'claim' | 'concern', ref: string, t: PlumbingType[] = types) => sendFromDefense(dir, { defenseId: 'w-test', kind, ref, types: t, now: T1 });

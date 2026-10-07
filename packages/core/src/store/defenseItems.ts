@@ -158,8 +158,10 @@ export async function sendFromDefense(
 
 /**
  * The threads made from this defense: `asked` are the Defense threads ("Ask Claude about this"), `sent` the items sent
- * to plumbing. An item sent from an earlier defense is listed when this one still has that part, with the same kind
- * and text, under this defense's ref for it. Other items made from an earlier defense aren't listed. Oldest first.
+ * to plumbing. A sent item is listed under every part of this defense with the same kind and text, in the defense's
+ * order, because sendFromDefense refuses each of them as already sent: a defense can repeat an unknown in two sections.
+ * An item sent from an earlier defense is listed only when this one still has that part; other items made from an
+ * earlier defense aren't listed. Oldest first.
  */
 export async function defenseLinks(dir: string, defense: WhiteboardDefense): Promise<{ asked: DefenseLink[]; sent: DefenseLink[] }> {
   const [{ values: items }, { values: threads }] = await Promise.all([readItems(dir), readThreads(dir)]);
@@ -169,15 +171,21 @@ export async function defenseLinks(dir: string, defense: WhiteboardDefense): Pro
     const thread = threadById.get(i.threadId);
     return thread?.messages[0]?.at ?? thread?.draft?.updatedAt ?? '';
   };
-  // The parts this defense can send, by kind and text, each with its ref: the first part with that text wins.
-  const partRefs = new Map<string, string>();
+  // The parts this defense can send, by kind and text, each with the refs of every part with that text, in order.
+  const partRefs = new Map<string, string[]>();
+  const addPart = (key: string, ref: string) => partRefs.set(key, [...(partRefs.get(key) ?? []), ref]);
   defense.sections.forEach((s) =>
     s.claims.forEach((c, i) => {
-      const key = `claim:${sameText(c.text)}`;
-      if ((c.basis === 'unknown' || c.basis === 'verify') && !partRefs.has(key)) partRefs.set(key, `${s.id}.${i}`);
+      if (c.basis === 'unknown' || c.basis === 'verify') addPart(`claim:${sameText(c.text)}`, `${s.id}.${i}`);
     }),
   );
-  for (const c of defense.concerns) if (!partRefs.has(`concern:${sameText(c.text)}`)) partRefs.set(`concern:${sameText(c.text)}`, c.id);
+  for (const c of defense.concerns) addPart(`concern:${sameText(c.text)}`, c.id);
+  // Where a sent item shows: at every part with its text, and always at the part of this defense it was sent from.
+  const refsOf = (i: Item): string[] => {
+    const same = partRefs.get(sentKey(i) ?? '') ?? [];
+    const own = i.fromDefense!.id === defense.id ? i.fromDefense!.ref : null;
+    return own === null || same.includes(own) ? same : [own, ...same];
+  };
   const link = (i: Item, ref = i.fromDefense!.ref): DefenseLink => {
     const thread = threadById.get(i.threadId);
     return {
@@ -193,8 +201,6 @@ export async function defenseLinks(dir: string, defense: WhiteboardDefense): Pro
   const oldestFirst = (a: Item, b: Item) => startedAt(a).localeCompare(startedAt(b)) || a.id.localeCompare(b.id);
   const made = items.filter((i) => i.fromDefense?.id === defense.id).sort(oldestFirst);
   const earlier = items.filter((i) => i.fromDefense !== undefined && i.fromDefense.id !== defense.id && partRefs.has(sentKey(i) ?? ''));
-  const sent = [...made.filter((i) => i.type !== DEFENSE), ...earlier]
-    .sort(oldestFirst)
-    .map((i) => (i.fromDefense!.id === defense.id ? link(i) : link(i, partRefs.get(sentKey(i)!))));
+  const sent = [...made.filter((i) => i.type !== DEFENSE), ...earlier].sort(oldestFirst).flatMap((i) => refsOf(i).map((ref) => link(i, ref)));
   return { asked: made.filter((i) => i.type === DEFENSE).map((i) => link(i)), sent };
 }
