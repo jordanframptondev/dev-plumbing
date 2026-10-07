@@ -1,11 +1,9 @@
-import fs from 'node:fs/promises';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import {
   acceptFinal,
   diffText,
   discardProposal,
-  expandHome,
   finalInputsHash,
   finalizeChecklist,
   finalName,
@@ -17,7 +15,6 @@ import {
   readProjectFile,
   requestFinalize,
   type FinalizeView,
-  type PlumbingProject,
   type ProjectRef,
 } from '@dev-plumbing/core';
 import type { AppContext } from '../context';
@@ -25,6 +22,7 @@ import { handle } from '../errors';
 import { EXPECTED_OBJECT, readJsonObject } from '../json';
 import { locateProject } from '../locate';
 import { projectKey, type Runtime } from '../runtime';
+import { clonesOf, knownClone } from './clones';
 
 /** What Start finalize says, by whether a Claude window will pick the request up. */
 export const FINALIZE_WAITING = 'Waiting for Claude to write the final.';
@@ -38,17 +36,6 @@ async function parse<S extends z.ZodTypeAny>(c: Context, schema: S): Promise<z.i
   const parsed = schema.safeParse(body);
   if (!parsed.success) throw new InputError(formatZodError(parsed.error));
   return parsed.data;
-}
-
-/** The clones this project was opened from that are still folders on this Mac: the source clone first, each once. */
-async function clonesOf(project: PlumbingProject, home?: string): Promise<FinalizeView['clones']> {
-  const source = expandHome(project.source.clone, home);
-  const found: FinalizeView['clones'] = [];
-  for (const clone of new Set([source, ...project.clones.map((c) => expandHome(c, home))])) {
-    const stat = await fs.stat(clone).catch(() => null);
-    if (stat?.isDirectory()) found.push({ path: clone, source: clone === source });
-  }
-  return found;
 }
 
 export function finalizeRoutes(ctx: AppContext, rt: Runtime): Hono {
@@ -106,10 +93,8 @@ export function finalizeRoutes(ctx: AppContext, rt: Runtime): Hono {
   r.post(`${base}/accept`, handle(async (c) => {
     const body = await parse(c, acceptBody);
     const { cfg, ref } = await find(c);
-    const project = await readProjectFile(ref.dir);
-    const clone = expandHome(body.clone, ctx.home);
     // Only a clone this project was opened from. acceptFinal then checks its remote and every path inside it.
-    if (!(await clonesOf(project, ctx.home)).some((x) => x.path === clone)) throw new InputError("That folder isn't one of the clones this project was opened from.");
+    const clone = await knownClone(await readProjectFile(ref.dir), body.clone, ctx.home);
     const profile = cfg.repos.find((p) => p.name === ref.repo);
     if (!profile) throw new InputError(`There's no repo profile for ${ref.repo}. Add it in Settings → Repos.`);
     return c.json(await write(ref, () => acceptFinal({ dir: ref.dir, clone, profile, types: cfg.types, home: ctx.home })));

@@ -14,10 +14,8 @@ import {
   setParked,
   setReviewed,
   submit,
-  submitMessage,
   undoChange,
   type ProjectRef,
-  type SubmitResponse,
 } from '@dev-plumbing/core';
 import type { AppContext } from '../context';
 import { checkerFor } from '../checker';
@@ -25,6 +23,7 @@ import { handle } from '../errors';
 import { EXPECTED_OBJECT, readJsonObject } from '../json';
 import { locateProject } from '../locate';
 import { projectKey, type Runtime } from '../runtime';
+import { submitResponse } from './respond';
 
 // `{ clear: true }` clears a draft. Anything else must name at least one known field, so a typo can't erase one.
 const draftBody = z.union([
@@ -68,13 +67,6 @@ export function threadRoutes(ctx: AppContext, rt: Runtime): Hono {
     rt.events.projectChanged(ref.repo, ref.id);
     return result;
   };
-  const respond = (ref: ProjectRef, r: { resolved: string[]; sent: string[]; skipped: { threadId: string; reason: string }[] }): SubmitResponse => {
-    const key = projectKey(ref.repo, ref.id);
-    if (r.sent.length) rt.listeners.notify(key);
-    const listening = rt.listeners.state(key);
-    const counts = { resolved: r.resolved.length, sent: r.sent.length, skipped: r.skipped };
-    return { ...counts, listening, message: submitMessage(counts, listening) };
-  };
 
   r.get(`${base}/threads/:threadId`, handle(async (c) => {
     const { cfg, ref } = await find(c);
@@ -114,7 +106,7 @@ export function threadRoutes(ctx: AppContext, rt: Runtime): Hono {
     const body = await parse(c, submitBody);
     const { cfg, ref } = await find(c);
     const result = await write(ref, () => submit(ref.dir, { scope: body.scope, threadId: body.scope === 'thread' ? body.threadId : undefined, types: cfg.types }));
-    return c.json(respond(ref, result));
+    return c.json(submitResponse(rt, ref, result));
   }));
 
   r.post(`${base}/items`, handle(async (c) => {
@@ -133,7 +125,7 @@ export function threadRoutes(ctx: AppContext, rt: Runtime): Hono {
       const { thread } = await addOwnItem(ref.dir, { type, title: body.title, text: body.text, fields: body.fields, anchor: body.anchor });
       return { threadId: thread.id, result: await submit(ref.dir, { scope: 'thread', threadId: thread.id, types: cfg.types }) };
     });
-    return c.json({ ...respond(ref, result), threadId });
+    return c.json({ ...submitResponse(rt, ref, result), threadId });
   }));
 
   r.get(`${base}/changes`, handle(async (c) => {
