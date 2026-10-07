@@ -66,6 +66,10 @@ export function PracticeView({ view, repo, project, place, onPlace }: PracticeVi
     onError: reload,
     onSettled: () => setTicking(null),
   });
+  /** Previous and Next: the card stays put while a rating saves. */
+  const move = (card: number) => {
+    if (!rate.isPending) go(card);
+  };
   /** Rates the card on show. Its rating again clears it. */
   const rateCard = (rating: Rating | null) => {
     if (q) rate.mutate({ questionId: q.id, rating, card: at });
@@ -118,7 +122,7 @@ export function PracticeView({ view, repo, project, place, onPlace }: PracticeVi
       ) : (
         <>
           <div className="mt-6 flex items-center gap-2.5">
-            <Switch id="practice-shaky" checked={place.deck !== null} onChange={toggleDeck} label={SHAKY} disabled={rate.isPending} />
+            <Switch id="practice-shaky" checked={place.deck !== null} onChange={toggleDeck} label={SHAKY} busy={rate.isPending} />
             <label htmlFor="practice-shaky" className="text-[13px] text-ink-2">
               {SHAKY}
             </label>
@@ -141,11 +145,12 @@ export function PracticeView({ view, repo, project, place, onPlace }: PracticeVi
                   onRate={rateCard}
                   asked={view.asked}
                 />
+                {/* While a rating saves they wait, marked aria-disabled so a focused one keeps the focus. */}
                 <div className="mt-3 flex gap-2">
-                  <Button size="sm" disabled={at === 0 || rate.isPending} onClick={() => go(at - 1)}>
+                  <Button size="sm" disabled={at === 0} aria-disabled={rate.isPending || undefined} onClick={() => move(at - 1)}>
                     Previous
                   </Button>
-                  <Button size="sm" disabled={at >= n - 1 || rate.isPending} onClick={() => go(at + 1)}>
+                  <Button size="sm" disabled={at >= n - 1} aria-disabled={rate.isPending || undefined} onClick={() => move(at + 1)}>
                     Next
                   </Button>
                 </div>

@@ -57,6 +57,18 @@ describe('Switch', () => {
     fireEvent.click(screen.getByRole('switch', { name: 'Start at login' }));
     expect(onChange).toHaveBeenCalledWith(true);
   });
+
+  it('waits while busy: aria-disabled, so it keeps the focus, and a press does nothing', () => {
+    const onChange = vi.fn();
+    render(<Switch checked={false} onChange={onChange} label="Start at login" busy />);
+    const control = screen.getByRole('switch', { name: 'Start at login' }) as HTMLButtonElement;
+    control.focus();
+    fireEvent.click(control);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(control.getAttribute('aria-disabled')).toBe('true');
+    expect(control.disabled).toBe(false);
+    expect(document.activeElement).toBe(control);
+  });
 });
 
 describe('ProgressBar', () => {

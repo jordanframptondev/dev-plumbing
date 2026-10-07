@@ -241,25 +241,75 @@ describe('Practice', () => {
     expect(only.getAttribute('aria-checked')).toBe('true');
   });
 
-  it('holds the card and the deck while a rating is saving, then moves on in the same deck', async () => {
+  it('holds the card and the deck while a rating is saving, keeping the focus where it is, then moves on in the same deck', async () => {
     show(view({ practice: practice(RATED) }));
     let done!: (p: ReturnType<typeof practice>) => void;
-    vi.spyOn(api, 'ratePractice').mockReturnValue(new Promise((r) => (done = r)));
+    const rate = vi.spyOn(api, 'ratePractice').mockReturnValue(new Promise((r) => (done = r)));
     const only = await screen.findByRole('switch', { name: "Only shaky and couldn't" });
     fireEvent.click(only);
     fireEvent.click(screen.getByTestId('show-answer'));
-    fireEvent.click(screen.getByRole('button', { name: 'Could explain it' }));
-    await waitFor(() => expect((screen.getByRole('button', { name: 'Next' }) as HTMLButtonElement).disabled).toBe(true));
-    expect((screen.getByRole('button', { name: 'Previous' }) as HTMLButtonElement).disabled).toBe(true);
-    expect((only as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    const could = screen.getByRole('button', { name: 'Could explain it' }) as HTMLButtonElement;
+    could.focus();
+    fireEvent.click(could);
+    const next = screen.getByRole('button', { name: 'Next' }) as HTMLButtonElement;
+    const previous = screen.getByRole('button', { name: 'Previous' }) as HTMLButtonElement;
+    // Every control waits, marked aria-disabled rather than disabled, so the one you're on keeps the focus.
+    await waitFor(() => expect(could.getAttribute('aria-disabled')).toBe('true'));
+    for (const control of [could, screen.getByRole('button', { name: 'Shaky' }), next, only]) {
+      expect(control.getAttribute('aria-disabled'), control.textContent ?? '').toBe('true');
+      expect((control as HTMLButtonElement).disabled, control.textContent ?? '').toBe(false);
+    }
+    // Previous is disabled on the first card anyway.
+    expect(previous.disabled).toBe(true);
+    expect(document.activeElement).toBe(could);
+    fireEvent.click(could);
+    fireEvent.click(screen.getByRole('button', { name: 'Shaky' }));
+    fireEvent.keyDown(window, { key: '3' });
+    fireEvent.click(next);
     fireEvent.click(only);
     fireEvent.keyDown(window, { key: 'ArrowRight' });
     fireEvent.keyDown(window, { key: 'ArrowLeft' });
+    expect(rate).toHaveBeenCalledTimes(1);
     expect(card().textContent).toContain('Card 1 of 2');
     expect(only.getAttribute('aria-checked')).toBe('true');
     done(practice({ ...RATED, ratings: { ...RATED.ratings, q2: 'could' } }));
     await waitFor(() => expect(card().textContent).toContain('Card 2 of 2'));
     expect(card().textContent).toContain('Who can change the lead time?');
+    expect(next.getAttribute('aria-disabled')).toBeNull();
+    expect(only.getAttribute('aria-disabled')).toBeNull();
+  });
+
+  it('keeps the focus on a box while its tick saves, and takes no other tick until it has', async () => {
+    show();
+    let done!: (p: ReturnType<typeof practice>) => void;
+    const tick = vi.spyOn(api, 'tickPractice').mockReturnValue(new Promise((r) => (done = r)));
+    const checklist = await screen.findByTestId('defense-checklist');
+    const box = within(checklist).getByRole('checkbox', { name: 'I can explain the data flow.' }) as HTMLInputElement;
+    const other = within(checklist).getByRole('checkbox', { name: 'I know what breaks first.' }) as HTMLInputElement;
+    box.focus();
+    fireEvent.click(box);
+    await waitFor(() => expect(tick).toHaveBeenCalledTimes(1));
+    // The box shows where it's going. Every box waits, marked aria-disabled rather than disabled.
+    expect(box.checked).toBe(true);
+    for (const b of [box, other]) {
+      expect(b.getAttribute('aria-disabled')).toBe('true');
+      expect(b.disabled).toBe(false);
+    }
+    expect(document.activeElement).toBe(box);
+    // A click while it saves, on it or another box, does nothing.
+    fireEvent.click(box);
+    fireEvent.click(other);
+    expect(tick).toHaveBeenCalledTimes(1);
+    expect(box.checked).toBe(true);
+    expect(other.checked).toBe(false);
+    done(practice({ ticks: ['k2'], readiness: 13, counts: { could: 0, shaky: 0, couldnt: 0, unrated: 3, ticked: 1, checklist: 4 } }));
+    await waitFor(() => expect(checklist.textContent).toContain('1 of 4 ticked'));
+    expect(box.getAttribute('aria-disabled')).toBeNull();
+    expect(box.checked).toBe(true);
+    expect(document.activeElement).toBe(box);
+    // Then the next tick goes.
+    fireEvent.click(other);
+    await waitFor(() => expect(tick).toHaveBeenCalledTimes(2));
+    expect(tick).toHaveBeenLastCalledWith('acme-app', 'restock', { defenseId: 'w-1', checklistId: 'k4', ticked: true });
   });
 });

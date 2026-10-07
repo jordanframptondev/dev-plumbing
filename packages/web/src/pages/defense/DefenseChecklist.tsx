@@ -4,7 +4,8 @@ const LIST = 'mt-2 overflow-hidden rounded-[10px] border-[0.5px] border-separato
 
 /**
  * The defense's checklist, to tick as you practise. `ticks` are the ids ticked. While a tick is on its way
- * (`pending`) its box shows where it's going, and every box waits, so two ticks can't race.
+ * (`pending`) its box shows where it's going, and every box waits, so two ticks can't race: marked aria-disabled and
+ * ignoring changes, rather than disabled, so the box you ticked keeps the focus.
  */
 export function DefenseChecklist({
   checklist,
@@ -35,9 +36,11 @@ export function DefenseChecklist({
               <input
                 type="checkbox"
                 checked={checked(k.id)}
-                disabled={pending !== undefined}
-                onChange={(e) => onTick(k.id, e.target.checked)}
-                className="mt-0.5 size-3.5 shrink-0 accent-slate"
+                aria-disabled={pending !== undefined || undefined}
+                onChange={(e) => {
+                  if (pending === undefined) onTick(k.id, e.target.checked);
+                }}
+                className="mt-0.5 size-3.5 shrink-0 accent-slate aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
               />
               <span className="min-w-0 break-words">{k.text}</span>
             </label>

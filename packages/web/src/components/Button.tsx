@@ -9,7 +9,7 @@ const SIZES = { sm: 'rounded-[6px] px-2.5 py-1 text-[11.5px]', md: 'rounded-[7px
 /** A Button's classes, for a link that should look like one. */
 export function buttonClass({ variant = 'secondary', size = 'md', className = '' }: { variant?: Variant; size?: Size; className?: string } = {}): string {
   const look = variant === 'primary' ? 'bg-button text-button-text' : 'border-[0.5px] border-separator bg-cell text-ink';
-  return `inline-flex items-center justify-center whitespace-nowrap font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate disabled:cursor-not-allowed disabled:opacity-40 ${look} ${SIZES[size]} ${className}`;
+  return `inline-flex items-center justify-center whitespace-nowrap font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate disabled:cursor-not-allowed disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:opacity-40 ${look} ${SIZES[size]} ${className}`;
 }
 
 export function Button({ variant = 'secondary', size = 'md', className = '', type = 'button', ...rest }: Props) {

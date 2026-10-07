@@ -26,9 +26,13 @@ async function practise(page: Page) {
   await page.keyboard.press('Enter');
   await expect(card.getByRole('button', { name: 'Shaky' })).toHaveAttribute('aria-pressed', 'true');
   const checklist = page.getByTestId('defense-checklist');
-  for (const line of LINES) {
-    await checklist.getByRole('checkbox', { name: line }).check();
-    await expect(checklist.getByRole('checkbox', { name: line })).toBeChecked();
+  for (const [i, line] of LINES.entries()) {
+    const box = checklist.getByRole('checkbox', { name: line });
+    await box.check();
+    await expect(box).toBeChecked();
+    await expect(checklist).toContainText(`${i + 1} of 20 ticked`);
+    // Saving the tick never takes the focus off the box.
+    await expect(box).toBeFocused();
   }
 }
 

@@ -9,11 +9,13 @@ export const RATINGS: { value: Rating; label: string; tone: string }[] = [
   { value: 'shaky', label: 'Shaky', tone: 'text-amber' },
   { value: 'couldnt', label: "Couldn't", tone: 'text-seal' },
 ];
-const CHIP = 'inline-flex items-center rounded-[6px] border-[0.5px] border-separator px-2.5 py-1 text-[11.5px] font-medium disabled:cursor-not-allowed disabled:opacity-40';
+const CHIP = 'inline-flex items-center rounded-[6px] border-[0.5px] border-separator px-2.5 py-1 text-[11.5px] font-medium aria-disabled:cursor-not-allowed aria-disabled:opacity-40';
 
 /**
  * One question to explain out loud. Show answer reveals the defense's answer and how sure it is, and only then the
  * ratings you give yourself. Choosing your rating again clears it. Practice keeps whether it's shown, so its keys work.
+ * While a rating saves (`busy`) the ratings are marked aria-disabled and ignore presses, rather than being disabled, so
+ * the one you pressed keeps the focus.
  */
 export function Flashcard({
   repo,
@@ -63,8 +65,10 @@ export function Flashcard({
                   key={r.value}
                   type="button"
                   aria-pressed={chosen}
-                  disabled={busy}
-                  onClick={() => onRate(chosen ? null : r.value)}
+                  aria-disabled={busy || undefined}
+                  onClick={() => {
+                    if (!busy) onRate(chosen ? null : r.value);
+                  }}
                   className={`${CHIP} ${chosen ? `bg-selection ${r.tone}` : 'bg-cell text-ink'}`}
                 >
                   {r.label}
