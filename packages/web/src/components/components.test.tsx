@@ -62,8 +62,15 @@ describe('Switch', () => {
 describe('ProgressBar', () => {
   it('reports resolved out of total', () => {
     render(<ProgressBar resolved={3} total={6} />);
-    const bar = screen.getByRole('progressbar');
+    const bar = screen.getByRole('progressbar', { name: 'Resolved threads' });
     expect(bar.getAttribute('aria-valuenow')).toBe('3');
     expect(bar.getAttribute('aria-valuemax')).toBe('6');
+  });
+
+  it('can be named for what it measures', () => {
+    render(<ProgressBar resolved={55} total={100} label="Readiness" />);
+    const bar = screen.getByRole('progressbar', { name: 'Readiness' });
+    expect(bar.getAttribute('aria-valuenow')).toBe('55');
+    expect((bar.firstElementChild as HTMLElement).style.width).toBe('55%');
   });
 });
