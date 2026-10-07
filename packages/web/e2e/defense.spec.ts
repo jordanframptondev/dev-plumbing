@@ -92,3 +92,46 @@ test.describe('on a phone', () => {
     expect(await noSideScroll(page)).toEqual([]);
   });
 });
+
+test('Study: ask Claude about a part, and send an unknown to Questions, and Finalize never lists the Defense thread', async ({ page }) => {
+  const p = await importProject('def-ask', 'Defense ask');
+  await writeDefense(p);
+  await page.goto(`${p.url}/defense`);
+  const security = page.getByTestId('defense-section-security');
+  await expect(security.getByRole('heading')).toHaveText('5. Security model');
+  await expect(security.getByText('Unknown', { exact: true })).toBeVisible();
+
+  // The Unknown claim goes to Questions, where Claude suggests answers.
+  await security.getByTestId('send-to-plumbing').click();
+  await expect(security.getByRole('status')).toHaveText(/^Added to Questions\. /);
+  await expect(security.getByRole('link', { name: 'In Questions ›' })).toBeVisible();
+  await expect(security.getByTestId('send-to-plumbing')).toHaveCount(0);
+
+  // Asking about Security model opens a Defense thread whose first message is the question.
+  await security.getByTestId('ask-claude').click();
+  await security.getByTestId('ask-question').fill('Who signs off on a change to the lead time?');
+  await security.getByTestId('ask-send').click();
+  await expect(page).toHaveURL(new RegExp(`${p.url}/th/t-defense-`));
+  await expect(page.getByTestId('messages')).toContainText('Who signs off on a change to the lead time?');
+  await expect(page.getByTestId('thread-status')).toHaveText('With Claude');
+  const nav = page.getByRole('complementary', { name: 'Project navigation' });
+  await expect(nav.getByTestId('nav-type-defense')).toHaveText('Defense questions');
+
+  // Claude's answer needs nothing more, so it resolves the thread itself. The answer stays, and the form is still there
+  // to carry on.
+  const threadId = new URL(page.url()).pathname.split('/').at(-1)!;
+  const answer = 'The plan names nobody. Until it does, whoever can deploy can change it.';
+  await asClaude('/reply', { repo: p.repo, project: p.project, threadId, text: answer, resolve: { decision: 'Nobody signs off on the lead time yet' } });
+  await expect(page.getByTestId('thread-status')).toHaveText('Resolved');
+  await expect(page.getByTestId('messages')).toContainText(answer);
+  await expect(page.getByTestId('answer-form')).toBeVisible();
+
+  // Back on the page, the thread is listed under the part it's about.
+  await nav.getByTestId('nav-defense').click();
+  await expect(page.getByTestId('defense-section-security').getByRole('link', { name: /Who signs off on a change to the lead time\?/ })).toBeVisible();
+
+  // Finalize never lists a Defense thread.
+  await page.goto(`${p.url}/finalize`);
+  await expect(page.getByTestId('finalize-checklist')).toBeVisible();
+  await expect(page.getByTestId('finalize')).not.toContainText('Who signs off on a change to the lead time?');
+});
