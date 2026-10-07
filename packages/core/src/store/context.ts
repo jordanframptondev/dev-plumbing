@@ -468,6 +468,7 @@ export type WhiteboardPack = {
   /**
    * The saved defense's question texts, and the texts of its claims marked unknown or verify. A regenerate keeps the
    * wording of those that still apply: Practice keeps ratings, and sending matches unknowns, by text. Null with none saved.
+   * At most the first 40 questions and 60 unknowns, each cut to 300 characters (ending "…"), so the pack stays small.
    */
   previous: { questions: string[]; unknowns: string[] } | null;
 };
@@ -478,6 +479,11 @@ export type WhiteboardPack = {
  */
 const BODY_MAX = 800;
 const CLIPPED = '… (clipped: Read file for the rest)';
+/** The last defense's wording in the pack (`previous`): at most this many questions and unknowns, each cut to PREVIOUS_MAX characters. */
+const PREVIOUS_QUESTIONS = 40;
+const PREVIOUS_UNKNOWNS = 60;
+const PREVIOUS_MAX = 300;
+const clipPrevious = (text: string) => (text.length <= PREVIOUS_MAX ? text : `${text.slice(0, PREVIOUS_MAX - 1)}…`);
 
 /**
  * What the whiteboard subagent receives: the framework and the document the defense is based on (as files to Read),
@@ -517,8 +523,11 @@ export async function whiteboardPack(o: { dir: string; types: PlumbingType[]; pr
     diagramItemIds: await defenseDiagramItemIds(o.dir, o.types),
     previous: saved
       ? {
-          questions: saved.questions.map((q) => q.q),
-          unknowns: saved.sections.flatMap((s) => s.claims.filter((c) => c.basis === 'unknown' || c.basis === 'verify').map((c) => c.text)),
+          questions: saved.questions.slice(0, PREVIOUS_QUESTIONS).map((q) => clipPrevious(q.q)),
+          unknowns: saved.sections
+            .flatMap((s) => s.claims.filter((c) => c.basis === 'unknown' || c.basis === 'verify').map((c) => c.text))
+            .slice(0, PREVIOUS_UNKNOWNS)
+            .map(clipPrevious),
         }
       : null,
   };

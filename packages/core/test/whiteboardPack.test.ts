@@ -140,6 +140,38 @@ describe("the whiteboard subagent's context pack", () => {
     });
   });
 
+  it("keeps the last defense's wording small: at most 40 questions and 60 unknowns, each cut to 300 characters", async () => {
+    const dir = await seed();
+    const base = storedDefense();
+    const long = (start: string) => `${start} ${'It goes on for a while. '.repeat(40)}`.trim();
+    const claims = (id: string) => Array.from({ length: 40 }, (_, i) => ({ text: long(`${id} ${i + 1}.`), basis: i % 2 ? ('verify' as const) : ('unknown' as const) }));
+    await writeDefense(
+      dir,
+      storedDefense({
+        // More than a saved defense can have: the pack is capped all the same.
+        questions: Array.from({ length: 45 }, (_, i) => ({ id: `q${i + 1}`, q: long(`Question ${i + 1}?`), a: 'Yes.', basis: 'known' as const })),
+        sections: base.sections.map((s) => (s.id === 'walkthrough' || s.id === 'failure' ? { ...s, claims: claims(s.id) } : s)),
+      }),
+    );
+    const { previous } = await whiteboardPack({ dir, types, profile, rulesFile: RULES_FILE });
+    expect(previous!.questions).toHaveLength(40);
+    expect(previous!.unknowns).toHaveLength(60);
+    // Each long one is cut; a short one is kept as it is.
+    const cut = [...previous!.questions, ...previous!.unknowns].filter((text) => text.includes('It goes on'));
+    expect(cut).toHaveLength(99);
+    for (const text of cut) {
+      expect(text).toHaveLength(300);
+      expect(text.endsWith('…')).toBe(true);
+    }
+    // The first ones, in the defense's order.
+    expect(previous!.questions[0]).toMatch(/^Question 1\? It goes on/);
+    expect(previous!.questions.at(-1)).toMatch(/^Question 40\? It goes on/);
+    expect(previous!.unknowns[0]).toMatch(/^walkthrough 1\. It goes on/);
+    // Security model's unknown comes between Walkthrough's 40 and Failure analysis's.
+    expect(previous!.unknowns[40]).toBe('Whether the unsubscribe link needs a signed token.');
+    expect(previous!.unknowns.at(-1)).toMatch(/^failure 19\. It goes on/);
+  });
+
   it('stays small on a big plan: 40 items with long bodies, five of them drawn', async () => {
     const BIG_DIAGRAM = {
       kind: 'system',
