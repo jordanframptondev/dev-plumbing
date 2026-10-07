@@ -1,4 +1,4 @@
-import { DEFENSE } from '../defenseType';
+import { defenseThreadIds } from '../defenseType';
 import type { Decision, Thread } from '../schemas';
 import { newId, readDecisions, readItems, writeDecisions } from './io';
 
@@ -41,7 +41,7 @@ export async function relevantDecisions(dir: string, threadIds: string[]): Promi
     if (own.has(i.id)) for (const l of i.links ?? []) touched.add(l);
     else if (i.links?.some((l) => own.has(l))) touched.add(i.id);
   }
-  const defenseThreads = new Set(items.filter((i) => i.type === DEFENSE).map((i) => i.threadId));
+  const defenseThreads = defenseThreadIds(items);
   const decisions = active
     .filter((d) => threads.has(d.threadId) || (!defenseThreads.has(d.threadId) && d.itemIds.some((id) => touched.has(id))))
     .map((d) => d.text);

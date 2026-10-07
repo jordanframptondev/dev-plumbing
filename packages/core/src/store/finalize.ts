@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { writeJsonAtomic } from '../atomic';
-import { DEFENSE } from '../defenseType';
+import { DEFENSE, defenseThreadIds } from '../defenseType';
 import { expandTokens } from '../finalExport';
 import { PLAN_CHANGES } from '../planChanges';
 import { displayStatus, finalizeRequestSchema, type FinalizeRequest, type Item, type PlumbingType } from '../schemas';
@@ -37,7 +37,7 @@ export async function finalInputsHash(dir: string): Promise<string> {
   const project = await readProjectFile(dir);
   const draft = await readDocText(dir, project.docs.draft);
   const [{ values }, { values: threads }] = await Promise.all([readItems(dir), readThreads(dir)]);
-  const defenseThreads = new Set(values.filter((i) => i.type === DEFENSE).map((i) => i.threadId));
+  const defenseThreads = defenseThreadIds(values);
   // flags ("May need another look") and the reviewed mark are review marks, not content: setting or clearing one
   // mustn't make a proposal stale.
   const items = values

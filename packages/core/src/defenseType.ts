@@ -1,8 +1,16 @@
 import { splitSections } from './rules';
-import type { PlumbingType } from './schemas';
+import type { Item, PlumbingType } from './schemas';
 
 /** The built-in plumbing type for the questions you ask Claude about the Whiteboard Defense ("Ask Claude about this"). */
 export const DEFENSE = 'defense';
+
+/**
+ * The threads of the Defense items among `items`. Their decisions are about the Whiteboard Defense, not the plan, so
+ * the packs, the final, a plan update and the defense's own fingerprint leave them out.
+ */
+export function defenseThreadIds(items: Item[]): Set<string> {
+  return new Set(items.filter((i) => i.type === DEFENSE).map((i) => i.threadId));
+}
 
 /** postReply's problem when a reply on a Defense thread would change the draft. */
 export const DEFENSE_CHANGE_REFUSAL =

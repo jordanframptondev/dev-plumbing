@@ -2,7 +2,9 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { CONFLICT_REASON, PLAN_CHANGES_TYPE } from '../src/planChanges';
 import type { HistoryEntry, Message, Option } from '../src/schemas';
 import { changesSinceFinal, checklistFrom, finalizeChecklist } from '../src/store/checklist';
-import { writeHistoryEntry } from '../src/store/io';
+import { readItem, readThread, writeHistoryEntry, writeThread } from '../src/store/io';
+import { postReply } from '../src/store/reply';
+import { submit } from '../src/store/submit';
 import { removeTempDirs } from '../../../testkit/tmp';
 import { listType, pair, seedProject, TYPES } from './fixtures';
 
@@ -158,6 +160,46 @@ describe('the finalize checklist', () => {
     expect(list.blocking.map((e) => e.itemId)).toEqual(['q-block']);
     expect(list.defaults.map((e) => e.itemId)).toEqual(['q-default']);
     expect(list.parked.map((e) => e.itemId)).toEqual(['q-parked']);
+  });
+
+  it("doesn't hold up Finalize with the proposal an item Claude added opens with, until you've written in it", async () => {
+    const dir = await seedProject({ pairs: [pair('q1', { title: 'Who gets reminders?', status: 'with_claude' })] });
+    const reply = (r: Parameters<typeof postReply>[1]['reply']) => postReply(dir, { reply: r, types: TYPES, autoApply: true, clone: '/nowhere' });
+    // Claude settles q1, and adds a concern through newItems whose first message already proposes a change.
+    const { newThreadIds } = await reply({
+      threadId: 't-q1',
+      text: 'Everyone active. That raises a concern.',
+      resolve: { decision: 'Everyone with an active subscription.' },
+      newItems: [
+        {
+          type: 'concerns',
+          title: 'Reminder channel',
+          summary: 'Which channel the reminder goes by.',
+          fields: { severity: 'medium' },
+          message: { text: 'Email only, or SMS too?', options: WITH_CHANGE, recommended: 'email' },
+        },
+      ],
+    });
+    const [threadId] = newThreadIds;
+    const itemId = threadId.slice('t-'.length);
+    expect(await readItem(dir, itemId)).toMatchObject({ type: 'concerns', createdBy: 'claude', links: ['q1'] });
+    const thread = await readThread(dir, threadId);
+    expect(thread.messages.map((m) => m.author)).toEqual(['claude']);
+    expect(thread.messages[0]).not.toHaveProperty('opening');
+    // Nobody has written in it, so its proposal isn't waiting for an answer: it's only unreviewed.
+    const first = await finalizeChecklist(dir, TYPES);
+    expect(first.blocking).toEqual([]);
+    expect(first.unreviewed).toEqual([row(itemId, 'Reminder channel', 'Concerns', 'Nobody has answered here.')]);
+    expect(first.canStart).toBe(true);
+
+    // You write in it, and Claude proposes again: now that proposal waits for your answer.
+    await writeThread(dir, { ...thread, draft: { text: 'What would SMS cost?', updatedAt: AT } });
+    await submit(dir, { scope: 'thread', threadId, types: TYPES });
+    await reply({ threadId, text: 'About 1p a message. Still two ways:', options: WITH_CHANGE, recommended: 'email' });
+    expect((await readThread(dir, threadId)).messages.map((m) => m.author)).toEqual(['claude', 'you', 'claude']);
+    const then = await finalizeChecklist(dir, TYPES);
+    expect(then.blocking).toEqual([row(itemId, 'Reminder channel', 'Concerns', 'A proposal is waiting for your answer.')]);
+    expect(then.canStart).toBe(false);
   });
 
   it('counts the changes applied since the last final', () => {

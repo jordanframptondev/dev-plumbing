@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { writeFileAtomic, writeJsonAtomic } from '../atomic';
 import { diffText } from '../docDiff';
 import { MergeError, mergePlan, type MergeConflict, type MergeResult } from '../merge';
-import { DEFENSE } from '../defenseType';
+import { defenseThreadIds } from '../defenseType';
 import { importableTypes, PLAN_CHANGES } from '../planChanges';
 import { titleFromMarkdown, type Item, type Message, type PlanVersion, type PlumbingProject, type PlumbingType, type Submission, type Thread } from '../schemas';
 import { readFinalize } from './finalize';
@@ -292,7 +292,7 @@ function conflictBody(c: MergeConflict, n: number): string {
 export async function updateRefusal(dir: string): Promise<string | null> {
   const project = await readProjectFile(dir);
   if (project.status === 'importing') return "This project is still importing. Run /dev-plumbing again once that's done.";
-  const defenseThreads = new Set((await readItems(dir)).values.filter((i) => i.type === DEFENSE).map((i) => i.threadId));
+  const defenseThreads = defenseThreadIds((await readItems(dir)).values);
   const waiting = (await readThreads(dir)).values.filter((t) => t.status === 'with_claude' && !defenseThreads.has(t.id)).length;
   if (waiting === 1) return "Claude has 1 thread to answer in this project first. Run /dev-plumbing again once it's answered.";
   if (waiting > 1) return `Claude has ${waiting} threads to answer in this project first. Run /dev-plumbing again once they're answered.`;

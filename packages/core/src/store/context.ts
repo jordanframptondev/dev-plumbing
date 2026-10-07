@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { DEFENSE } from '../defenseType';
+import { DEFENSE, defenseThreadIds } from '../defenseType';
 import { diffText } from '../docDiff';
 import { availableTokens } from '../finalExport';
 import { PLAN_CHANGES } from '../planChanges';
@@ -146,7 +146,7 @@ export async function threadPack(o: { dir: string; threadId: string; types: Plum
   const item = await readItem(o.dir, thread.itemId);
   const draft = await readDocText(o.dir, project.docs.draft);
   const { values: items } = await readItems(o.dir);
-  const defenseThreads = new Set(items.filter((i) => i.type === DEFENSE).map((i) => i.threadId));
+  const defenseThreads = defenseThreadIds(items);
   const type = o.types.find((t) => t.id === item.type);
   const linkedIds = new Set([...(item.links ?? []), ...items.filter((i) => i.links?.includes(item.id)).map((i) => i.id)]);
   const section = item.mdAnchor ? sectionFor(draft, item.mdAnchor.heading) : null;

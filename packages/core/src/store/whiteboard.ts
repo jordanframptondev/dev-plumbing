@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import { writeJsonAtomic } from '../atomic';
-import { DEFENSE } from '../defenseType';
+import { DEFENSE, defenseThreadIds } from '../defenseType';
 import {
   DEFENSE_SECTIONS,
   dataKindOf,
@@ -132,7 +132,7 @@ export async function defenseInputsHash(dir: string): Promise<string> {
 
 async function inputsHashFor(dir: string, basis: DefenseBasis): Promise<string> {
   const [{ values }, { values: threads }] = await Promise.all([readItems(dir), readThreads(dir)]);
-  const defenseThreads = new Set(values.filter((i) => i.type === DEFENSE).map((i) => i.threadId));
+  const defenseThreads = defenseThreadIds(values);
   const items = values
     .filter((i) => i.type !== DEFENSE && i.createdBy !== 'whiteboard')
     .sort((a, b) => a.id.localeCompare(b.id))
