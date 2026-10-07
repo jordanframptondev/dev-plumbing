@@ -160,6 +160,7 @@ describe('the plugin', () => {
     const thread = parseFrontMatter(read('plugin/agents/thread.md')).content;
     expect(thread).toContain("In a Defense thread, answer from the pack's `defense` and never send `change` or `smallEdits`");
     expect(thread).toContain('resolve the thread with your answer');
+    expect(thread).toContain('add a Questions or Concerns item with `newItems` (type `questions` or `concerns`)');
   });
 
   it("detects a repo profile again when the user asks, keeping the user's own settings", () => {

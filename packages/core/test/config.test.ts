@@ -165,6 +165,8 @@ describe('config folder', () => {
     expect(DEFENSE_TYPE.sections.Rules).toContain("The item's body is that part, as Markdown, and the pack's `defense` is the whole defense.");
     expect(DEFENSE_TYPE.sections.Rules).toContain('Never offer a change to the draft');
     expect(DEFENSE_TYPE.sections.Rules).toContain('add a Questions or Concerns item with `newItems`');
+    // It names the type ids newItems takes, so Claude doesn't guess "concern" and get refused.
+    expect(DEFENSE_TYPE.sections.Rules).toContain('with `newItems` (type `questions` or `concerns`)');
     expect(DEFENSE_TYPE.sections.Rules).toContain('send it with `resolve` and a one-line decision that sums it up');
     expect(importableTypes(c.types).map((t) => t.id)).not.toContain('defense');
     // Yours wins, and is never imported either.

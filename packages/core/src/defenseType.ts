@@ -25,7 +25,7 @@ const RULES = `## What to look for
 - Never offer a change to the draft: no option has a \`change\`, and the reply has no \`smallEdits\`. dev-plumbing refuses a Defense reply that has either.
 - When your answer needs nothing more from the person, send it with \`resolve\` and a one-line decision that sums it up, so it doesn't wait in their Inbox. They can reply to carry on. Resolve only this thread: leave out \`resolve.itemIds\`.
 - Offer options only when the person must choose.
-- When the answer shows a gap or a risk the plan doesn't cover, add a Questions or Concerns item with \`newItems\`, and say so in your reply. A Defense thread can't add an item of any other type.
+- When the answer shows a gap or a risk the plan doesn't cover, add a Questions or Concerns item with \`newItems\` (type \`questions\` or \`concerns\`), and say so in your reply. A Defense thread can't add an item of any other type.
 - When the person says their question is answered, resolve the thread with a one-line decision that sums up the answer.
 
 ## Done when
