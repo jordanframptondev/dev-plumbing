@@ -17,6 +17,16 @@ function typeStatus(t: TypeEntry): DisplayStatus {
 
 const Section = ({ children }: { children: ReactNode }) => <div className="px-2 pb-1 pt-3 text-[11px] font-semibold text-ink-3">{children}</div>;
 
+/**
+ * The quiet word after Whiteboard Defense: one is being asked for or written, none has been saved yet, or the plan
+ * changed since. Null when it's current.
+ */
+function defenseNote(d: ProjectHome['defense']): string | null {
+  if (d.state === 'requested' || d.state === 'writing') return 'Writing…';
+  if (!d.ready) return 'Not yet';
+  return d.stale ? 'Out of date' : null;
+}
+
 export function ProjectNav({ home, repo, project, onNavigate }: { home: ProjectHome; repo: string; project: string; onNavigate?: () => void }) {
   // Once the plan has a v2, Original and Draft say which version they are, and the earlier ones are under Versions.
   const versioned = home.version.count > 1;
@@ -66,9 +76,10 @@ export function ProjectNav({ home, repo, project, onNavigate }: { home: ProjectH
       )}
       {docEntry('final')}
       <Section>Review</Section>
-      <span className={`${LINK} text-ink-3`} title="Whiteboard Defense arrives in a later update.">
+      <Link to="/p/$repo/$project/defense" params={{ repo, project }} activeProps={ACTIVE} className={LINK} onClick={onNavigate} data-testid="nav-defense">
         Whiteboard Defense
-      </span>
+        {defenseNote(home.defense) && <span className="ml-auto text-[11px] text-ink-3">{defenseNote(home.defense)}</span>}
+      </Link>
     </nav>
   );
 }

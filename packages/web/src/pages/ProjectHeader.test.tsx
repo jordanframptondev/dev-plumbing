@@ -62,3 +62,13 @@ describe('Finalize spec in the project header', () => {
     expect(screen.queryByText(/block Finalize/)).toBeNull();
   });
 });
+
+describe('Whiteboard Defense in the project header', () => {
+  it('opens the Whiteboard Defense page, and is never the main action', () => {
+    show(home());
+    const link = screen.getByRole('link', { name: 'Whiteboard Defense' });
+    expect(link.getAttribute('href')).toBe('/p/acme-app/restock/defense');
+    expect(link.className).not.toContain('bg-button');
+    expect(screen.queryByRole('button', { name: 'Whiteboard Defense' })).toBeNull();
+  });
+});

@@ -1,6 +1,7 @@
-import { createRootRoute, createRoute, createRouter } from '@tanstack/react-router';
+import { createRootRoute, createRoute, createRouter, type SearchSchemaInput } from '@tanstack/react-router';
 import { PageMessage } from './components/PageMessage';
 import { AppHome } from './pages/AppHome';
+import { DefensePage, type DefenseMode } from './pages/defense/DefensePage';
 import { DocumentView } from './pages/DocumentView';
 import { FinalizePage } from './pages/finalize/FinalizePage';
 import { InboxView } from './pages/InboxView';
@@ -31,6 +32,15 @@ const docRoute = createRoute({ getParentRoute: () => projectRoute, path: 'd/$doc
 const finalizeRoute = createRoute({ getParentRoute: () => projectRoute, path: 'finalize', component: FinalizePage });
 const versionsRoute = createRoute({ getParentRoute: () => projectRoute, path: 'versions', component: VersionsPage });
 const versionRoute = createRoute({ getParentRoute: () => projectRoute, path: 'versions/$n', component: VersionPage });
+
+/** `?mode=practice` opens Practice; anything else is Study. Links may leave the search out. */
+type DefenseSearch = { mode: DefenseMode };
+const defenseRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: 'defense',
+  component: DefensePage,
+  validateSearch: (search: { mode?: DefenseMode } & SearchSchemaInput): DefenseSearch => ({ mode: search.mode === 'practice' ? 'practice' : 'study' }),
+});
 const settingsRoute = createRoute({ getParentRoute: () => rootRoute, path: '/settings', component: SettingsPage });
 const rulesRoute = createRoute({ getParentRoute: () => rootRoute, path: '/rules', component: RulesPage });
 const ruleRoute = createRoute({ getParentRoute: () => rootRoute, path: '/rules/$file', component: RuleEditorPage });
@@ -38,7 +48,7 @@ const outputRoute = createRoute({ getParentRoute: () => rootRoute, path: '/rules
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
-  projectRoute.addChildren([inboxRoute, typeRoute, threadRoute, docRoute, finalizeRoute, versionsRoute, versionRoute]),
+  projectRoute.addChildren([inboxRoute, typeRoute, threadRoute, docRoute, finalizeRoute, versionsRoute, versionRoute, defenseRoute]),
   settingsRoute,
   rulesRoute,
   ruleRoute,

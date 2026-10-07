@@ -51,7 +51,9 @@ export function ProjectHeader({ home, repo, project, submitAll, submitPrimary = 
       <div className="flex flex-wrap items-start gap-3">
         <h1 className="min-w-0 flex-1 text-[26px] font-bold leading-8 tracking-tight">{home.project.title}</h1>
         <div className="hidden gap-2 md:flex">
-          <Button disabled title="Whiteboard Defense arrives in a later update.">Whiteboard Defense</Button>
+          <Link to="/p/$repo/$project/defense" params={{ repo, project }} className={buttonClass()}>
+            Whiteboard Defense
+          </Link>
           <FinalizeButton home={home} repo={repo} project={project} />
           <Button variant={submitPrimary ? 'primary' : 'secondary'} disabled={!s.counts.drafts || submitAll.isPending} onClick={() => submitAll.mutate({ scope: 'all' })}>
             Submit all · {draftsLabel(s.counts.drafts)}

@@ -1,25 +1,32 @@
 import type {
   AgentsConfig,
   Anchor,
+  AskDefenseResponse,
   ChangesResponse,
   ConfigProblem,
+  DefenseExport,
   DiffSegment,
   MockupKitInfo,
   DiscoveryProblem,
   FinalizeRequest,
   FinalizeView,
+  GenerateWhiteboardResponse,
   ListeningState,
   PlumbingProject,
+  PracticeView,
   ProjectHome,
   ProjectSummary,
+  Rating,
   RepoProfile,
   RuleSummary,
+  SendFromDefenseResponse,
   Settings,
   SubmitResponse,
   ThreadDetail,
   TypeEntry,
   TypeItemRow,
   VersionSummary,
+  WhiteboardView,
 } from '@dev-plumbing/core/schemas';
 
 export class ApiError extends Error {
@@ -116,4 +123,16 @@ export const api = {
   compareVersions: (repo: string, id: string, from: number, to: number, which: 'original' | 'draft') =>
     request<{ segments: DiffSegment[] }>(`${proj(repo, id)}/versions/compare?${new URLSearchParams({ from: String(from), to: String(to), which })}`),
   updateDiff: (repo: string, id: string, n: number) => request<{ segments: DiffSegment[] }>(`${proj(repo, id)}/versions/${n}/update-diff`),
+  whiteboard: (repo: string, id: string) => request<WhiteboardView>(`${proj(repo, id)}/whiteboard`),
+  generateWhiteboard: (repo: string, id: string) => request<GenerateWhiteboardResponse>(`${proj(repo, id)}/whiteboard`, send('POST', {})),
+  cancelWhiteboard: (repo: string, id: string) => request<{ ok: true }>(`${proj(repo, id)}/whiteboard/cancel`, send('POST', {})),
+  askAboutDefense: (repo: string, id: string, body: { defenseId: string; kind: 'section' | 'question' | 'concern'; ref: string; question: string }) =>
+    request<AskDefenseResponse>(`${proj(repo, id)}/whiteboard/ask`, send('POST', body)),
+  sendFromDefense: (repo: string, id: string, body: { defenseId: string; kind: 'claim' | 'concern'; ref: string }) =>
+    request<SendFromDefenseResponse>(`${proj(repo, id)}/whiteboard/send`, send('POST', body)),
+  ratePractice: (repo: string, id: string, body: { defenseId: string; questionId: string; rating: Rating | null }) =>
+    request<PracticeView>(`${proj(repo, id)}/whiteboard/practice/rating`, send('POST', body)),
+  tickPractice: (repo: string, id: string, body: { defenseId: string; checklistId: string; ticked: boolean }) =>
+    request<PracticeView>(`${proj(repo, id)}/whiteboard/practice/tick`, send('POST', body)),
+  exportDefense: (repo: string, id: string, clone: string) => request<{ exportedTo: DefenseExport }>(`${proj(repo, id)}/whiteboard/export`, send('POST', { clone })),
 };
