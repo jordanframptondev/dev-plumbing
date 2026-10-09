@@ -48,7 +48,7 @@ export type PresentPlace = { chapter: number; step: number };
 export type PresentViewProps = DefenseViewProps & { place: PresentPlace; onPlace: (place: PresentPlace) => void };
 
 const WAITING = 'Waiting for Claude to write the Whiteboard Defense.';
-const NO_WINDOW = 'No Claude window is listening. Run /dev-plumbing in any clone.';
+const NO_WINDOW = 'No Claude window is listening. Run /plumb:listen in any clone.';
 // Writing takes the only window for ten minutes or more, so it says what that means for threads.
 const WRITING = "Claude is writing the Whiteboard Defense. Threads you send now wait until it's done.";
 const GAVE_UP = "The whiteboard subagent didn't send a Whiteboard Defense.";
@@ -58,7 +58,7 @@ const INTRO = "Claude writes a defense of this plan: how it works, what could fa
 export function statusLine(v: WhiteboardView): string | null {
   const r = v.request;
   if (r?.state === 'requested') return v.listening ? WAITING : NO_WINDOW;
-  // The window that took it went away, and no other is running: it's requeued the moment one runs /dev-plumbing.
+  // The window that took it went away, and no other is running: it's requeued the moment one runs /plumb:listen.
   if (r?.state === 'writing') return v.listening ? WRITING : NO_WINDOW;
   if (r?.state === 'failed') return r.reason ?? GAVE_UP;
   return null;

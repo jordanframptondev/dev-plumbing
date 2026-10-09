@@ -53,7 +53,7 @@ async function show(type: string, title: string, catchUpDue: boolean) {
 describe('TypeView', () => {
   it('says on the Plan changes list that a re-import is waiting, once the project home says so', async () => {
     await show('plan-changes', 'Plan changes', true);
-    expect((await screen.findByTestId('catch-up-due')).textContent).toBe('Your Plan changes are settled. Run /dev-plumbing to catch the items up.');
+    expect((await screen.findByTestId('catch-up-due')).textContent).toBe('Your Plan changes are settled. Run /plumb:listen to catch the items up.');
   });
 
   it('says nothing while no catch-up is waiting, and nothing on any other list', async () => {

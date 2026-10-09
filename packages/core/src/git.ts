@@ -20,7 +20,7 @@ async function git(cwd: string, args: string[]): Promise<string | null> {
 /** The clone root, its origin remote (or first remote), the current branch, and its info/exclude file. */
 export async function gitInfo(cwd: string): Promise<GitInfo> {
   const root = await git(cwd, ['rev-parse', '--show-toplevel']);
-  if (!root) throw new NotAGitRepoError(`${cwd} isn't inside a git repository. Run /dev-plumbing from a clone of your repo.`);
+  if (!root) throw new NotAGitRepoError(`${cwd} isn't inside a git repository. Run /plumb:rough-in or /plumb:listen from a clone of your repo.`);
   let remote = await git(root, ['remote', 'get-url', 'origin']);
   if (!remote) {
     const first = (await git(root, ['remote']))?.split('\n')[0];

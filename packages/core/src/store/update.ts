@@ -196,7 +196,7 @@ async function setAside(dir: string, n: number, now: Date): Promise<string> {
 export type UpdateRecovery = { recovered: boolean; keptChanged: string[]; setAside: string | null; version: number | null };
 
 /**
- * What /dev-plumbing tells you after recoverUnfinishedUpdate put an update back: that it did, and, when it kept working
+ * What /open tells you after recoverUnfinishedUpdate put an update back: that it did, and, when it kept working
  * files you'd changed since, which ones, and where your files from before the update went. [] when nothing was put back.
  */
 export function recoveryLines(note: UpdateRecovery): string[] {
@@ -232,7 +232,7 @@ export async function recoverUnfinishedUpdate(dir: string, now: Date = new Date(
     }
     const unfinished = (left: string[]) =>
       new ConflictError(
-        `An earlier update to v${journal.data.to} didn't finish, and some files couldn't be put back yet: ${left.join(', ')}. Run /dev-plumbing again to finish putting them back.`,
+        `An earlier update to v${journal.data.to} didn't finish, and some files couldn't be put back yet: ${left.join(', ')}. Run /plumb:rough-in again to finish putting them back.`,
       );
     const { failed, changed } = await putBack(dir, project.docs, n, journal.data);
     if (failed.length) throw unfinished(failed);
@@ -309,13 +309,13 @@ function conflictBody(c: MergeConflict, n: number): string {
  */
 export async function updateRefusal(dir: string): Promise<string | null> {
   const project = await readProjectFile(dir);
-  if (project.status === 'importing') return "This project is still importing. Run /dev-plumbing again once that's done.";
+  if (project.status === 'importing') return "This project is still importing. Run /plumb:rough-in again once that's done.";
   const defenseThreads = defenseThreadIds((await readItems(dir)).values);
   const waiting = (await readThreads(dir)).values.filter((t) => t.status === 'with_claude' && !defenseThreads.has(t.id)).length;
-  if (waiting === 1) return "Claude has 1 thread to answer in this project first. Run /dev-plumbing again once it's answered.";
-  if (waiting > 1) return `Claude has ${waiting} threads to answer in this project first. Run /dev-plumbing again once they're answered.`;
+  if (waiting === 1) return "Claude has 1 thread to answer in this project first. Run /plumb:rough-in again once it's answered.";
+  if (waiting > 1) return `Claude has ${waiting} threads to answer in this project first. Run /plumb:rough-in again once they're answered.`;
   const finalize = await readFinalize(dir);
-  if (finalize?.state === 'requested' || finalize?.state === 'writing') return "Finalize is under way. Run /dev-plumbing again once it's done or cancelled.";
+  if (finalize?.state === 'requested' || finalize?.state === 'writing') return "Finalize is under way. Run /plumb:rough-in again once it's done or cancelled.";
   return null;
 }
 
@@ -388,7 +388,7 @@ export async function catchUpDue(dir: string): Promise<number | null> {
  */
 export async function startCatchUp(dir: string, o: { version: number; types: PlumbingType[]; windowId: string; now?: Date }): Promise<{ importTypes: string[] }> {
   const project = await readProjectFile(dir);
-  if (project.status === 'importing') throw new ConflictError("This project is still importing. Run /dev-plumbing again once that's done.");
+  if (project.status === 'importing') throw new ConflictError("This project is still importing. Run /plumb:listen again once that's done.");
   const importPending = importableTypes(o.types).map((t) => t.id);
   const from = project.status === 'finalized' ? 'finalized' : 'active';
   // It imports every type again, so a re-import that was ended early has nothing left to finish.
@@ -435,7 +435,7 @@ export async function updatePlan(
   const present = await fs.readdir(docPath(dir, `docs/versions/v${current.n}`)).catch((error: unknown): string[] => {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
     const reason = error instanceof Error ? error.message : String(error);
-    throw new ConflictError(`The update couldn't read docs/versions/v${current.n} (${reason}). Run /dev-plumbing to try again.`);
+    throw new ConflictError(`The update couldn't read docs/versions/v${current.n} (${reason}). Run /plumb:rough-in to try again.`);
   });
   if (present.includes('original.md') || present.includes('draft.md')) throw new ConflictError(`Version ${current.n} is already saved in docs/versions/v${current.n}.`);
   const n = current.n + 1;
@@ -583,9 +583,9 @@ export async function updatePlan(
     if (left.length === 0) {
       await fs.rmdir(docPath(dir, `docs/versions/v${current.n}`)).catch(quiet);
       await fs.rmdir(docPath(dir, 'docs/versions')).catch(quiet);
-      throw new ConflictError(`The update didn't finish (${reason}). What it had written was put back, so the project is as it was. Run /dev-plumbing to try again.`);
+      throw new ConflictError(`The update didn't finish (${reason}). What it had written was put back, so the project is as it was. Run /plumb:rough-in to try again.`);
     }
-    throw new ConflictError(`The update didn't finish (${reason}), and some files couldn't be put back yet: ${left.join(', ')}. Run /dev-plumbing again to finish putting them back.`);
+    throw new ConflictError(`The update didn't finish (${reason}), and some files couldn't be put back yet: ${left.join(', ')}. Run /plumb:rough-in again to finish putting them back.`);
   }
   await fs.rm(docPath(dir, journalRel(current.n)), { force: true }).catch(quiet);
   // Superseded Plan changes threads are parked, saying what superseded them. The update has happened by now, so if one
@@ -656,7 +656,7 @@ export type IncompleteImport = { kind: 'resumed' | 'waits' | 'again'; version: n
  * project is importing. Types that can't be imported any more (turned off since) are dropped; with none left, the
  * record is cleared and it's null. While updateRefusal says an update would have to wait, it `waits`, writing nothing.
  * It runs once on its own: ended early again (importIncompleteTries 2), it's `again`, and the count goes back to 1, so
- * the next /dev-plumbing, after the user is told, tries once more. Under the project's lock, after
+ * the next /plumb:listen or /plumb:rough-in, after the user is told, tries once more. Under the project's lock, after
  * recoverUnfinishedUpdate.
  */
 export async function resumeIncompleteImport(dir: string, o: { types: PlumbingType[]; now?: Date }): Promise<IncompleteImport | null> {

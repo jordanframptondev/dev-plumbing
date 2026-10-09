@@ -155,7 +155,7 @@ test('a UI item without markup offers Ask Claude for a mockup', async ({ page })
   await expect(page.getByTestId('mockup-frame')).toHaveCount(0);
   const ask = page.getByRole('button', { name: 'Ask Claude for a mockup' });
   await ask.click();
-  await expect(page.getByTestId('send-notice')).toHaveText('Saved. No Claude window is listening. Run /dev-plumbing in any clone.');
+  await expect(page.getByTestId('send-notice')).toHaveText('Saved. No Claude window is listening. Run /plumb:listen in any clone.');
   await expect(ask).toBeDisabled();
   await expect(page.getByText('Claude is working on it.')).toBeVisible();
   const detail = await api(`/api/projects/${p.repo}/${p.project}/threads/t-ui-orders`);

@@ -304,9 +304,10 @@ export async function writeImportBatch(o: {
 /**
  * Ends an import whose importers have all returned. Types that never wrote and have no items are marked "didn't
  * finish" (in a re-import, a type whose importer didn't return keeps its items as they were). A re-import records
- * every type whose batch never came in importIncomplete, so the project home says so and the next /dev-plumbing
- * re-imports just those. The project goes back to Active, or to Finalized after a finalized project's re-import. Only
- * the window that runs the importers (`importBy`) ends it, or another one once that window is no longer alive.
+ * every type whose batch never came in importIncomplete, so the project home says so and the next /plumb:listen
+ * or /plumb:rough-in re-imports just those. The project goes back to Active, or to Finalized after a finalized
+ * project's re-import. Only the window that runs the importers (`importBy`) ends it, or another one once that window
+ * is no longer alive.
  */
 export async function finishImport(dir: string, o: { windowId?: string; isAlive?: (windowId: string) => boolean; now?: Date } = {}): Promise<boolean> {
   const now = o.now ?? new Date();
@@ -319,7 +320,7 @@ export async function finishImport(dir: string, o: { windowId?: string; isAlive?
     .filter((type) => !project.emptyTypes.some((e) => e.type === type) && !items.some((i) => i.type === type))
     .map((type) => ({ type, reason: IMPORT_DID_NOT_FINISH }));
   // A re-import ended early: the types whose batch never came, how many times this version's re-import was cut, and
-  // whether it was a catch-up or carried one, so the next /dev-plumbing finishes it the same way.
+  // whether it was a catch-up or carried one, so the next one finishes it the same way.
   const incomplete = project.reimporting ? project.importPending : [];
   const carried = project.reimporting?.carriedCatchUp;
   await writeProjectFile(

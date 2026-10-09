@@ -12,7 +12,7 @@ afterAll(removeTempDirs);
 const W = `${P}/whiteboard`;
 const EXPORT_FILE = 'docs/specs/restock-reminders.whiteboard-defense.md';
 const WAITING = 'Waiting for Claude to write the Whiteboard Defense.';
-const NO_WINDOW = 'No Claude window is listening. Run /dev-plumbing in any clone.';
+const NO_WINDOW = 'No Claude window is listening. Run /plumb:listen in any clone.';
 const UNDER_WAY = 'The Whiteboard Defense is already being written.';
 const IMPORTING = "The plan is still importing. Generate the Whiteboard Defense once that's done.";
 const CHANGED = 'The Whiteboard Defense changed since this page loaded. Reload it.';

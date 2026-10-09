@@ -16,7 +16,7 @@ afterEach(() => {
   navigate.mockClear();
 });
 
-const NO_WINDOW = 'No Claude window is listening. Run /dev-plumbing in any clone.';
+const NO_WINDOW = 'No Claude window is listening. Run /plumb:listen in any clone.';
 const WRITING = "Claude is writing the Whiteboard Defense. Threads you send now wait until it's done.";
 const GAVE_UP = "The whiteboard subagent didn't send a Whiteboard Defense.";
 const INTRO = "Claude writes a defense of this plan: how it works, what could fail and what's still unknown. Then you study it and practise explaining it.";

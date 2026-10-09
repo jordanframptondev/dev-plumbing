@@ -264,8 +264,8 @@ describe('a catch-up that was cut short', () => {
       importIncompleteCatchUp: true,
       importIncompleteTries: 1,
     });
-    // The next /dev-plumbing finishes it as a catch-up: caughtUp is already set, so nothing else would bring the
-    // settled edits to those types.
+    // The next /plumb:listen or /plumb:rough-in finishes it as a catch-up: caughtUp is already set, so nothing else
+    // would bring the settled edits to those types.
     expect(await resumeIncompleteImport(dir, { types, now: T })).toEqual({ kind: 'resumed', version: 2, importTypes: ['questions', 'concerns'] });
     expect((await readProjectFile(dir)).reimporting).toEqual({ version: 2, from: 'active', catchUp: true });
     const pack = await importPack({ dir, typeId: 'questions', types });

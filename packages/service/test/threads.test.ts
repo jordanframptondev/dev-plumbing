@@ -84,7 +84,7 @@ describe('thread routes', () => {
 
     await t.send('PUT', `${P}/threads/t-questions-channels/draft`, { text: 'Both.' });
     const sent = await t.send('POST', `${P}/submit`, { scope: 'all' });
-    expect(sent.body).toMatchObject({ sent: 1, listening: null, message: 'Saved. No Claude window is listening. Run /dev-plumbing in any clone.' });
+    expect(sent.body).toMatchObject({ sent: 1, listening: null, message: 'Saved. No Claude window is listening. Run /plumb:listen in any clone.' });
   });
 
   it("a window that only opened the project and pinged isn't listening", async () => {
@@ -93,7 +93,7 @@ describe('thread routes', () => {
     expect((await t.send('POST', '/api/claude/alive', { windowId: 'w-idle' })).body).toEqual({ ok: true });
     await t.send('PUT', `${P}/threads/t-questions-channels/draft`, { text: 'Both.' });
     const sent = await t.send('POST', `${P}/submit`, { scope: 'all' });
-    expect(sent.body).toMatchObject({ sent: 1, listening: null, message: 'Saved. No Claude window is listening. Run /dev-plumbing in any clone.' });
+    expect(sent.body).toMatchObject({ sent: 1, listening: null, message: 'Saved. No Claude window is listening. Run /plumb:listen in any clone.' });
     expect(t.rt.listeners.isAlive('w-idle')).toBe(true);
   });
 

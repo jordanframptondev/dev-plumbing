@@ -302,14 +302,14 @@ describe('bringing a changed plan in', () => {
     await t.send('PUT', `${P}/threads/t-questions-who/draft`, { text: 'Everyone.' });
     expect((await t.send('POST', `${P}/submit`, { scope: 'thread', threadId: 't-questions-who' })).body).toMatchObject({ sent: 1 });
     const before = await snapshot(t.dir);
-    const told = `Tell the user: "The plan changed in the repo since v1. Claude has 1 thread to answer in this project first. Run /dev-plumbing again once it's answered." ${WAIT_NEXT}`;
+    const told = `Tell the user: "The plan changed in the repo since v1. Claude has 1 thread to answer in this project first. Run /plumb:rough-in again once it's answered." ${WAIT_NEXT}`;
     for (const answer of [{}, { update: true }]) {
       const open = await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a', ...answer });
       expect(open.status).toBe(200);
       expect(open.body).toMatchObject({ kind: 'reopened', importTypes: [], waitingSubmissions: 1, next: told });
     }
     expect(await snapshot(t.dir)).toEqual(before);
-    // This window listens and answers the thread. The next /dev-plumbing asks.
+    // This window listens and answers the thread. The next /plumb:rough-in asks.
     expect((await t.claude('/wait', { ...base, windowId: 'w-a', timeoutSeconds: 0 })).body).toMatchObject({ kind: 'submission' });
     expect((await t.claude('/reply', { ...base, threadId: 't-questions-who', text: 'Everyone gets them.', resolve: { decision: 'Everyone gets reminders.' } })).status).toBe(200);
     expect((await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a' })).body).toMatchObject({ kind: 'plan-changed', version: 1, nextVersion: 2 });
@@ -319,7 +319,7 @@ describe('bringing a changed plan in', () => {
     const t = await harness();
     expect((await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a' })).body.kind).toBe('created');
     await rewritePlan(t, V2);
-    const told = `Tell the user: "The plan changed in the repo since v1. This project is still importing. Run /dev-plumbing again once that's done." ${IMPORT_NEXT}`;
+    const told = `Tell the user: "The plan changed in the repo since v1. This project is still importing. Run /plumb:rough-in again once that's done." ${IMPORT_NEXT}`;
     for (const answer of [{}, { update: true }]) {
       const again = await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a', ...answer });
       expect(again.body).toMatchObject({ kind: 'reopened', next: told });
@@ -444,7 +444,7 @@ describe('bringing a changed plan in', () => {
 
 describe('catching the items up with settled Plan changes', () => {
   const CATCH_UP = `Tell the user: "Your settled Plan changes touch the plan's items. Re-importing to catch them up." ${IMPORT_NEXT}`;
-  const WAITS = `Tell the user: "Your settled Plan changes still need a re-import. It waits until Claude has answered: run /dev-plumbing again then." ${WAIT_NEXT}`;
+  const WAITS = `Tell the user: "Your settled Plan changes still need a re-import. It waits until Claude has answered: run /plumb:listen again then." ${WAIT_NEXT}`;
   const MERGED = { id: 'merged', label: 'Use the merged version', change: { md: [{ find: 'Log one row per reminder sent.', replace: 'Log one row per reminder sent, in the events table.' }] } };
   const KEEP = { id: 'keep', label: 'Keep my draft', change: { md: [] } };
 
@@ -501,7 +501,7 @@ describe('catching the items up with settled Plan changes', () => {
     expect(project).toMatchObject({ status: 'active', importPending: [], caughtUp: 2 });
     expect(project.reimporting).toBeUndefined();
 
-    // Once per version: the next /dev-plumbing just listens.
+    // Once per version: the next one just listens.
     expect((await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a' })).body).toMatchObject({ kind: 'reopened', importTypes: [], next: WAIT_NEXT });
     expect((await readProjectFile(t.dir)).status).toBe('active');
   });
@@ -519,16 +519,16 @@ describe('catching the items up with settled Plan changes', () => {
     expect(pack.reimport.changes).toContain('+ Log one row per reminder sent, in the events table.');
   });
 
-  it('waits for a re-import that was ended early, which the same /dev-plumbing finishes first', async () => {
+  it('waits for a re-import that was ended early, which the same /plumb:listen finishes first', async () => {
     const t = await atV2();
     await settle(t, 'merged');
     // The update's re-import had been ended before Flows' importer came back.
     await writeJsonAtomic(path.join(t.dir, 'project.json'), { ...(await readProjectFile(t.dir)), importIncomplete: ['flows'] });
     const open = await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a' });
-    // It's finished first, and the catch-up says it waits for another /dev-plumbing.
+    // It's finished first, and the catch-up says it waits for another /plumb:listen.
     expect(open.body).toMatchObject({
       kind: 'reopened',
-      next: `Tell the user: "The v2 re-import didn't finish for Flows. Finishing it now. Your settled Plan changes still need a re-import. It waits until Claude has answered: run /dev-plumbing again then." ${IMPORT_NEXT}`,
+      next: `Tell the user: "The v2 re-import didn't finish for Flows. Finishing it now. Your settled Plan changes still need a re-import. It waits until Claude has answered: run /plumb:listen again then." ${IMPORT_NEXT}`,
     });
     expect(open.body.importTypes).toEqual([{ id: 'flows', title: 'Flows', afterOthers: true }]);
     const project = await readProjectFile(t.dir);
@@ -536,7 +536,7 @@ describe('catching the items up with settled Plan changes', () => {
     // The catch-up waits for it: nothing recorded it yet.
     expect(project.caughtUp).toBeUndefined();
     await importAll(t, open.body.importTypes, []);
-    // Then the next /dev-plumbing catches the items up.
+    // Then the next /plumb:listen catches the items up.
     expect((await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a' })).body).toMatchObject({ kind: 'reopened', next: CATCH_UP });
   });
 
@@ -551,7 +551,7 @@ describe('catching the items up with settled Plan changes', () => {
     expect(open.body).toMatchObject({
       kind: 'reopened',
       importTypes: [],
-      next: `Tell the user: "The v2 re-import didn't finish again for Flows. Run /dev-plumbing to try again. Your settled Plan changes still need a re-import. It waits until Claude has answered: run /dev-plumbing again then." ${WAIT_NEXT}`,
+      next: `Tell the user: "The v2 re-import didn't finish again for Flows. Run /plumb:listen to try again. Your settled Plan changes still need a re-import. It waits until Claude has answered: run /plumb:listen again then." ${WAIT_NEXT}`,
     });
     const project = await readProjectFile(t.dir);
     expect(project).toMatchObject({ status: 'active', importIncomplete: ['flows'], importIncompleteTries: 1 });
@@ -569,14 +569,14 @@ describe('catching the items up with settled Plan changes', () => {
     const busy = await atV2();
     await settle(busy, 'merged');
     // You asked something Claude hasn't answered yet: the window listens and answers it first, and says the catch-up
-    // waits for another /dev-plumbing.
+    // waits for another /plumb:listen.
     await busy.send('PUT', `${P}/threads/t-questions-who/draft`, { text: 'Everyone.' });
     expect((await busy.send('POST', `${P}/submit`, { scope: 'thread', threadId: 't-questions-who' })).body).toMatchObject({ sent: 1 });
     expect((await busy.send('GET', P)).body.catchUpDue).toBe(true);
     expect((await busy.claude('/open', { cwd: busy.repo, plan: PLAN, windowId: 'w-a' })).body).toMatchObject({ kind: 'reopened', importTypes: [], waitingSubmissions: 1, next: WAITS });
     expect((await busy.claude('/wait', { ...base, windowId: 'w-a', timeoutSeconds: 0 })).body).toMatchObject({ kind: 'submission' });
     expect((await busy.claude('/reply', { ...base, threadId: 't-questions-who', text: 'Everyone gets them.', resolve: { decision: 'Everyone gets reminders.' } })).status).toBe(200);
-    // Then the next /dev-plumbing catches the items up.
+    // Then the next /plumb:listen catches the items up.
     expect((await busy.claude('/open', { cwd: busy.repo, plan: PLAN, windowId: 'w-a' })).body).toMatchObject({ kind: 'reopened', next: CATCH_UP });
   });
 });
@@ -625,7 +625,7 @@ describe('an update that stopped part-way', () => {
 });
 
 describe('a re-import that was ended early', () => {
-  it('is finished by the next /dev-plumbing, for just the types whose batch never came', async () => {
+  it('is finished by the next /plumb:listen, for just the types whose batch never came', async () => {
     const t = await setup();
     await rewritePlan(t, V2);
     const yes = await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a', update: true });
@@ -665,24 +665,24 @@ describe('a re-import that was ended early', () => {
     expect((await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a' })).body).toMatchObject({
       kind: 'reopened',
       importTypes: [],
-      next: `Tell the user: "The v2 re-import still needs to finish for Architecture and Flows. It waits until Claude has answered: run /dev-plumbing again then." ${WAIT_NEXT}`,
+      next: `Tell the user: "The v2 re-import still needs to finish for Architecture and Flows. It waits until Claude has answered: run /plumb:listen again then." ${WAIT_NEXT}`,
     });
     const wait = await t.claude('/wait', { ...base, windowId: 'w-a', timeoutSeconds: 0 });
     expect(wait.body).toMatchObject({ kind: 'submission' });
     expect((await t.claude('/reply', { ...base, threadId: 't-questions-who', text: 'Everyone gets them.', resolve: { decision: 'Everyone gets reminders.' } })).status).toBe(200);
 
-    // Then the next /dev-plumbing finishes it, but it's ended early again.
+    // Then the next /plumb:listen finishes it, but it's ended early again.
     expect((await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a' })).body.next).toBe(
       `Tell the user: "The v2 re-import didn't finish for Architecture and Flows. Finishing it now." ${IMPORT_NEXT}`,
     );
     expect((await t.claude('/wait', { ...base, windowId: 'w-a', timeoutSeconds: 0, finished: { submission: wait.body.submission } })).body).toEqual({ kind: 'timeout' });
     expect((await t.send('GET', P)).body.importIncomplete).toEqual({ version: 2, titles: ['Architecture', 'Flows'], again: true });
 
-    // Not a third time on its own: it says so, and the /dev-plumbing after that tries once more.
+    // Not a third time on its own: it says so, and the /plumb:listen after that tries once more.
     expect((await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a' })).body).toMatchObject({
       kind: 'reopened',
       importTypes: [],
-      next: `Tell the user: "The v2 re-import didn't finish again for Architecture and Flows. Run /dev-plumbing to try again." ${WAIT_NEXT}`,
+      next: `Tell the user: "The v2 re-import didn't finish again for Architecture and Flows. Run /plumb:listen to try again." ${WAIT_NEXT}`,
     });
     expect((await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a' })).body.next).toBe(
       `Tell the user: "The v2 re-import didn't finish for Architecture and Flows. Finishing it now." ${IMPORT_NEXT}`,

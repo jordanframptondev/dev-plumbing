@@ -4,7 +4,7 @@ import { expect, test } from '@playwright/test';
 import { api, asClaude, defenseInput, fixtureRepo, importProject, PLAN_TEXT, writeDefense } from './claude';
 import { noSideScroll } from './env';
 
-const NO_WINDOW = 'No Claude window is listening. Run /dev-plumbing in any clone.';
+const NO_WINDOW = 'No Claude window is listening. Run /plumb:listen in any clone.';
 const INTRO = "Claude writes a defense of this plan: how it works, what could fail and what's still unknown. Then you study it and practise explaining it.";
 const META = /^Level 2 · Standard · Based on the draft \(v1\) · Generated /;
 

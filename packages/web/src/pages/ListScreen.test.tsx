@@ -53,7 +53,7 @@ describe('ListScreen', () => {
       );
     show(true);
     const line = screen.getByTestId('catch-up-due');
-    expect(line.textContent).toBe('Your Plan changes are settled. Run /dev-plumbing to catch the items up.');
+    expect(line.textContent).toBe('Your Plan changes are settled. Run /plumb:listen to catch the items up.');
     expect(line.className).toContain('text-ink-2');
     cleanup();
     show(false);

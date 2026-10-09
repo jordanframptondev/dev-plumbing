@@ -19,7 +19,7 @@ test('answers with an option and a note, and Claude replies in the thread', asyn
   await page.getByRole('textbox', { name: 'Note for One row per send' }).fill('Delete rows after 180 days.');
   await expect(page.getByText('Draft saved · goes with Submit all')).toBeVisible();
   await page.getByRole('button', { name: 'Send this thread' }).click();
-  await expect(page.getByTestId('send-notice')).toHaveText('Saved. No Claude window is listening. Run /dev-plumbing in any clone.');
+  await expect(page.getByTestId('send-notice')).toHaveText('Saved. No Claude window is listening. Run /plumb:listen in any clone.');
   await expect(page.getByText('With Claude. A subagent is working on this thread.')).toBeVisible();
 
   const wait = await asClaude('/wait', { repo: p.repo, project: p.project, windowId: 'w-e2e-loop', timeoutSeconds: 0 });

@@ -39,7 +39,7 @@ import { submitResponse } from './respond';
 
 /** What Generate says, by whether a Claude window will pick the request up. */
 export const WHITEBOARD_WAITING = 'Waiting for Claude to write the Whiteboard Defense.';
-export const WHITEBOARD_NO_WINDOW = 'No Claude window is listening. Run /dev-plumbing in any clone.';
+export const WHITEBOARD_NO_WINDOW = 'No Claude window is listening. Run /plumb:listen in any clone.';
 
 // Strict, so a misspelt key is refused rather than ignored.
 const askBody = z

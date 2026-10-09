@@ -58,7 +58,8 @@ export const plumbingProjectSchema = z.object({
   importBy: z.string().optional(),
   /**
    * The plumbing types (ids) whose batch never came in a re-import that was ended early. The project home says so,
-   * and the next /dev-plumbing re-imports just those. Cleared once an import finishes with every batch in.
+   * and the next /plumb:listen or /plumb:rough-in re-imports just those. Cleared once an import finishes with every
+   * batch in.
    */
   importIncomplete: z.array(z.string()).optional(),
   /** The re-import that was ended early was a catch-up, so finishing it is one too (reimporting.catchUp). */
@@ -68,7 +69,10 @@ export const plumbingProjectSchema = z.object({
    * so finishing it carries them too.
    */
   importIncompleteCarried: z.number().int().min(2).optional(),
-  /** How many times this version's re-import was ended early. From 2, /dev-plumbing says so rather than run it again. */
+  /**
+   * How many times this version's re-import was ended early. From 2, the next /plumb:listen or /plumb:rough-in says so
+   * rather than run it again.
+   */
   importIncompleteTries: z.number().int().min(1).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),

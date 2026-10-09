@@ -6,7 +6,7 @@ import { readDecisions, readDocText, readHistory, readItem, readItems, readProje
 import { openOptions } from './threads';
 import { itemVersionChange } from './versionChange';
 
-export const NO_WINDOW = 'Saved. No Claude window is listening. Run /dev-plumbing in any clone.';
+export const NO_WINDOW = 'Saved. No Claude window is listening. Run /plumb:listen in any clone.';
 
 /** What the app says after Send this thread or Submit all. */
 export function submitMessage(r: { resolved: number; sent: number; skipped: { reason: string }[] }, listening: ListeningState): string {

@@ -107,7 +107,7 @@ describe('Finalize over HTTP', () => {
     await unblock(t);
     const start = await t.send('POST', `${P}/finalize`);
     expect(start.status).toBe(200);
-    expect(start.body).toMatchObject({ request: { state: 'requested' }, listening: null, message: 'No Claude window is listening. Run /dev-plumbing in any clone.' });
+    expect(start.body).toMatchObject({ request: { state: 'requested' }, listening: null, message: 'No Claude window is listening. Run /plumb:listen in any clone.' });
     const again = await t.send('POST', `${P}/finalize`);
     expect(again.status).toBe(409);
     expect(again.body.error).toBe('Finalize is already under way.');

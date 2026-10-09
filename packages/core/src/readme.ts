@@ -34,7 +34,7 @@ export function renderReadme(): string {
     '',
     '## Repo profiles: repos/<repo>.json',
     '',
-    'A profile is created the first time you run /dev-plumbing in a repo. Plain JSON, no comments.',
+    'A profile is created the first time you run /plumb:rough-in in a repo. Plain JSON, no comments.',
     '',
     docTable(repoProfileDocs),
     '',

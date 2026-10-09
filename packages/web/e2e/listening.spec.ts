@@ -18,7 +18,7 @@ test('Submit all says when no Claude window is listening', async ({ page }) => {
   await api(`/api/projects/${p.repo}/${p.project}/threads/t-questions-channels/draft`, 'PUT', { text: 'Both.' });
   await page.goto(p.url);
   await page.getByRole('button', { name: 'Submit all · 1 draft' }).first().click();
-  await expect(page.getByTestId('submit-notice')).toHaveText('Saved. No Claude window is listening. Run /dev-plumbing in any clone.');
+  await expect(page.getByTestId('submit-notice')).toHaveText('Saved. No Claude window is listening. Run /plumb:listen in any clone.');
   await expect(page.getByRole('button', { name: 'Submit all · 0 drafts' }).first()).toBeDisabled();
 });
 
@@ -41,7 +41,7 @@ test.describe('on a phone', () => {
     await api(`/api/projects/${p.repo}/${p.project}/threads/t-questions-channels/draft`, 'PUT', { text: 'Both.' });
     await page.goto(p.url);
     await page.getByRole('button', { name: 'Submit all · 1 draft' }).click();
-    await expect(page.getByTestId('submit-notice-phone')).toHaveText('Saved. No Claude window is listening. Run /dev-plumbing in any clone.');
+    await expect(page.getByTestId('submit-notice-phone')).toHaveText('Saved. No Claude window is listening. Run /plumb:listen in any clone.');
     await expect(page.getByTestId('submit-notice-phone')).toBeInViewport();
   });
 });

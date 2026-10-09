@@ -158,7 +158,7 @@ describe('the built-in Defense type', () => {
     const q1 = pair('q1', { status: 'with_claude', messages: [{ ...you, text: 'Who gets reminders?' }] });
     await writeItem(dir, q1.item);
     await writeThread(dir, q1.thread);
-    expect(await updateRefusal(dir)).toBe("Claude has 1 thread to answer in this project first. Run /dev-plumbing again once it's answered.");
+    expect(await updateRefusal(dir)).toBe("Claude has 1 thread to answer in this project first. Run /plumb:rough-in again once it's answered.");
   });
 
   it("is never imported, and Claude can't add one in a reply", async () => {

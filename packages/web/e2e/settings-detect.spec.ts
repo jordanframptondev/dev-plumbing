@@ -4,7 +4,7 @@ import { expect, test } from '@playwright/test';
 import { api, asClaude, fixtureRepo } from './claude';
 import { configPath, readJson, writeJson } from './env';
 
-const DETECT_NOTE = 'Detection runs the next time a Claude window for this repo listens, or you run /dev-plumbing in a clone.';
+const DETECT_NOTE = 'Detection runs the next time a Claude window for this repo listens, or you run /plumb:listen in a clone.';
 
 test('Detect again re-detects a repo profile and keeps your own settings', async ({ page }) => {
   const saved = readJson('repos/acme-app.json');

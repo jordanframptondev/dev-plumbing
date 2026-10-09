@@ -14,7 +14,7 @@ afterEach(() => {
 });
 
 const AT = '2026-10-03T09:00:00.000Z';
-const NO_WINDOW = 'No Claude window is listening. Run /dev-plumbing in any clone.';
+const NO_WINDOW = 'No Claude window is listening. Run /plumb:listen in any clone.';
 const entry = (over: Partial<ChecklistEntry> = {}): ChecklistEntry => ({
   itemId: 'questions-channels',
   threadId: 't-questions-channels',

@@ -26,7 +26,7 @@ import { clonesOf, knownClone } from './clones';
 
 /** What Start finalize says, by whether a Claude window will pick the request up. */
 export const FINALIZE_WAITING = 'Waiting for Claude to write the final.';
-export const FINALIZE_NO_WINDOW = 'No Claude window is listening. Run /dev-plumbing in any clone.';
+export const FINALIZE_NO_WINDOW = 'No Claude window is listening. Run /plumb:listen in any clone.';
 
 const acceptBody = z.object({ clone: z.string().min(1) });
 

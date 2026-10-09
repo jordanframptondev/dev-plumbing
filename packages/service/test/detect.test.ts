@@ -57,7 +57,7 @@ describe('Detect again', () => {
     expect(missing.body.error).toBe('Unknown repo profile.');
   });
 
-  it("runs at the next /dev-plumbing in a clone, and keeps the user's own settings", async () => {
+  it("runs at the next /plumb:listen or /plumb:rough-in in a clone, and keeps the user's own settings", async () => {
     const t = await setup();
     await t.send('POST', '/api/repos/acme-app/detect');
     const open = await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a' });

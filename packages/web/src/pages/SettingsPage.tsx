@@ -13,7 +13,7 @@ import { useConfig } from '../lib/useConfig';
 
 const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const RESTART = 'Restart the service to use the new port: dev-plumbing stop, then dev-plumbing start.';
-const DETECT_NOTE = 'Detection runs the next time a Claude window for this repo listens, or you run /dev-plumbing in a clone.';
+const DETECT_NOTE = 'Detection runs the next time a Claude window for this repo listens, or you run /plumb:listen in a clone.';
 
 type Notice = { kind: 'ok' | 'error'; text: string };
 
@@ -46,7 +46,7 @@ export function SettingsPage() {
           Repos
         </h2>
         <p className="mt-1 text-[12.5px] text-ink-3">
-          A repo profile is created the first time you run /dev-plumbing in a repo. Edit it here as JSON, or use Detect again to have Claude look at the repo again.
+          A repo profile is created the first time you run /plumb:rough-in in a repo. Edit it here as JSON, or use Detect again to have Claude look at the repo again.
         </p>
         {config.repos.length === 0 ? (
           <p className="mt-3 text-[13px] text-ink-3">No repo profiles yet.</p>

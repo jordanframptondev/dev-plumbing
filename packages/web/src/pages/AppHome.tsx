@@ -82,7 +82,7 @@ export function AppHome() {
             'No finalized plumbing projects yet.'
           ) : (
             <>
-              No plumbing projects yet. In Claude Code, run <code className="font-mono text-ink-2">/dev-plumbing path/to/plan.md</code>.
+              No plumbing projects yet. In Claude Code, run <code className="font-mono text-ink-2">/plumb:rough-in path/to/plan.md</code>.
             </>
           )}
         </p>

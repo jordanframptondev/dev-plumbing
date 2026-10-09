@@ -417,22 +417,22 @@ describe('when an update is refused or fails', () => {
   }
 
   it('an update waits for work in progress', async () => {
-    await refused(await seed({ project: { status: 'importing', importPending: ['questions'] } }), "This project is still importing. Run /dev-plumbing again once that's done.");
+    await refused(await seed({ project: { status: 'importing', importPending: ['questions'] } }), "This project is still importing. Run /plumb:rough-in again once that's done.");
     await refused(
       await seed({ pairs: [pair('q1', { status: 'with_claude' }), pair('q2')] }),
-      "Claude has 1 thread to answer in this project first. Run /dev-plumbing again once it's answered.",
+      "Claude has 1 thread to answer in this project first. Run /plumb:rough-in again once it's answered.",
     );
     await refused(
       await seed({ pairs: [pair('q1', { status: 'with_claude' }), pair('q2', { status: 'with_claude' })] }),
-      "Claude has 2 threads to answer in this project first. Run /dev-plumbing again once they're answered.",
+      "Claude has 2 threads to answer in this project first. Run /plumb:rough-in again once they're answered.",
     );
     const requested = await seed();
     await requestFinalize(requested, { types });
-    await refused(requested, "Finalize is under way. Run /dev-plumbing again once it's done or cancelled.");
+    await refused(requested, "Finalize is under way. Run /plumb:rough-in again once it's done or cancelled.");
     const writing = await seed();
     await requestFinalize(writing, { types });
     await pickUpFinalize(writing, 'w-a');
-    await refused(writing, "Finalize is under way. Run /dev-plumbing again once it's done or cancelled.");
+    await refused(writing, "Finalize is under way. Run /plumb:rough-in again once it's done or cancelled.");
   });
 
   it("refuses a plan that hasn't changed", async () => {
@@ -463,7 +463,7 @@ describe('when an update is refused or fails', () => {
     // A plain message, not Node's error.
     expect(error).toBeInstanceOf(ConflictError);
     expect((error as Error).message).toBe(
-      `The update couldn't read docs/versions/v1 (EMFILE: too many open files, scandir '${folder}'). Run /dev-plumbing to try again.`,
+      `The update couldn't read docs/versions/v1 (EMFILE: too many open files, scandir '${folder}'). Run /plumb:rough-in to try again.`,
     );
     expect(await snapshot(dir)).toEqual(before);
   });
@@ -479,7 +479,7 @@ describe('when an update is refused or fails', () => {
     reading.fail = new Set();
     expect(error).toBeInstanceOf(ConflictError);
     expect((error as Error).message).toBe(
-      "The update didn't finish (No space left on device). What it had written was put back, so the project is as it was. Run /dev-plumbing to try again.",
+      "The update didn't finish (No space left on device). What it had written was put back, so the project is as it was. Run /plumb:rough-in to try again.",
     );
     expect(await snapshot(dir)).toEqual(before);
   });
@@ -512,7 +512,7 @@ describe('when an update is refused or fails', () => {
     failing.calls = new Set();
     expect(error).toBeInstanceOf(ConflictError);
     expect((error as Error).message).toBe(
-      "The update didn't finish (No space left on device). What it had written was put back, so the project is as it was. Run /dev-plumbing to try again.",
+      "The update didn't finish (No space left on device). What it had written was put back, so the project is as it was. Run /plumb:rough-in to try again.",
     );
     expect(await snapshot(dir)).toEqual(before);
     expect((await update(dir, CONFLICTING)).version).toBe(2);
@@ -529,7 +529,7 @@ describe('when an update is refused or fails', () => {
     failing.calls = new Set();
     expect(error).toBeInstanceOf(ConflictError);
     expect((error as Error).message).toBe(
-      "The update didn't finish (No space left on device). What it had written was put back, so the project is as it was. Run /dev-plumbing to try again.",
+      "The update didn't finish (No space left on device). What it had written was put back, so the project is as it was. Run /plumb:rough-in to try again.",
     );
     expect(await snapshot(dir)).toEqual(before);
 
@@ -548,7 +548,7 @@ describe('when an update is refused or fails', () => {
     failing.calls = new Set();
     expect(error).toBeInstanceOf(ConflictError);
     expect((error as Error).message).toBe(
-      "The update didn't finish (No space left on device), and some files couldn't be put back yet: docs/draft.md. Run /dev-plumbing again to finish putting them back.",
+      "The update didn't finish (No space left on device), and some files couldn't be put back yet: docs/draft.md. Run /plumb:rough-in again to finish putting them back.",
     );
     // v1's copy of your draft and the journal are still there. Everything else was put back, and the conflict's
     // thread isn't left queued for Claude.
@@ -574,7 +574,7 @@ describe('when an update is refused or fails', () => {
     reading.fail = new Set();
     expect(error).toBeInstanceOf(ConflictError);
     expect((error as Error).message).toBe(
-      "The update didn't finish (No space left on device). What it had written was put back, so the project is as it was. Run /dev-plumbing to try again.",
+      "The update didn't finish (No space left on device). What it had written was put back, so the project is as it was. Run /plumb:rough-in to try again.",
     );
     expect(await read(dir, 'docs/draft.md')).toBe(OURS);
     expect(await snapshot(dir)).toEqual(before);
@@ -594,7 +594,7 @@ describe('when an update is refused or fails', () => {
     reading.fail = new Set();
     expect(error).toBeInstanceOf(ConflictError);
     expect((error as Error).message).toBe(
-      "An earlier update to v2 didn't finish, and some files couldn't be put back yet: docs/draft.md. Run /dev-plumbing again to finish putting them back.",
+      "An earlier update to v2 didn't finish, and some files couldn't be put back yet: docs/draft.md. Run /plumb:rough-in again to finish putting them back.",
     );
     expect(await read(dir, 'docs/draft.md')).toBe(merged);
     expect(await read(dir, 'docs/versions/v1/draft.md')).toBe(OURS);
@@ -612,10 +612,10 @@ describe('when an update is refused or fails', () => {
     const error = await failure(update(dir, CONFLICTING));
     failing.calls = new Set();
     expect((error as Error).message).toBe(
-      "The update didn't finish (No space left on device), and some files couldn't be put back yet: docs/original.md, docs/draft.md. Run /dev-plumbing again to finish putting them back.",
+      "The update didn't finish (No space left on device), and some files couldn't be put back yet: docs/original.md, docs/draft.md. Run /plumb:rough-in again to finish putting them back.",
     );
     expect(await read(dir, 'docs/original.md')).toBe(CONFLICTING);
-    // Before the next /dev-plumbing, the draft changes: an accepted change, or an edit by hand.
+    // Before the next /plumb:listen or /plumb:rough-in, the draft changes: an accepted change, or an edit by hand.
     const edited = `${await read(dir, 'docs/draft.md')}\n## Rollout\n\nShip to one store first.\n`;
     await fs.writeFile(path.join(dir, 'docs', 'draft.md'), edited);
     const aside = 'docs/versions/v1.unfinished-20261005113000';
@@ -879,7 +879,7 @@ describe('finishing a re-import that was ended early', () => {
     expect(await snapshot(dir)).toEqual(before);
   });
 
-  it('is tried once on its own: cut short again, it says so, and the next /dev-plumbing tries once more', async () => {
+  it('is tried once on its own: cut short again, it says so, and the next /plumb:listen tries once more', async () => {
     const dir = await endedEarly();
     expect(await resumeIncompleteImport(dir, { types })).toMatchObject({ kind: 'resumed' });
     // Cut short again: the second cut is counted.

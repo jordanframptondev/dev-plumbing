@@ -99,7 +99,8 @@ export type ProjectHome = {
   version: { current: number; count: number };
   /**
    * Every Plan changes item of the current version is settled, and the items haven't caught up with what that did to
-   * the draft: the next /dev-plumbing re-imports to catch them up (catchUpWaiting). The Plan changes list says so.
+   * the draft: the next /plumb:listen or /plumb:rough-in re-imports to catch them up (catchUpWaiting). The Plan changes
+   * list says so.
    */
   catchUpDue: boolean;
   listening?: ListeningState;
@@ -116,7 +117,7 @@ export type ProjectHome = {
   defense: { ready: boolean; stale: boolean; state: WhiteboardState | null };
   /**
    * A re-import that was ended early, once the project isn't importing: the version it imported, the titles of the
-   * types whose batch never came, and `again` when it was ended early again after /dev-plumbing tried once more; or null.
+   * types whose batch never came, and `again` when it was ended early again after /open tried once more; or null.
    */
   importIncomplete: { version: number; titles: string[]; again: boolean } | null;
 };

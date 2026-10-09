@@ -73,7 +73,7 @@ export function ProjectHeader({ home, repo, project, submitAll, submitPrimary = 
       </div>
       {home.importIncomplete && (
         <p className="mt-2 text-[12.5px] text-ink-2" data-testid="import-incomplete">
-          {`The v${home.importIncomplete.version} re-import didn't finish${home.importIncomplete.again ? ' again' : ''} for ${andList(home.importIncomplete.titles)}. Run /dev-plumbing to try again.`}
+          {`The v${home.importIncomplete.version} re-import didn't finish${home.importIncomplete.again ? ' again' : ''} for ${andList(home.importIncomplete.titles)}. Run /plumb:listen to try again.`}
         </p>
       )}
       {/* Phones hide the buttons above, so Finalize gets its own row, with the reason it's off spelled out. */}

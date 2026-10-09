@@ -4,7 +4,7 @@ import { expect, test } from '@playwright/test';
 import { api, asClaude, fixtureRepo, importProject, PLAN_TEXT, type TestItem } from './claude';
 import { noSideScroll } from './env';
 
-const NO_WINDOW = 'No Claude window is listening. Run /dev-plumbing in any clone.';
+const NO_WINDOW = 'No Claude window is listening. Run /plumb:listen in any clone.';
 const channels: TestItem = { key: 'channels', title: 'Which channels?', summary: 'SMS, email or both.', fields: { blocking: 'true' }, message: { text: 'SMS, email or both?' } };
 const lead: TestItem = { key: 'lead', title: 'How many days before?', summary: 'When the reminder goes out.', fields: { default: '3 days' }, message: { text: 'How many days before the due date?' } };
 const twice: TestItem = { key: 'twice', title: 'The job might run twice', summary: 'A second run would send every reminder again.', fields: { severity: 'low' } };
@@ -96,7 +96,7 @@ test('once nothing blocks it, Finalize waits for a Claude window, then says Clau
   await page.getByRole('button', { name: 'Try again' }).click();
   await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0);
   // The window polled moments ago, so whether it still counts as listening depends on timing.
-  await expect(status).toHaveText(/^(Waiting for Claude to write the final\.|No Claude window is listening\. Run \/dev-plumbing in any clone\.)$/);
+  await expect(status).toHaveText(/^(Waiting for Claude to write the final\.|No Claude window is listening\. Run \/plumb:listen in any clone\.)$/);
   expect((await api(`${P}/finalize`)).request.state).toBe('requested');
 });
 

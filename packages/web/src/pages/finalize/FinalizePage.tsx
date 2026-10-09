@@ -9,7 +9,7 @@ import { FinalDone, ProposalView } from './ProposalView';
 
 const LIST = 'overflow-hidden rounded-[10px] border-[0.5px] border-separator bg-cell [&>*+*]:border-t-[0.5px] [&>*+*]:border-separator';
 const WAITING = 'Waiting for Claude to write the final.';
-const NO_WINDOW = 'No Claude window is listening. Run /dev-plumbing in any clone.';
+const NO_WINDOW = 'No Claude window is listening. Run /plumb:listen in any clone.';
 const WRITING = 'Claude is writing the final.';
 const GAVE_UP = "The finalizer didn't send a final.";
 
@@ -28,7 +28,7 @@ const GROUPS: Group[] = [
 function statusLine(v: FinalizeView): string | null {
   const r = v.request;
   if (r?.state === 'requested') return v.listening ? WAITING : NO_WINDOW;
-  // The window that took it went away, and no other is running: it's requeued the moment one runs /dev-plumbing.
+  // The window that took it went away, and no other is running: it's requeued the moment one runs /plumb:listen.
   if (r?.state === 'writing') return v.listening ? WRITING : NO_WINDOW;
   if (r?.state === 'failed') return r.reason ?? GAVE_UP;
   return null;

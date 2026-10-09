@@ -78,15 +78,15 @@ describe('a re-import that was ended early, in the project header', () => {
   it('names the version and the types that never came back, and says how to finish it', () => {
     show(home({ importIncomplete: { version: 2, titles: ['Architecture', 'Flows', 'Testing & rollout'], again: false } }));
     expect(screen.getByTestId('import-incomplete').textContent).toBe(
-      "The v2 re-import didn't finish for Architecture, Flows and Testing & rollout. Run /dev-plumbing to try again.",
+      "The v2 re-import didn't finish for Architecture, Flows and Testing & rollout. Run /plumb:listen to try again.",
     );
     cleanup();
     show(home({ importIncomplete: { version: 3, titles: ['Architecture'], again: false } }));
-    expect(screen.getByTestId('import-incomplete').textContent).toBe("The v3 re-import didn't finish for Architecture. Run /dev-plumbing to try again.");
-    // Ended early again after /dev-plumbing tried once more.
+    expect(screen.getByTestId('import-incomplete').textContent).toBe("The v3 re-import didn't finish for Architecture. Run /plumb:listen to try again.");
+    // Ended early again after /plumb:listen tried once more.
     cleanup();
     show(home({ importIncomplete: { version: 3, titles: ['Architecture'], again: true } }));
-    expect(screen.getByTestId('import-incomplete').textContent).toBe("The v3 re-import didn't finish again for Architecture. Run /dev-plumbing to try again.");
+    expect(screen.getByTestId('import-incomplete').textContent).toBe("The v3 re-import didn't finish again for Architecture. Run /plumb:listen to try again.");
   });
 
   it('says nothing otherwise', () => {
