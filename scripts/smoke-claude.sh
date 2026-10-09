@@ -125,9 +125,9 @@ echo "Working in $work"
 round2="$work/round2"
 DP_SMOKE_ROUND2="$round2" node "$root/scripts/smoke-user.mjs" &
 user=$!
-# exec, so $! is Claude itself and not a subshell that would leave it running.
 # Turns off the old dev-plumbing plugin, if installed, for these sessions only, so only --plugin-dir's plumb loads.
 old_off='{"enabledPlugins":{"dev-plumbing@dev-plumbing":false}}'
+# exec, so $! is Claude itself and not a subshell that would leave it running.
 ( cd "$repo" && exec claude -p "Use the /plumb:rough-in skill to plumb docs/specs/restock-reminders.md." \
     --plugin-dir "$root/plugin" --settings "$old_off" --permission-mode bypassPermissions \
     --output-format stream-json --verbose > "$work/transcript.jsonl" 2> "$work/claude.err" ) &
@@ -169,8 +169,8 @@ plugins_loaded() {
       try { const e = JSON.parse(line); if (e.type === "system" && e.subtype === "init") { init = e; break; } } catch {}
     }
     if (!init) { console.log("No init line in the transcript."); process.exit(1); }
-    const tools = Array.isArray(init.tools) ? init.tools : [];
-    const plugins = (Array.isArray(init.plugins) ? init.plugins : []).map((p) => (typeof p === "string" ? p : p?.name ?? "?"));
+    const tools = (Array.isArray(init.tools) ? init.tools : []).filter((t) => typeof t === "string");
+    const plugins = (Array.isArray(init.plugins) ? init.plugins : []).map((p) => (typeof p === "string" ? p : String(p?.name ?? "?")));
     const plumb = tools.filter((t) => t.startsWith("mcp__plugin_plumb_dp__"));
     const old = tools.filter((t) => t.startsWith("mcp__plugin_dev-plumbing_dp__"));
     console.log("Plugins in the init line: " + (plugins.join(", ") || "none listed"));
@@ -180,6 +180,7 @@ plugins_loaded() {
       console.log("The old dev-plumbing plugin loaded next to plumb.");
       process.exit(1);
     }
+    if (!plumb.length) { console.log("No mcp__plugin_plumb_dp__ tools loaded."); process.exit(1); }
   ' "$1"
 }
 echo "== Round 1: import, one thread, Finalize"
