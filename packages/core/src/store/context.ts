@@ -1,3 +1,4 @@
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { DEFENSE, defenseThreadIds } from '../defenseType';
 import { diffText } from '../docDiff';
@@ -256,15 +257,21 @@ export async function importPack(o: { dir: string; typeId: string; types: Plumbi
   };
 }
 
+/**
+ * What the finalizer reads. The big texts are files it Reads, not text in the pack, so the pack stays well under the
+ * size an MCP tool result may have, whatever the size of the plan.
+ */
 export type FinalizePack = {
   project: { repo: string; id: string; title: string; sourcePath: string; name: string };
-  /** outputs/finalize.md: the final's structure and rules. */
-  rules: string;
-  draft: string;
+  /** outputs/finalize.md, or the shipped one when the user's is missing: the final's structure and rules. */
+  rulesFile: string;
+  /** The draft, with every accepted change in it. */
+  draftFile: string;
   /**
    * Every item that goes into the final, in plumbing-type order. Parked items, items of disabled types, Plan changes
    * items (what they settled is already in the draft) and Defense items (questions about the Whiteboard Defense) are
-   * left out of the final, so they aren't here.
+   * left out of the final, so they aren't here. `file` is the item's own JSON, to Read for anything cut short here.
+   * In finalizePack, `body` is cut to 800 characters.
    */
   items: {
     id: string;
@@ -277,6 +284,7 @@ export type FinalizePack = {
     status: DisplayStatus;
     codeRefs: CodeRef[];
     dataSummary: string | null;
+    file: string;
   }[];
   /** The active decisions, each with what was chosen, what was turned down, and Claude's reasoning from its thread. */
   decisions: { text: string; itemId: string | null; itemTitle: string | null; chosen: string | null; rejected: string[]; why: string | null }[];
@@ -287,7 +295,8 @@ export type FinalizePack = {
   conventions: string[];
   /** The tokens the finalizer may use for diagrams, flows, schema blocks, migrations and mockup links, one per line. */
   tokens: string[];
-  previousFinal: string | null;
+  /** The last accepted final, or null when there's none. */
+  previousFinalFile: string | null;
 };
 
 /** Claude's reasoning for a decision is cut to this many characters. */
@@ -402,6 +411,7 @@ async function planItems(o: { dir: string; types: PlumbingType[] }): Promise<Pla
       status: statusOf(i),
       codeRefs: i.codeRefs ?? [],
       dataSummary: dataSummary(i, typeOf(i)),
+      file: path.resolve(projectFiles(o.dir).item(i.id)),
     })),
     decisions: activeDecisions(await readDecisions(o.dir))
       .map((d) => decisionDetail(d, context))
@@ -415,24 +425,28 @@ async function planItems(o: { dir: string; types: PlumbingType[] }): Promise<Pla
 }
 
 /**
- * What the finalizer receives: the output rules, the whole draft, every item that goes into the final with a summary of
- * its drawing, the decisions with their why, the defaults that will be used, the items still open, the repo's
- * conventions, the tokens it may place, and the previous final. `rules` is read by the service from the config folder.
+ * What the finalizer receives: the output rules, the draft and the previous final as files to Read, every item that
+ * goes into the final with its file, its body cut short and a summary of its drawing, the decisions with their why, the
+ * defaults that will be used, the items still open, the repo's conventions and the tokens it may place. `rulesFile` is
+ * the rules file the service picked: the user's, or the shipped one.
  */
-export async function finalizePack(o: { dir: string; types: PlumbingType[]; profile?: RepoProfile; rules: string }): Promise<FinalizePack> {
+export async function finalizePack(o: { dir: string; types: PlumbingType[]; profile?: RepoProfile; rulesFile: string }): Promise<FinalizePack> {
   const project = await readProjectFile(o.dir);
   const plan = await planItems(o);
+  // Bodies are cut as the whiteboard pack's are (BODY_MAX and CLIPPED, below): the finalizer Reads the item's file for the rest.
+  const clipped = (body: string | null) => (body !== null && body.length > BODY_MAX ? `${body.slice(0, BODY_MAX)}${CLIPPED}` : body);
+  const finalFile = docPath(o.dir, project.docs.final ?? 'docs/final.md');
   return {
     project: { repo: project.repo, id: project.id, title: project.title, sourcePath: project.source.path, name: finalName(project.source.path) },
-    rules: o.rules,
-    draft: await readDocText(o.dir, project.docs.draft),
-    items: plan.listed,
+    rulesFile: o.rulesFile,
+    draftFile: docPath(o.dir, project.docs.draft),
+    items: plan.listed.map((entry) => ({ ...entry, body: clipped(entry.body) })),
     decisions: plan.decisions,
     defaults: plan.defaults,
     openItems: plan.openItems,
     conventions: o.profile?.conventions ?? [],
     tokens: availableTokens(plan.items, o.types),
-    previousFinal: await readDocText(o.dir, project.docs.final ?? 'docs/final.md').catch(() => null),
+    previousFinalFile: (await fs.access(finalFile).then(() => true, () => false)) ? finalFile : null,
   };
 }
 

@@ -21,7 +21,9 @@ const types: PlumbingType[] = [
   listType('phases', { title: 'Phases & milestones', timeline: true, order: 8 }),
 ];
 const profile = repoProfileSchema.parse({ name: 'acme', match: ['github.com/acme/acme'], conventions: ['Ids use uuid()'] });
-const RULES = '# Finalize spec rules\n\n## Rules\n\n- Never invent behaviour.\n';
+/** The rules file the service picked. The pack only names it: the finalizer Reads it. */
+const RULES_FILE = '/Users/you/.dev-plumbing/outputs/finalize.md';
+const CLIPPED = '… (clipped: Read file for the rest)';
 const LONG_WHY = `Accepting the risk: ${'volume is low and sends are spread across the day. '.repeat(20)}`;
 
 const claude = (id: string, at: string, text: string, extra: Partial<ClaudeMessage> = {}): Message => ({ id, at, author: 'claude', text, ...extra });
@@ -104,19 +106,29 @@ async function seed(): Promise<string> {
 }
 
 describe("the finalizer's context pack", () => {
-  it('gives the finalizer the rules, the draft, the project and the earlier final', async () => {
+  it('gives the finalizer the rules, the draft and the earlier final as files to Read, and the project', async () => {
     const dir = await seed();
-    const pack = await finalizePack({ dir, types, profile, rules: RULES });
+    const pack = await finalizePack({ dir, types, profile, rulesFile: RULES_FILE });
     expect(pack.project).toEqual({ repo: 'acme', id: 'restock', title: 'Restock reminders', sourcePath: 'docs/specs/restock.md', name: 'restock' });
-    expect(pack.rules).toBe(RULES);
-    expect(pack.draft).toBe(DRAFT);
+    expect(pack.rulesFile).toBe(RULES_FILE);
+    expect(pack.draftFile).toBe(path.join(dir, 'docs', 'draft.md'));
+    expect(await fs.readFile(pack.draftFile, 'utf8')).toBe(DRAFT);
+    expect(pack.previousFinalFile).toBe(path.join(dir, 'docs', 'final.md'));
+    expect(await fs.readFile(pack.previousFinalFile!, 'utf8')).toBe('# Restock reminders\n\nThe first final.\n');
     expect(pack.conventions).toEqual(['Ids use uuid()']);
-    expect(pack.previousFinal).toBe('# Restock reminders\n\nThe first final.\n');
+    // The texts themselves aren't in the pack any more.
+    for (const key of ['rules', 'draft', 'previousFinal']) expect(pack).not.toHaveProperty(key);
+  });
+
+  it("names no earlier final when there isn't one, or its file is gone", async () => {
+    const dir = await seed();
+    await fs.rm(path.join(dir, 'docs', 'final.md'));
+    expect((await finalizePack({ dir, types, rulesFile: RULES_FILE })).previousFinalFile).toBeNull();
   });
 
   it('lists every item that goes into the final, in plumbing-type order, with what its drawing holds', async () => {
     const dir = await seed();
-    const pack = await finalizePack({ dir, types, profile, rules: RULES });
+    const pack = await finalizePack({ dir, types, profile, rulesFile: RULES_FILE });
     expect(pack.items.map((i) => [i.id, i.typeTitle, i.status, i.dataSummary])).toEqual([
       ['architecture-broken', 'Architecture', 'idle', null],
       ['architecture-system', 'Architecture', 'idle', 'System diagram: 3 boxes, 2 groups'],
@@ -139,13 +151,14 @@ describe("the finalizer's context pack", () => {
       status: 'idle',
       codeRefs: [{ path: 'apps/worker/jobs/restock.ts', verified: true }],
       dataSummary: 'System diagram: 3 boxes, 2 groups',
+      file: path.join(dir, 'items', 'architecture-system.json'),
     });
     expect(pack.items.find((i) => i.id === 'q-lead')).toMatchObject({ body: null, fields: { blocking: 'false', default: '3 days before' }, codeRefs: [] });
   });
 
   it('gives each decision what was chosen, what was turned down, and why', async () => {
     const dir = await seed();
-    const pack = await finalizePack({ dir, types, profile, rules: RULES });
+    const pack = await finalizePack({ dir, types, profile, rulesFile: RULES_FILE });
     expect(pack.decisions).toEqual([
       { text: 'Reminder channel: Email', itemId: 'q-channel', itemTitle: 'Reminder channel', chosen: 'Email', rejected: ['SMS'], why: 'Email or SMS? Email is cheaper to send.' },
       { text: 'Burst risk accepted', itemId: 'c-burst', itemTitle: 'Burst of sends', chosen: 'Accept the risk', rejected: ['Stagger sends', 'Queue them'], why: `${LONG_WHY.slice(0, 599)}…` },
@@ -160,7 +173,7 @@ describe("the finalizer's context pack", () => {
     await addDecision(dir, { text: 'Ship before the sale', threadId: 't-nowhere', itemIds: [], now: new Date('2026-10-01T16:00:00.000Z') });
     // You parked the channel question after it was decided. Its decision is still active, but the item is left out.
     await setParked(dir, 't-q-channel', true);
-    const pack = await finalizePack({ dir, types, profile, rules: RULES });
+    const pack = await finalizePack({ dir, types, profile, rulesFile: RULES_FILE });
     expect(pack.decisions.map((d) => [d.text, d.itemId])).toEqual([
       ['Burst risk accepted', 'c-burst'],
       ['Jobs run in the worker', 'architecture-system'],
@@ -169,7 +182,7 @@ describe("the finalizer's context pack", () => {
     ]);
     // With UI changes turned off, the card's decision is left out too.
     const off = types.map((t) => (t.id === 'ui' ? { ...t, enabled: false } : t));
-    expect((await finalizePack({ dir, types: off, profile, rules: RULES })).decisions.map((d) => d.text)).toEqual([
+    expect((await finalizePack({ dir, types: off, profile, rulesFile: RULES_FILE })).decisions.map((d) => d.text)).toEqual([
       'Burst risk accepted',
       'Jobs run in the worker',
       'Ship before the sale',
@@ -178,7 +191,7 @@ describe("the finalizer's context pack", () => {
 
   it('lists the defaults that will be used, the open items, and only the tokens for items in the final', async () => {
     const dir = await seed();
-    const pack = await finalizePack({ dir, types, profile, rules: RULES });
+    const pack = await finalizePack({ dir, types, profile, rulesFile: RULES_FILE });
     expect(pack.defaults).toEqual([{ itemId: 'q-lead', title: 'Lead time', defaultValue: '3 days before' }]);
     expect(pack.openItems).toEqual([
       { itemId: 'ui-card', title: 'Restock card', typeTitle: 'UI changes' },
@@ -197,7 +210,7 @@ describe("the finalizer's context pack", () => {
   it('leaves out items of disabled plumbing types, and their tokens', async () => {
     const dir = await seed();
     const off = types.map((t) => (t.id === 'ui' ? { ...t, enabled: false } : t));
-    const pack = await finalizePack({ dir, types: off, profile, rules: RULES });
+    const pack = await finalizePack({ dir, types: off, profile, rulesFile: RULES_FILE });
     expect(pack.items.map((i) => i.id)).not.toContain('ui-card');
     expect(pack.tokens.join('\n')).not.toContain('{{mockup:');
     expect(pack.tokens.join('\n')).toContain('{{diagram:architecture-system}}');
@@ -209,7 +222,7 @@ describe("the finalizer's context pack", () => {
     const open = pair('plan-changes-v2-2', { type: 'plan-changes', title: 'Data', status: 'your_turn' });
     const dir = await seedProject({ pairs: [settled, open, pair('q1', { title: 'Who gets reminders?' })] });
     await addDecision(dir, { text: 'Approach: kept my draft', threadId: 't-plan-changes-v2-1', itemIds: ['plan-changes-v2-1'] });
-    const pack = await finalizePack({ dir, types: [PLAN_CHANGES_TYPE, ...types], rules: RULES });
+    const pack = await finalizePack({ dir, types: [PLAN_CHANGES_TYPE, ...types], rulesFile: RULES_FILE });
     expect(pack.items.map((i) => i.id)).toEqual(['q1']);
     expect(pack.openItems.map((e) => e.itemId)).toEqual(['q1']);
     expect(pack.decisions).toEqual([]);
@@ -218,17 +231,66 @@ describe("the finalizer's context pack", () => {
 
   it('works for a project with nothing decided, no profile and no earlier final', async () => {
     const dir = await seedProject({ pairs: [pair('q1', { title: 'Who gets reminders?' })] });
-    expect(await finalizePack({ dir, types, rules: RULES })).toEqual({
+    expect(await finalizePack({ dir, types, rulesFile: RULES_FILE })).toEqual({
       project: { repo: 'acme', id: 'restock', title: 'Restock reminders', sourcePath: 'docs/specs/restock.md', name: 'restock' },
-      rules: RULES,
-      draft: DRAFT,
-      items: [{ id: 'q1', type: 'questions', typeTitle: 'Questions', title: 'Who gets reminders?', summary: 'A summary.', body: null, fields: {}, status: 'your_turn', codeRefs: [], dataSummary: null }],
+      rulesFile: RULES_FILE,
+      draftFile: path.join(dir, 'docs', 'draft.md'),
+      items: [
+        {
+          id: 'q1',
+          type: 'questions',
+          typeTitle: 'Questions',
+          title: 'Who gets reminders?',
+          summary: 'A summary.',
+          body: null,
+          fields: {},
+          status: 'your_turn',
+          codeRefs: [],
+          dataSummary: null,
+          file: path.join(dir, 'items', 'q1.json'),
+        },
+      ],
       decisions: [],
       defaults: [],
       openItems: [{ itemId: 'q1', title: 'Who gets reminders?', typeTitle: 'Questions' }],
       conventions: [],
       tokens: [],
-      previousFinal: null,
+      previousFinalFile: null,
     });
+  });
+
+  it("cuts a long body to 800 characters, and says to Read the item's file for the rest", async () => {
+    const long = pair('q-long', { title: 'Long one' });
+    const exact = pair('q-exact', { title: 'Exactly 800' });
+    const body = 'The reminder job reads the subscriptions table. '.repeat(50);
+    const dir = await seedProject({ pairs: [{ ...long, item: { ...long.item, body } }, { ...exact, item: { ...exact.item, body: 'x'.repeat(800) } }] });
+    const pack = await finalizePack({ dir, types, rulesFile: RULES_FILE });
+    const byId = new Map(pack.items.map((i) => [i.id, i]));
+    expect(byId.get('q-long')!.body).toBe(`${body.slice(0, 800)}${CLIPPED}`);
+    expect(byId.get('q-exact')!.body).toBe('x'.repeat(800));
+    // The whole body is in the item's file.
+    expect(JSON.parse(await fs.readFile(byId.get('q-long')!.file, 'utf8')).body).toBe(body);
+  });
+
+  it('stays small on a big plan: 40 items with long bodies, five of them drawn', async () => {
+    const BIG_DIAGRAM = {
+      kind: 'system',
+      groups: [],
+      nodes: ['job', 'db', 'mailer', 'queue', 'log', 'admin'].map((id) => ({ id, label: `The ${id} box`, status: 'new' })),
+      edges: ['db', 'mailer', 'queue', 'log', 'admin'].map((to, i) => ({ id: `e${i}`, from: 'job', to, label: `job to ${to}` })),
+    };
+    const sentence = 'The reminder job reads the subscriptions table and sends one email per subscription that is due. ';
+    const pairs = Array.from({ length: 40 }, (_, i) => {
+      const drawnOne = i < 5;
+      const id = drawnOne ? `architecture-view-${i + 1}` : `q-${i + 1}`;
+      const p = pair(id, { type: drawnOne ? 'architecture' : 'questions', title: drawnOne ? `View ${i + 1}` : `Question ${i + 1}?` });
+      return { item: { ...p.item, body: `${i + 1}. ${sentence.repeat(60)}`.slice(0, 5000), ...(drawnOne ? { data: BIG_DIAGRAM } : {}) }, thread: p.thread };
+    });
+    const dir = await seedProject({ pairs, draft: `${DRAFT}\n${sentence.repeat(1500)}\n` });
+    const pack = await finalizePack({ dir, types, profile, rulesFile: RULES_FILE });
+    expect(pack.items).toHaveLength(40);
+    for (const item of pack.items) expect(item.body).toHaveLength(800 + CLIPPED.length);
+    // The 150,000-character draft is a file to Read, so it isn't counted here.
+    expect(JSON.stringify(pack).length).toBeLessThan(60_000);
   });
 });

@@ -98,7 +98,10 @@ it('hands a finalize to the window and takes the final back', async () => {
   const wait = json(await mcp.callTool({ name: 'dp_wait', arguments: { repo: 'acme-app', project: 'restock-reminders' } }));
   expect(wait).toMatchObject({ kind: 'finalize', request: start.request.id, model: 'opus' });
   const pack = json(await mcp.callTool({ name: 'dp_context', arguments: { repo: 'acme-app', project: 'restock-reminders', finalize: true } }));
-  expect(pack.rules).toMatch(/^# Finalize spec rules/);
+  // The finalizer Reads the rules file and the draft the pack names. There's no earlier final yet.
+  expect(fs.readFileSync(pack.rulesFile, 'utf8')).toMatch(/^# Finalize spec rules/);
+  expect(fs.readFileSync(pack.draftFile, 'utf8')).toMatch(/^# Restock reminders/);
+  expect(pack.previousFinalFile).toBeNull();
   const sent = await mcp.callTool({
     name: 'dp_finalize',
     arguments: { repo: 'acme-app', project: 'restock-reminders', request: start.request.id, markdown: '# Restock reminders\n\nReminders go by SMS and email.\n' },

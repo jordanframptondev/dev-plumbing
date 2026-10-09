@@ -5,7 +5,7 @@ import { readProjectFile, writeJsonAtomic } from '@dev-plumbing/core';
 import { createApp } from '../src/app';
 import { createRuntime } from '../src/runtime';
 import { makeRepo } from '../../core/test/fixtures';
-import { call, makeContext, removeTempDirs } from './helpers';
+import { call, DEFAULTS_DIR, makeContext, removeTempDirs } from './helpers';
 
 afterAll(removeTempDirs);
 
@@ -127,9 +127,11 @@ describe('Finalize over HTTP', () => {
 
     const pack = await t.claude('/context', { ...base, finalize: true });
     expect(pack.status).toBe(200);
-    expect(pack.body.rules).toContain('# Finalize spec rules');
+    // The rules and the draft are files the finalizer Reads.
+    expect(await fs.readFile(pack.body.rulesFile, 'utf8')).toContain('# Finalize spec rules');
     expect(pack.body.project).toMatchObject({ repo: 'acme-app', id: 'restock-reminders', name: 'restock-reminders' });
-    expect(pack.body.draft).toContain('Log one row per reminder sent.');
+    expect(await fs.readFile(pack.body.draftFile, 'utf8')).toContain('Log one row per reminder sent.');
+    expect(pack.body.previousFinalFile).toBeNull();
     expect(pack.body.tokens.some((line: string) => line.includes('{{mockup:ui-settings:after}}'))).toBe(true);
 
     // A final that points at an item that doesn't exist is refused as a whole, and nothing is saved.
@@ -168,6 +170,22 @@ describe('Finalize over HTTP', () => {
 
     // The window reports back. The request is gone, so there's nothing left to fail.
     expect((await t.claude('/wait', { ...base, windowId: 'w-a', timeoutSeconds: 0, finished: { finalize: id } })).body).toEqual({ kind: 'timeout' });
+  });
+
+  it("names the user's outputs/finalize.md, or the shipped one when theirs is gone, and the last final once there is one", async () => {
+    const t = await setup();
+    await unblock(t);
+    const mine = path.join(t.ctx.configDir, 'outputs', 'finalize.md');
+    const pack = async () => (await t.claude('/context', { ...base, finalize: true })).body;
+    expect((await pack()).rulesFile).toBe(mine);
+    const first = await pickedUp(t);
+    expect((await t.claude('/finalize', { ...base, request: first, markdown: FINAL })).status).toBe(200);
+    expect((await t.send('POST', `${P}/finalize/accept`, { clone: t.repo })).status).toBe(200);
+    const after = await pack();
+    expect(after.previousFinalFile).toBe(path.join(t.dir, 'docs', 'final.md'));
+    expect(await fs.readFile(after.previousFinalFile, 'utf8')).toContain('# Restock reminders');
+    await fs.rm(mine);
+    expect((await pack()).rulesFile).toBe(path.join(DEFAULTS_DIR, 'outputs', 'finalize.md'));
   });
 
   it('finalizing again shows the changes since the last final, and Discard clears the proposal', async () => {

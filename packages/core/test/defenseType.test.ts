@@ -19,7 +19,7 @@ afterAll(removeTempDirs);
 
 const AT = '2026-10-06T09:00:00.000Z';
 const types = [...TYPES, DEFENSE_TYPE];
-const RULES = '# Finalize spec rules\n';
+const RULES_FILE = '/Users/you/.dev-plumbing/outputs/finalize.md';
 const QUESTION = 'Does the unsubscribe link need a signed token?';
 const ID = 'defense-does-the-unsubscribe-link-need-a-signed-token';
 
@@ -65,7 +65,7 @@ describe('the built-in Defense type', () => {
       const checklist = await finalizeChecklist(dir, types);
       expect(listed(checklist), state).toEqual([]);
       expect(checklist.canStart, state).toBe(true);
-      const pack = await finalizePack({ dir, types, rules: RULES });
+      const pack = await finalizePack({ dir, types, rulesFile: RULES_FILE });
       expect(pack.items.map((i) => i.id), state).toEqual(['q1']);
       expect(pack.decisions.map((d) => d.text), state).toEqual(['Everyone with an active subscription.']);
       expect(pack.openItems, state).toEqual([]);

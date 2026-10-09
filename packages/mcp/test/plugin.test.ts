@@ -74,9 +74,15 @@ describe('the plugin', () => {
     const finalizer = parseFrontMatter(read('plugin/agents/finalizer.md')).content;
     for (const s of [
       'finalize: true',
-      '`rules`',
+      '`rulesFile`',
+      '`draftFile`',
       '`tokens`',
-      '`previousFinal`',
+      '`previousFinalFile`',
+      // The big texts are files, and long bodies are cut short, so the pack stays small on a big plan.
+      'Before you write anything, Read `rulesFile` and `draftFile`, each one whole (in parts, with offset and limit, when it\'s long), and `previousFinalFile` when it isn\'t null.',
+      // The final is what gets built, so no part of it is written from a clipped body.
+      'A body over 800 characters is cut short and ends `… (clipped: Read file for the rest)`.',
+      'Read the `file` of every item whose body is cut short before you write its part of the final.',
       "**Parked items aren't in the pack.**",
       'Parked: left out of the final',
       '**Never draw.**',
@@ -94,6 +100,7 @@ describe('the plugin', () => {
       expect(finalizer).toContain(s);
     }
     expect(finalizer).not.toContain('anywhere else');
+    for (const gone of ['- `rules`:', '- `draft`:', '- `previousFinal`:']) expect(finalizer).not.toContain(gone);
     expect(parseFrontMatter(read('plugin/agents/finalizer.md')).data.color).toBe('yellow');
     const skill = parseFrontMatter(read('plugin/skills/dev-plumbing/SKILL.md')).content;
     for (const s of ['dev-plumbing:finalizer', '**kind: finalize**', '> Write the final spec for repo `<repo>`, plumbing project `<project>`, request `<request>`.', 'finished: { finalize:']) {

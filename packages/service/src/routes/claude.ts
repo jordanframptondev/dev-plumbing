@@ -175,14 +175,13 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
     return info?.root ?? expandHome((await readProjectFile(ref.dir)).source.clone, ctx.home);
   };
   const changed = (ref: ProjectRef) => rt.events.projectChanged(ref.repo, ref.id);
-  /** outputs/finalize.md from the config folder, or the shipped default when the user's copy is missing. */
-  const finalizeRules = () =>
-    fs.readFile(path.join(ctx.configDir, 'outputs', 'finalize.md'), 'utf8').catch(() => fs.readFile(path.join(ctx.defaultsDir, 'outputs', 'finalize.md'), 'utf8'));
-  /** outputs/whiteboard-defense.md in the config folder, or the shipped default when the user's copy is missing. */
-  const whiteboardRulesFile = async () => {
-    const mine = path.resolve(ctx.configDir, 'outputs', 'whiteboard-defense.md');
-    return (await fs.access(mine).then(() => true, () => false)) ? mine : path.resolve(ctx.defaultsDir, 'outputs', 'whiteboard-defense.md');
+  /** outputs/<name> in the config folder, or the shipped default when the user's copy is missing: the file a subagent Reads. */
+  const outputRulesFile = async (name: 'finalize.md' | 'whiteboard-defense.md') => {
+    const mine = path.resolve(ctx.configDir, 'outputs', name);
+    return (await fs.access(mine).then(() => true, () => false)) ? mine : path.resolve(ctx.defaultsDir, 'outputs', name);
   };
+  const finalizeRulesFile = () => outputRulesFile('finalize.md');
+  const whiteboardRulesFile = () => outputRulesFile('whiteboard-defense.md');
   /** A window that comes back (it opens a project, or listens again) is done with any Detect again it was handed. */
   const cameBack = (windowId: string) => {
     for (const h of rt.detects.values()) if (h.windowId === windowId) h.back = true;
@@ -622,7 +621,7 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
       const profile = cfg.repos.find((p) => p.name === ref.repo);
       if (body.threadId) return c.json(await threadPack({ dir: ref.dir, threadId: body.threadId, types: cfg.types, profile }));
       if (body.importType) return c.json(await importPack({ dir: ref.dir, typeId: body.importType, types: cfg.types, profile }));
-      if (body.finalize) return c.json(await finalizePack({ dir: ref.dir, types: cfg.types, profile, rules: await finalizeRules() }));
+      if (body.finalize) return c.json(await finalizePack({ dir: ref.dir, types: cfg.types, profile, rulesFile: await finalizeRulesFile() }));
       if (body.whiteboard) return c.json(await whiteboardPack({ dir: ref.dir, types: cfg.types, profile, rulesFile: await whiteboardRulesFile() }));
       throw new InputError('Give threadId (for a thread), importType (for an importer), finalize: true (for the finalizer) or whiteboard: true (for the whiteboard subagent).');
     }),
