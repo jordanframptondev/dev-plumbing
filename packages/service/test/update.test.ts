@@ -530,6 +530,27 @@ describe('catching the items up with settled Plan changes', () => {
     // Then the next /dev-plumbing catches the items up.
     expect((await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a' })).body).toMatchObject({ kind: 'reopened', next: CATCH_UP });
   });
+
+  it("waits too for a re-import that didn't finish again, which keeps its record", async () => {
+    const t = await atV2();
+    await settle(t, 'merged');
+    // The update's re-import was ended before Flows' importer came back, then again after its one resume.
+    await writeJsonAtomic(path.join(t.dir, 'project.json'), { ...(await readProjectFile(t.dir)), importIncomplete: ['flows'], importIncompleteTries: 2 });
+    expect((await t.send('GET', P)).body.catchUpDue).toBe(true);
+    const open = await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a' });
+    // The user hears both, and no catch-up starts: it would re-import every type and forget the unfinished one.
+    expect(open.body).toMatchObject({
+      kind: 'reopened',
+      importTypes: [],
+      next: `Tell the user: "The v2 re-import didn't finish again for Flows. Run /dev-plumbing to try again. Your settled Plan changes still need a re-import. It waits until Claude has answered: run /dev-plumbing again then." ${WAIT_NEXT}`,
+    });
+    const project = await readProjectFile(t.dir);
+    expect(project).toMatchObject({ status: 'active', importIncomplete: ['flows'], importIncompleteTries: 1 });
+    expect(project.caughtUp).toBeUndefined();
+    expect(project.reimporting).toBeUndefined();
+    expect((await t.send('GET', P)).body.catchUpDue).toBe(true);
+  });
+
   it("doesn't re-import when you kept your draft, and says it waits while Claude has a thread to answer", async () => {
     const kept = await atV2();
     await settle(kept, 'keep');

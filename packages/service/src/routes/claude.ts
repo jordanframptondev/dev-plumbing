@@ -380,9 +380,9 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
         if (outcome?.kind === 'updated') update = outcome.result;
       }
       // A re-import that was ended early is finished first, for just the types whose batch never came. A catch-up that's
-      // due too then waits (the project is importing) for a later /dev-plumbing. This runs after Not now as well: Not now
-      // answers the new version's question, not this version's unfinished re-import. When it waits, or was ended early
-      // again, the user is told.
+      // due too then waits for a later /dev-plumbing, as it does when this one waits or was ended early again. This runs
+      // after Not now as well: Not now answers the new version's question, not this version's unfinished re-import.
+      // When it waits, or was ended early again, the user is told.
       let incomplete: IncompleteImport | null = null;
       if (!created && !update) {
         incomplete = await rt.withLock(key, async () => {
@@ -400,11 +400,16 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
       // Once every Plan changes thread of the current version is settled, and settling them changed the draft, the
       // items catch up with that: one re-import, run by this window, as an update's is. After Not now too, which only
       // declines a newer version. While Claude has work under way it waits, and the user is told to run /dev-plumbing
-      // again once Claude has answered (`waits` holds what has to wait, said last).
+      // again once Claude has answered (`waits` holds what has to wait, said last). The unfinished re-import comes
+      // first: when this call resumed it, found it waiting, or found it ended early again, the catch-up waits too, as
+      // it would re-import every type and forget what's left to finish.
       let caughtUp = false;
       const waits: string[] = [];
       const windowId = body.windowId;
-      if (!created && !update && windowId) {
+      if (incomplete) {
+        const due = await rt.withLock(key, async () => (await catchUpWaiting(ref.dir)) !== null);
+        if (due) waits.push(CATCH_UP_WAITS);
+      } else if (!created && !update && windowId) {
         caughtUp = await rt.withLock(key, async () => {
           await putBackFirst();
           const version = await catchUpDue(ref.dir);
