@@ -79,8 +79,8 @@ Which Claude model each agent uses is set in `~/.dev-plumbing/agents.json`. It a
 ### How the plugin gets installed
 
 `dev-plumbing setup` runs three Claude Code commands for you:
-1. `claude plugin marketplace add <this repo>` registers this repo as a **marketplace**, a catalogue of plugins, called `dev-plumbing`. The catalogue is `.claude-plugin/marketplace.json`.
-2. `claude plugin uninstall dev-plumbing@dev-plumbing --scope user` takes out the plugin's old name, from before it was `plumb`. When it isn't installed, setup carries on.
+1. `claude plugin uninstall dev-plumbing@dev-plumbing --scope user` takes out the plugin's old name, from before it was `plumb`. It's best-effort: when the old plugin isn't installed, nothing is said, and when it can't be taken out, setup carries on and tells you to run that command yourself.
+2. `claude plugin marketplace add <this repo>` registers this repo as a **marketplace**, a catalogue of plugins, called `dev-plumbing`. The catalogue is `.claude-plugin/marketplace.json`.
 3. `claude plugin install plumb@dev-plumbing --scope user` installs the plugin for your user, so it works in every repo.
 
 Two things to know:

@@ -16,34 +16,38 @@ function fakeRunner(fail: Record<string, string | NodeJS.ErrnoException> = {}) {
   return { run, ran };
 }
 
+const INSTALLED = 'Installed the Claude Code plugin. Restart any open Claude Code sessions, then run /plumb:rough-in path/to/plan.md in a repo.';
+const ORDER = [
+  'claude --version',
+  'claude plugin uninstall dev-plumbing@dev-plumbing --scope user',
+  'claude plugin marketplace add /src/dev-plumbing',
+  'claude plugin install plumb@dev-plumbing --scope user',
+];
+
 describe('installing the plugin', () => {
-  it('adds this repo as a marketplace, takes out the old dev-plumbing plugin and installs plumb for your user', async () => {
+  it('takes out the old dev-plumbing plugin, adds this repo as a marketplace and installs plumb for your user', async () => {
     const { run, ran } = fakeRunner();
-    expect(await installPlugin('/src/dev-plumbing', run)).toBe(
-      'Installed the Claude Code plugin. Restart any open Claude Code sessions, then run /plumb:rough-in path/to/plan.md in a repo.',
-    );
-    expect(ran).toEqual([
-      'claude --version',
-      'claude plugin marketplace add /src/dev-plumbing',
-      'claude plugin uninstall dev-plumbing@dev-plumbing --scope user',
-      'claude plugin install plumb@dev-plumbing --scope user',
-    ]);
+    expect(await installPlugin('/src/dev-plumbing', run)).toBe(INSTALLED);
+    // The old plugin goes first, while the marketplace still lists it.
+    expect(ran).toEqual(ORDER);
   });
 
-  it("installs plumb when the old dev-plumbing plugin isn't installed", async () => {
+  it("says nothing about the old dev-plumbing plugin when it isn't installed", async () => {
     for (const said of ['Plugin "dev-plumbing@dev-plumbing" not found in installed plugins', 'Plugin "dev-plumbing@dev-plumbing" is not installed at scope user']) {
       const { run, ran } = fakeRunner({ 'claude plugin uninstall': said });
-      expect(await installPlugin('/src/dev-plumbing', run)).toMatch(/Installed the Claude Code plugin/);
-      expect(ran.at(-1)).toBe('claude plugin install plumb@dev-plumbing --scope user');
+      expect(await installPlugin('/src/dev-plumbing', run)).toBe(INSTALLED);
+      expect(ran).toEqual(ORDER);
     }
   });
 
-  it("stops before installing plumb when the old plugin can't be taken out", async () => {
+  it("still installs plumb when the old plugin can't be taken out, and says how to take it out", async () => {
     // Like execFile's errors: the message names the command, which isn't the command's own output.
     const failure = Object.assign(new Error('Command failed: claude plugin uninstall dev-plumbing@dev-plumbing --scope user\nnot found'), { stderr: 'Error: permission denied', stdout: '' });
     const { run, ran } = fakeRunner({ 'claude plugin uninstall': failure });
-    await expect(installPlugin('/src/dev-plumbing', run)).rejects.toThrow(/claude plugin uninstall failed: Error: permission denied/);
-    expect(ran).not.toContain('claude plugin install plumb@dev-plumbing --scope user');
+    expect(await installPlugin('/src/dev-plumbing', run)).toBe(
+      `${INSTALLED}\nCouldn't take out the old dev-plumbing@dev-plumbing plugin (Error: permission denied). Run claude plugin uninstall dev-plumbing@dev-plumbing yourself.`,
+    );
+    expect(ran).toEqual(ORDER);
   });
 
   it('is happy to run again', async () => {
