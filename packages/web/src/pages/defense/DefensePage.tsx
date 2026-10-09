@@ -1,7 +1,7 @@
 import { LEVEL_NAMES, type WhiteboardDefense, type WhiteboardView } from '@dev-plumbing/core/schemas';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router';
-import { useState } from 'react';
+import { Component, lazy, Suspense, useState, type ReactNode } from 'react';
 import { api } from '../../api/client';
 import { Button } from '../../components/Button';
 import { Segmented } from '../../components/Segmented';
@@ -10,8 +10,32 @@ import { ExportForm } from './ExportForm';
 import { PracticeView } from './PracticeView';
 import { StudyView } from './StudyView';
 
-export type DefenseMode = 'study' | 'practice';
-/** What Study and Practice are given: the page's data, with a defense in it. */
+// Present brings Rough.js and Motion, so it's its own chunk, loaded the first time Present opens.
+const PresentView = lazy(() => import('./present/PresentView').then((m) => ({ default: m.PresentView })));
+const PRESENT_FAILED = "Present couldn't load. Reload the page.";
+
+/**
+ * Present's chunk can fail to load (a tab left open across an upgrade asks for one that's gone). Then Present says so,
+ * in place of the router's error page, and the rest of the page stays.
+ */
+export class PresentBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    return this.state.failed ? (
+      <p role="alert" className="mt-6 text-[13px] text-ink-2">
+        {PRESENT_FAILED}
+      </p>
+    ) : (
+      this.props.children
+    );
+  }
+}
+
+export type DefenseMode = 'study' | 'practice' | 'present';
+/** What Study, Practice and Present are given: the page's data, with a defense in it. */
 export type DefenseViewProps = { view: WhiteboardView & { defense: WhiteboardDefense }; repo: string; project: string };
 /**
  * Where Practice is: the card on show (from 0) and, while "Only shaky and couldn't" is on, the question ids of the deck
@@ -19,6 +43,9 @@ export type DefenseViewProps = { view: WhiteboardView & { defense: WhiteboardDef
  */
 export type PracticePlace = { card: number; deck: string[] | null };
 export type PracticeViewProps = DefenseViewProps & { place: PracticePlace; onPlace: (place: PracticePlace) => void };
+/** Where Present is: the chapter and the step on show (both from 0). The page keeps it, as it does Practice's. */
+export type PresentPlace = { chapter: number; step: number };
+export type PresentViewProps = DefenseViewProps & { place: PresentPlace; onPlace: (place: PresentPlace) => void };
 
 const WAITING = 'Waiting for Claude to write the Whiteboard Defense.';
 const NO_WINDOW = 'No Claude window is listening. Run /dev-plumbing in any clone.';
@@ -50,7 +77,8 @@ export function DefensePage() {
 
 /**
  * The Whiteboard Defense page: where the request is, Generate (or Regenerate, or Try again) and Cancel (or Dismiss),
- * what the defense is based on, Study or Practice, and Export .md. The defense on show stays until a new one is saved.
+ * what the defense is based on, Study, Practice or Present, and Export .md. The defense on show stays until a new one is
+ * saved.
  */
 export function DefenseBody({ repo, project, mode }: { repo: string; project: string; mode: DefenseMode }) {
   const qc = useQueryClient();
@@ -63,6 +91,8 @@ export function DefenseBody({ repo, project, mode }: { repo: string; project: st
   const cancel = useMutation({ mutationFn: () => api.cancelWhiteboard(repo, project), onSettled: refresh });
   // Practice's place lives here, so Study and back keeps it. It belongs to one defense: a new one starts at card 1.
   const [place, setPlace] = useState<PracticePlace & { defenseId: string | null }>({ defenseId: null, card: 0, deck: null });
+  // Present's place, the same way: Study and back keeps the chapter and the step, and a new defense starts at the top.
+  const [present, setPresent] = useState<PresentPlace & { defenseId: string | null }>({ defenseId: null, chapter: 0, step: 0 });
   if (q.error) return <p className="text-[13px] text-seal">{(q.error as Error).message}</p>;
   if (!q.data) return <p className="text-[13px] text-ink-3">Loading…</p>;
   const v = q.data;
@@ -71,13 +101,17 @@ export function DefenseBody({ repo, project, mode }: { repo: string; project: st
   const failed = v.request?.state === 'failed';
   const underWay = v.request?.state === 'requested' || v.request?.state === 'writing';
   const label = failed ? 'Try again' : d ? 'Regenerate' : 'Generate';
-  // The page's main action when there's nothing to study yet, it's out of date, or the last request failed.
-  const primary = !d || v.stale !== null || failed;
+  // The page's main action when there's nothing to study yet, it's out of date, the last request failed, or Present
+  // is open on a defense written before Present (no presenter, or one with no chapters, as Present itself reads it).
+  const primary = !d || v.stale !== null || failed || (mode === 'present' && !d.presenter?.chapters.length);
   const error = generate.error ?? cancel.error;
   const setMode = (next: DefenseMode) => void navigate({ to: '/p/$repo/$project/defense', params: { repo, project }, search: { mode: next } });
 
+  // Present's board takes the width it's given; Study and Practice read best at a line's length.
+  const width = mode === 'present' ? 'max-w-[1180px]' : 'max-w-[80ch]';
+
   return (
-    <div className="max-w-[80ch]" data-testid="defense">
+    <div className={width} data-testid="defense">
       <h2 className="text-[20px] font-semibold">Whiteboard Defense</h2>
       <p className="mt-1 text-[12.5px] text-ink-3">If you ship it, you should be able to explain it.</p>
       {d ? (
@@ -141,6 +175,7 @@ export function DefenseBody({ repo, project, mode }: { repo: string; project: st
               options={[
                 { value: 'study', label: 'Study' },
                 { value: 'practice', label: 'Practice' },
+                { value: 'present', label: 'Present' },
               ]}
             />
           </div>
@@ -154,6 +189,19 @@ export function DefenseBody({ repo, project, mode }: { repo: string; project: st
               place={place.defenseId === d.id ? { card: place.card, deck: place.deck } : { card: 0, deck: null }}
               onPlace={(next) => setPlace({ defenseId: d.id, ...next })}
             />
+          ) : mode === 'present' ? (
+            <PresentBoundary>
+              <Suspense fallback={<p className="mt-6 text-[12.5px] text-ink-3">Drawing…</p>}>
+                <PresentView
+                  key={d.id}
+                  view={{ ...v, defense: d }}
+                  repo={repo}
+                  project={project}
+                  place={present.defenseId === d.id ? { chapter: present.chapter, step: present.step } : { chapter: 0, step: 0 }}
+                  onPlace={(next) => setPresent({ defenseId: d.id, ...next })}
+                />
+              </Suspense>
+            </PresentBoundary>
           ) : (
             <StudyView key={d.id} view={{ ...v, defense: d }} repo={repo} project={project} />
           )}

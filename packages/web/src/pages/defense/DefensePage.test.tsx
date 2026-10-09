@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api, ApiError } from '../../api/client';
 import { formatUpdated } from '../../lib/time';
-import { DefenseBody, type DefenseMode } from './DefensePage';
+import { DefenseBody, PresentBoundary, type DefenseMode } from './DefensePage';
 import { AT, defense, EXPORT_PATH, view } from './testkit';
 
 const navigate = vi.hoisted(() => vi.fn());
@@ -165,6 +165,33 @@ describe('the Whiteboard Defense page', () => {
     cleanup();
     show(view(), 'practice');
     expect((await screen.findByRole('tab', { name: 'Practice' })).getAttribute('aria-selected')).toBe('true');
+  });
+
+  it("says Present couldn't load when its code doesn't come, in place of the router's error page", () => {
+    // React reports the error it caught; the test doesn't need to see it.
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const Gone = () => {
+      throw new TypeError('Failed to fetch dynamically imported module: /assets/PresentView-old.js');
+    };
+    render(
+      <PresentBoundary>
+        <Gone />
+      </PresentBoundary>,
+    );
+    expect(screen.getByRole('alert').textContent).toBe("Present couldn't load. Reload the page.");
+  });
+
+  it('offers Present as the third mode, through the address', async () => {
+    show(view());
+    const tabs = await screen.findByRole('tablist', { name: 'Whiteboard Defense mode' });
+    expect(within(tabs).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Study', 'Practice', 'Present']);
+    fireEvent.click(within(tabs).getByRole('tab', { name: 'Present' }));
+    expect(navigate).toHaveBeenCalledWith({ to: '/p/$repo/$project/defense', params: { repo: 'acme-app', project: 'restock' }, search: { mode: 'present' } });
+    cleanup();
+    show(view(), 'present');
+    expect((await screen.findByRole('tab', { name: 'Present' })).getAttribute('aria-selected')).toBe('true');
+    // Present is loaded when it's first opened.
+    expect(await screen.findByTestId('present-old')).toBeTruthy();
   });
 
   it('starts Study with the contents, all 13 parts in order', async () => {

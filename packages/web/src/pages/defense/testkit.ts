@@ -1,5 +1,5 @@
 // Helpers for the Whiteboard Defense page's component tests. Only test files import this.
-import type { DefenseLink, PracticeView, WhiteboardDefense, WhiteboardView } from '@dev-plumbing/core/schemas';
+import type { DefenseLink, PracticeView, Presenter, WhiteboardDefense, WhiteboardView } from '@dev-plumbing/core/schemas';
 
 export const AT = '2026-10-06T09:00:00.000Z';
 export const EXPORT_PATH = 'docs/specs/restock-reminders.whiteboard-defense.md';
@@ -61,6 +61,32 @@ export function defense(over: Partial<WhiteboardDefense> = {}): WhiteboardDefens
     ],
     ...over,
   };
+}
+
+type PresentChapter = Presenter['chapters'][number];
+const chapter = (id: PresentChapter['id'], title: string, drawing: PresentChapter['drawing'], steps: PresentChapter['steps']): PresentChapter => ({ id, title, drawing, steps });
+const say = (caption: string, reveal: string[] = [], notes: PresentChapter['steps'][number]['notes'] = []) => ({ caption, reveal, notes });
+
+/**
+ * A presenter for defense(), its chapters overridden as needed. Purpose draws nothing and has a note for the whole
+ * board; System flow draws the architecture-system diagram in three steps, the second adding a line and a seal note
+ * near its end; Data and source of truth draws the tables; the rest draw nothing, one step each.
+ */
+export function presenter(over: Partial<Record<PresentChapter['id'], Partial<PresentChapter>>> = {}): Presenter {
+  const chapters = [
+    chapter('purpose', 'Purpose', null, [say('A daily job reminds customers before an item runs out.', [], [{ near: '', text: 'One job, one table.', ink: 'ink' }])]),
+    chapter('flow', 'System flow', { kind: 'diagram', itemId: 'architecture-system' }, [
+      say('The job runs every morning.', ['node:job']),
+      say('It sends each reminder by SMS.', ['edge:sends'], [{ near: 'node:sms', text: 'Runs twice? One a day per subscription.', ink: 'seal' }]),
+      say("That's the whole flow."),
+    ]),
+    chapter('data', 'Data and source of truth', { kind: 'tables' }, [say('Each reminder sent is a row.', ['table:RestockReminder'])]),
+    chapter('states', 'States', null, [say("A reminder is due, then sent. This plan doesn't add other states.")]),
+    chapter('security', 'Security', null, [say('Only the job sends reminders.')]),
+    chapter('failure', 'Failure and retries', null, [say('A failed send is retried once, the next morning.', [], [{ near: '', text: 'No retry storm.', ink: 'moss' }])]),
+    chapter('rollback', 'Rollback and blast radius', null, [say('Turn the job off; nothing else depends on it.')]),
+  ];
+  return { chapters: chapters.map((c) => ({ ...c, ...over[c.id] })) };
 }
 
 /** Practice before anything is rated or ticked, overridden as needed. */

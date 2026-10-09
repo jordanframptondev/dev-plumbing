@@ -33,13 +33,15 @@ const finalizeRoute = createRoute({ getParentRoute: () => projectRoute, path: 'f
 const versionsRoute = createRoute({ getParentRoute: () => projectRoute, path: 'versions', component: VersionsPage });
 const versionRoute = createRoute({ getParentRoute: () => projectRoute, path: 'versions/$n', component: VersionPage });
 
-/** `?mode=practice` opens Practice; anything else is Study. Links may leave the search out. */
+/** `?mode=practice` opens Practice and `?mode=present` Present; anything else is Study. Links may leave the search out. */
 type DefenseSearch = { mode: DefenseMode };
 const defenseRoute = createRoute({
   getParentRoute: () => projectRoute,
   path: 'defense',
   component: DefensePage,
-  validateSearch: (search: { mode?: DefenseMode } & SearchSchemaInput): DefenseSearch => ({ mode: search.mode === 'practice' ? 'practice' : 'study' }),
+  validateSearch: (search: { mode?: DefenseMode } & SearchSchemaInput): DefenseSearch => ({
+    mode: search.mode === 'practice' || search.mode === 'present' ? search.mode : 'study',
+  }),
 });
 const settingsRoute = createRoute({ getParentRoute: () => rootRoute, path: '/settings', component: SettingsPage });
 const rulesRoute = createRoute({ getParentRoute: () => rootRoute, path: '/rules', component: RulesPage });
