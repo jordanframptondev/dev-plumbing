@@ -6,8 +6,10 @@
 # scratch repo and checks the copy. Then it changes the plan in the scratch repo, and this script stops Claude and
 # runs /dev-plumbing again: Claude asks to update to v2, merges, re-imports, and answers the Plan changes threads. It
 # fails when an importable type got no saved dp_write_items batch in the re-import. Last, the user script generates the
-# Whiteboard Defense: the second window writes it with a whiteboard subagent, then answers a question about it and
-# suggests answers for one of its unknowns, sent to Questions.
+# Whiteboard Defense: the second window writes it, with its presenter, in a whiteboard subagent, then answers a
+# question about it and suggests answers for one of its unknowns, sent to Questions. The report also gives the size of
+# the finalizer's pack and which of its files the finalizer read (it fails when that isn't the rules file and the
+# draft), and the size of the presenter. Last, scripts/smoke-present.mjs draws the presenter in Present, in a browser.
 # It uses a temporary dev-plumbing home and leaves your real ~/.dev-plumbing alone. It makes real model calls.
 #   scripts/smoke-claude.sh                   about 45 minutes (the finalizer and the whiteboard subagent run on opus)
 #   DP_SMOKE_LONG=1 scripts/smoke-claude.sh   waits 35 minutes before answering, to check the long wait
@@ -165,6 +167,48 @@ echo "Tokens in the finalizer's last dp_finalize call, by kind:"
 grep -h '"name":"mcp__plugin_dev-plumbing_dp__dp_finalize"' "$work/transcript.jsonl" | tail -1 | grep -o '{{[a-z]*:' | sort | uniq -c || true
 echo "Mermaid the finalizer wrote by hand in its dp_finalize calls (should be 0):"
 grep -h '"name":"mcp__plugin_dev-plumbing_dp__dp_finalize"' "$work/transcript.jsonl" | grep -c '```mermaid' || true
+# The finalizer's pack names the rules, the draft and the last final as files to Read, so it stays small on a big plan.
+# Read from the transcript's JSON, as the Whiteboard Defense's counts are below. A Read counts when the finalizer
+# subagent made it (its parent is the Agent call that started it) on a path the pack gave. The run fails when the
+# finalizer didn't read the rules file or the draft, or the last final when the pack names one: a final written without
+# them follows no rules. The clipped items' files it read are reported.
+if ! node -e '
+  const fs = require("fs"), path = require("path");
+  const DP = "mcp__plugin_dev-plumbing_dp__";
+  const calls = new Map();
+  const results = new Map();
+  for (const line of fs.readFileSync(process.argv[1], "utf8").split("\n")) {
+    let entry;
+    try { entry = JSON.parse(line); } catch { continue; }
+    const blocks = Array.isArray(entry.message?.content) ? entry.message.content : [];
+    for (const b of blocks) {
+      if (b.type === "tool_use") calls.set(b.id, { name: b.name, input: b.input ?? {}, parent: entry.parent_tool_use_id ?? null });
+      if (b.type === "tool_result") {
+        const text = typeof b.content === "string" ? b.content : (Array.isArray(b.content) ? b.content : []).map((c) => c.text ?? "").join("");
+        results.set(b.tool_use_id, { text, error: b.is_error === true });
+      }
+    }
+  }
+  const all = [...calls].map(([id, c]) => ({ id, ...c, result: results.get(id) }));
+  const packs = all.filter((c) => c.name === DP + "dp_context" && c.input.finalize === true);
+  const text = packs.at(-1)?.result?.text ?? "";
+  console.log("JSON characters in the finalize dp_context result: " + text.length);
+  let pack = null;
+  try { pack = JSON.parse(text); } catch {}
+  const finalizers = new Set(all.filter((c) => c.name === "Agent" && c.input.subagent_type === "dev-plumbing:finalizer").map((c) => c.id));
+  const real = (f) => { try { return fs.realpathSync(f); } catch { return path.resolve(f); } };
+  const read = new Set(all.filter((c) => c.name === "Read" && finalizers.has(c.parent) && typeof c.input.file_path === "string").map((c) => real(c.input.file_path)));
+  const said = (key) => (!pack ? "no pack" : pack[key] == null ? "none" : read.has(real(pack[key])) ? "yes" : "no");
+  const files = { rulesFile: said("rulesFile"), draftFile: said("draftFile"), previousFinalFile: said("previousFinalFile") };
+  console.log("Files from its pack the finalizer read: rulesFile " + files.rulesFile + ", draftFile " + files.draftFile + ", previousFinalFile " + files.previousFinalFile);
+  // Items whose body was cut to 800 characters: the finalizer should Read the file of each before writing its part.
+  const clipped = (pack?.items ?? []).filter((i) => typeof i.body === "string" && i.body.endsWith("… (clipped: Read file for the rest)"));
+  console.log("Clipped items whose file the finalizer read: " + clipped.filter((i) => read.has(real(i.file))).length + " of " + clipped.length);
+  if (["no", "no pack"].includes(files.rulesFile) || ["no", "no pack"].includes(files.draftFile) || files.previousFinalFile === "no") {
+    console.log("The finalizer did not read every file its pack names (should be yes, or none for previousFinalFile).");
+    process.exitCode = 1;
+  }
+' "$work/transcript.jsonl"; then status=1; fi
 if [ -e "$work/transcript-2.jsonl" ]; then
   t2="$work/transcript-2.jsonl"
   echo "== Round 2: the plan changed, and /dev-plumbing ran again"
@@ -241,6 +285,9 @@ if [ -e "$work/transcript-2.jsonl" ]; then
     console.log("dp_whiteboard calls: " + saves.length + ", refused: " + refused.length);
     for (const c of refused) console.log("  refused: " + c.result.text.replace(/\s+/g, " ").slice(0, 300));
     console.log("JSON characters in the last dp_whiteboard defense: " + (saves.length ? JSON.stringify(saves.at(-1).input.defense ?? null).length : 0));
+    const presenter = saves.at(-1)?.input.defense?.presenter;
+    console.log("JSON characters in the last dp_whiteboard presenter: " + (presenter === undefined ? 0 : JSON.stringify(presenter).length));
+    console.log("dp_whiteboard refusals naming the presenter: " + refused.filter((c) => c.result.text.includes("presenter")).length);
     const packs = all.filter((c) => c.name === DP + "dp_context" && c.input.whiteboard === true);
     console.log("JSON characters in the whiteboard dp_context result: " + (packs.length ? (packs.at(-1).result?.text ?? "").length : 0));
     console.log("dp_wait calls from the main window with finished.whiteboard: " + waits.filter((c) => c.input.finished?.whiteboard).length);
@@ -249,5 +296,14 @@ if [ -e "$work/transcript-2.jsonl" ]; then
     console.log("dp_reply refusals on a Defense thread: " + defenseRefused.length);
     for (const c of defenseRefused) console.log("  refused: " + c.result.text.replace(/\s+/g, " ").slice(0, 300));
   ' "$t2" || echo "Couldn't read $t2 to count them."
+fi
+# Present, drawn from the presenter Claude wrote, by Playwright on this run's own service (port 45461) and home. It
+# starts the service if it isn't running and then stops it, and this script's cleanup stops it too. A failure fails
+# the run. Nothing to look at when the user script failed.
+echo "== Present, drawn from the run's presenter"
+if [ "$status" -eq 0 ]; then
+  node "$root/scripts/smoke-present.mjs" "$work" || status=1
+else
+  echo "Not looked at: the run already failed."
 fi
 exit "$status"

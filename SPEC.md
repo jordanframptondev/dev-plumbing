@@ -292,6 +292,9 @@ Every setting is defined once in code, as a Zod schema with a description. `dev-
     docs/draft.md                          # working copy: every accepted change lands here
     docs/final.md                          # written by Finalize
     docs/final.assets/                     # mockups that go with the final
+    docs/versions/v<n>/                    # an earlier version's plan, draft and items; merged.md is the draft its update left,
+                                           #   reimported/ each item its re-import changed, as it left it
+    docs/versions/v<n>.unfinished-<stamp>/ # your plan and draft from before an update that didn't finish; Remove on Versions
     items/<id>.json                        # one file per item, including diagram / table / mockup / flow data
     threads/<id>.json                      # messages, options, drafts, status
     mockups/<id>.after.html                # body markup only; the app adds the design kit
@@ -578,10 +581,13 @@ The default structure:
 
 **Three modes**
 
-1. **Present:** a full-screen, hand-drawn whiteboard (Rough.js lines, Motion animation). The system draws itself one step at a time, and each step has a caption saying what to say out loud.
-   - **Chapters:** Purpose → System flow → Data and source of truth → States → Security → Failure and retries → Rollback and blast radius.
-   - **Controls:** arrow keys to step, and **Replay**.
-   - **Built from existing data:** steps reveal parts of the project's own diagram data and add red-marker notes (e.g. "runs twice? → one per subscription per day").
+1. **Present:** a hand-drawn whiteboard (Rough.js lines, Motion animation), as wide as the page, with **Full screen** to cover the window. The system draws itself one step at a time, and each step has a caption saying what to say out loud.
+   - **Chapters:** always these seven, in this order: Purpose → System flow → Data and source of truth → States → Security → Failure and retries → Rollback and blast radius. Each has 1–8 steps; a chapter the plan doesn't touch has one step that says so.
+   - **One drawing per chapter, or none:** a diagram item, the project's tables (the Database screen's relationship strip) or a system flow (a sequence). User flows, mockups and phases aren't drawn. A chapter with no drawing writes its notes as a list.
+   - **Built from existing data:** each step reveals parts of its chapter's drawing, adding to what earlier steps drew, by typed refs (`node:`, `edge:`, `group:`; `table:`, `link:`; `lane:`, `step:`), and adds up to four marker notes in ink, slate (data), seal (risks) or moss (what's safe), e.g. "runs twice? → one per subscription per day". A line brings its two ends, a flow's step its two lanes, and a group appears with its first box.
+   - **The board:** the canvas with a faint dot grid, rough lines seeded so they look the same every time, labels in the system font. New parts draw themselves in; going back a step, or reduced motion, shows the board at once. Each chapter is framed once, around what it shows by its last step and its notes, and notes stay where they're first placed, so nothing moves between steps.
+   - **Controls:** ◀ ▶ and the arrow keys to step, across chapters; Home and End; a chapters list (beside the board from 1100 px, a menu below); **Replay** (the chapter from its first step); **Full screen** (Esc leaves; the page under it is inert). On a phone held upright, it suggests turning sideways and pressing Full screen, which then fits in one view.
+   - **Written with the defense:** the whiteboard subagent writes the presenter in the same call, from the drawings its pack lists, and the service checks every ref against the project's drawings. A defense saved before Present has no presenter, and Present offers **Regenerate**. A ref whose part is gone since is skipped.
 2. **Study:** the 13 sections as a readable page, with a table of contents, tables (e.g. source of truth), diagrams and severity labels.
 3. **Practice:** the "questions the engineer should be able to answer" as flashcards. You reveal each answer and rate yourself: *Could explain it* / *Shaky* / *Couldn't*. There's a readiness meter, and the 20-item checklist, with ticks saved in `practice.json`.
 
@@ -701,9 +707,14 @@ type WhiteboardDefense = {
   sections: { id: string; title: string; claims: Claim[];                  // the ten prose sections, in order
               tables: { title: string; columns: string[]; rows: string[][] }[];
               diagram: string | null; diagramItemId: string | null }[];
-  presenter?: { chapters: { id: string; title: string;                      // Present (Plan 7)
-               steps: { caption: string; reveal: string[];                // node/edge ids
-                        notes?: { near: string; text: string; ink: "ink" | "slate" | "seal" | "moss" }[] }[] }[] };
+  presenter?: { chapters: {                                                 // Present; a defense saved before it has none
+      id: "purpose" | "flow" | "data" | "states" | "security" | "failure" | "rollback";   // all seven, in this order
+      title: string;
+      drawing: { kind: "diagram"; itemId: string } | { kind: "tables" } | { kind: "flow"; itemId: string } | null;
+      steps: { caption: string;                                             // 1–8 steps; what to say out loud
+               reveal: string[];          // parts added: node:, edge:, group: | table:, link: | lane:, step:
+               notes: { near: string;     // a part already on the board, or "" for the board's foot
+                        text: string; ink: "ink" | "slate" | "seal" | "moss" }[] }[] }[] };   // 0–4 notes a step
   questions: { id: string; q: string; a: string; basis: Claim["basis"] }[];
   concerns: { id: string; severity: "critical" | "high" | "medium" | "low" | "info"; text: string; basis: Claim["basis"] }[];
   checklist: { id: string; text: string }[];

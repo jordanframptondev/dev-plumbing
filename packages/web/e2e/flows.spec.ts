@@ -175,9 +175,10 @@ test.describe('on a phone', () => {
     await expect(page.getByTestId('sequence')).toBeVisible();
     const cards = page.getByTestId('story-step');
     await expect(cards).toHaveCount(3);
-    const a = (await cards.nth(0).boundingBox())!;
-    const b = (await cards.nth(1).boundingBox())!;
-    expect(b.y).toBeGreaterThanOrEqual(a.y + a.height);
+    // Both from one layout: a thumbnail shrinks from its placeholder when its frame reports its size, which can land
+    // between two separate boundingBox calls.
+    const [a, b] = await cards.evaluateAll((els) => els.slice(0, 2).map((el) => el.getBoundingClientRect()).map(({ top, bottom }) => ({ top, bottom })));
+    expect(b!.top).toBeGreaterThanOrEqual(a!.bottom);
     expect(await noSideScroll(page)).toEqual([]);
   });
 
@@ -214,9 +215,10 @@ test.describe('on a tablet', () => {
     await page.goto(`${p.url}/t/flows`);
     const cards = page.getByTestId('story-step');
     await expect(cards).toHaveCount(3);
-    const [a, b, c] = await Promise.all([0, 1, 2].map(async (i) => (await cards.nth(i).boundingBox())!));
-    expect(Math.abs(a!.y - b!.y)).toBeLessThan(1);
-    expect(c!.y).toBeGreaterThanOrEqual(Math.max(a!.y + a!.height, b!.y + b!.height));
+    // All three from one layout, as in the phone test.
+    const [a, b, c] = await cards.evaluateAll((els) => els.slice(0, 3).map((el) => el.getBoundingClientRect()).map(({ top, bottom }) => ({ top, bottom })));
+    expect(Math.abs(a!.top - b!.top)).toBeLessThan(1);
+    expect(c!.top).toBeGreaterThanOrEqual(Math.max(a!.bottom, b!.bottom));
     expect(await noSideScroll(page)).toEqual([]);
   });
 });

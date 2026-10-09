@@ -209,3 +209,52 @@ Notes:
 - **Suggested answers:** for the sent Unknown (one card, or one per subscription), Claude suggested 3 options in 24 s and recommended "One card sets all of the customer's subscriptions". Finalize wasn't blocked.
 - **Runner, round 2:** `dp_whiteboard` 1 inside subagents, 3 thread subagents started by the main window (the Plan changes group, the Defense question and the unknown sent), `dp_wait` calls 4, and no importable type without a saved batch.
 - **Anything surprising / fixes:** none, and no fix was made.
+
+## Plan 7: Present, and the follow-ups
+
+Date: 2026-10-08 · Claude Code version: 2.1.294 (Claude Code)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Rounds 1 and 2 and the Whiteboard Defense still pass | yes | user log: "Claude's final arrived in 215 s: 24685 chars, 13 sections, 2 Mermaid blocks, 2 schema diffs, 2 mockup links", "Updated to v2 and re-imported in 48 s.", "Claude's Whiteboard Defense arrived in 301 s: level 3 (High risk), based on the draft (v2)", "Smoke test passed." |
+| The finalizer read the rules and the draft from its pack's files (the run fails otherwise), and its pack stayed small | yes | runner, round 1: "JSON characters in the finalize dp_context result: 13922" (Plan 6's run: 14,895), "Files from its pack the finalizer read: rulesFile yes, draftFile yes, previousFinalFile none", "Clipped items whose file the finalizer read: 0 of 0" |
+| Each item flagged as changed in v2 shows what v2 changed | yes | user log: "What v2 changed: "Table and daily reminder job": drawing; "Settings card and one-tap reorder": summary, drawing" |
+| The re-import finished for every type, and the home doesn't say otherwise | yes | user log: "Status: active, import pending: none, re-import unfinished for: none"; runner, round 2: "Importable types with no saved dp_write_items batch (should be none): none" |
+| The project home offers the catch-up exactly when settling a Plan changes thread changed the draft | yes | user log: "Catch-up: every option accepted on them kept the draft as it was, so there's nothing to catch up; the project home says one is not due" |
+| The whiteboard subagent wrote a presenter in the same call | yes | runner: "dp_whiteboard calls: 1, refused: 0", "dp_whiteboard refusals naming the presenter: 0"; user log: "Presenter: 7 chapters, 26 steps, 6 drawing something (diagram 3, tables 2, flow 1), 32 notes (ink 4, slate 5, seal 21, moss 2)" |
+| The presenter: seven chapters in order, 1–8 steps each, at least one drawing, every part it names in its chapter's drawing | yes | user log: "Drawings in the pack: diagram:architecture-system-overview (18 parts), tables (6 parts), flow:flows-daily-reminder-job (10 parts)", "Presenter: 7 chapters, 26 steps, …" and the seven chapter lines (3, 5, 4, 3, 3, 4 and 4 steps); no flaws reported |
+| The presenter, the defense and the pack stay small | yes | runner: "JSON characters in the last dp_whiteboard presenter: 7386" (under 20,000; about 12,000 asked), "… defense: 30411" (Plan 6: 25,493), "… whiteboard dp_context result: 20482" (Plan 6: 14,997) |
+| Present draws the run's presenter: every revealed part drawn, no note with a part in the foot list, no page errors, full screen fits a phone held sideways (the run fails otherwise) | yes | runner: "[present] 7 chapters, 26 steps. Parts the steps revealed, drawn: 85 of 85", "Notes with a part, listed at the board's foot (should be none): none", "Full screen on a phone held sideways: the caption and ▶ fit without scrolling", "Errors the page logged (should be none): none", "[present] Present look passed."; screenshots in `<work>/present/` (see Notes) |
+
+Not exercised by this run, and tested instead:
+- **The catch-up re-import itself:** it needs a third window, and a Plan changes answer that changed the draft. Task 7's core and service tests.
+- **Reserved ids:** Task 5.
+- **Recovery lines and leftover folders:** no update failed. Task 9.
+- **A re-import cut short:** Task 10.
+- **Present's keys, full screen and stale boards:** Task 4's unit and e2e tests; the look above checks the run's own presenter.
+
+Notes:
+- **Run:** run 1 of this plan, and it passed (exit 0, no fixes needed to the scripts or the app).
+- **Presenter:** 26 steps and 32 notes. Chapters: Purpose draws nothing (3 steps); System flow draws "System overview" (5 steps, 9 of 18 parts); Data and source of truth draws "Tables" (4 steps, 4 of 6 parts); States draws "Tables" (3 steps, 2 of 6); Security draws "System overview" (3 steps, 3 of 18); Failure and retries draws "Daily reminder job" (4 steps, 6 of 10); Rollback and blast radius draws "System overview" (4 steps, 7 of 18). The presenter is 7,386 JSON characters, inside a defense of 30,411; the whiteboard pack was 20,482 (the drawings added about 5,500 to Plan 6's 14,997). No refusals.
+- **What v2 changed:** "Table and daily reminder job" showed its drawing; "Settings card and one-tap reorder" showed its summary and drawing. 2 of 13 kept items were flagged as changed.
+- **Catch-up:** Claude recommended "Keep my draft" on the one Plan changes thread, as in Plans 5 and 6, so settling changed nothing and the home correctly did not offer a catch-up.
+- **Finalizer's pack:** 13,922 JSON characters (rules, draft and last final named as files, not inline), under Plan 6's 14,895. It read the rules file and the draft; the first final has no previous final. No item body was clipped.
+- **Screenshots** (the run's temp folder `$TMPDIR/dp-smoke-9ZE0bd/present/` isn't kept): `1280-1-purpose.png`, `1280-2-flow.png`, `1280-3-data.png`, `1280-4-states.png`, `1280-5-security.png`, `1280-6-failure.png`, `1280-7-rollback.png` (each chapter's last step at 1280 x 800), `fullscreen-1280.png`, `fullscreen-812x375.png` and `dark-1280.png`. The look's checks all passed (85 of 85 revealed parts drawn, no notes in the foot list, no page errors). I did not view the images myself, so how the boards looked is not recorded here.
+- **Surprising / fixes:** none in the run. While running the full check for this task, `flows.spec.ts`'s phone test (and the tablet one) failed repeatedly. It was a pre-existing race in the tests (two separate `boundingBox()` calls straddling a thumbnail shrinking from its placeholder), not a Plan 7 regression; both tests now read their cards from one layout, and that fix is part of this task.
+- **The user log's new lines** (`$TMPDIR` shortened):
+
+```
+[user 05:23:21]   Status: active, import pending: none, re-import unfinished for: none
+[user 05:23:21]   What v2 changed: "Table and daily reminder job": drawing; "Settings card and one-tap reorder": summary, drawing
+[user 05:23:21] Catch-up: every option accepted on them kept the draft as it was, so there's nothing to catch up; the project home says one is not due
+[user 05:28:22]   Drawings in the pack: diagram:architecture-system-overview (18 parts), tables (6 parts), flow:flows-daily-reminder-job (10 parts)
+[user 05:28:22]   Presenter: 7 chapters, 26 steps, 6 drawing something (diagram 3, tables 2, flow 1), 32 notes (ink 4, slate 5, seal 21, moss 2)
+[user 05:28:22]   1. Purpose: 3 steps, draws nothing, 2 notes
+[user 05:28:22]   2. System flow: 5 steps, draws "System overview" (diagram:architecture-system-overview), revealing 9 of its 18 parts, 5 notes
+[user 05:28:22]   3. Data and source of truth: 4 steps, draws "Tables" (tables), revealing 4 of its 6 parts, 5 notes
+[user 05:28:22]   4. States: 3 steps, draws "Tables" (tables), revealing 2 of its 6 parts, 3 notes
+[user 05:28:22]   5. Security: 3 steps, draws "System overview" (diagram:architecture-system-overview), revealing 3 of its 18 parts, 4 notes
+[user 05:28:22]   6. Failure and retries: 4 steps, draws "Daily reminder job" (flow:flows-daily-reminder-job), revealing 6 of its 10 parts, 7 notes
+[user 05:28:22]   7. Rollback and blast radius: 4 steps, draws "System overview" (diagram:architecture-system-overview), revealing 7 of its 18 parts, 6 notes
+[user 05:28:56] Whiteboard Defense: written in 301 s, level 3, 15 questions, 9 concerns, 84 claims, 26 presenter steps; asked 1, sent 1; out of date: Out of date: the plan changed since this was generated.
+```

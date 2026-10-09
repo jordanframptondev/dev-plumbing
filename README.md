@@ -2,7 +2,7 @@
 
 Plumb a feature plan before you build it. dev-plumbing turns a plan (for example a Superpowers spec) into a local web app where every question, concern, diagram and schema change has its own thread with Claude.
 
-**Status:** the Claude loop, the visual screens, Finalize spec, bringing in a changed plan and the Whiteboard Defense work. Present, which draws the Whiteboard Defense as an animated whiteboard, comes next. The design is in [SPEC.md](SPEC.md), and the plans are in [docs/superpowers/plans](docs/superpowers/plans).
+**Status:** v1 is complete. The Claude loop, the visual screens, Finalize spec, bringing in a changed plan and the Whiteboard Defense, with Present, all work. The design is in [SPEC.md](SPEC.md), and the plans are in [docs/superpowers/plans](docs/superpowers/plans).
 
 ## Requirements
 
@@ -43,14 +43,15 @@ Setup installs the Claude Code plugin for your user (skip it with `--no-plugin`)
   - the repo's changes are merged into your draft;
   - the importers run again, keeping your items, threads and answers.
 
-  Where you and the repo both changed the same passage, your draft keeps your text, and a **Plan changes** thread offers Claude's merged version, the repo's version and your own, each one click to accept. When the repo's version is mostly a rewrite, Claude also offers **Start the draft from v2**. **Not now** opens the project as it was, and Claude asks again next time.
+  Where you and the repo both changed the same passage, your draft keeps your text, and a **Plan changes** thread offers Claude's merged version, the repo's version and your own, each one click to accept. When the repo's version is mostly a rewrite, Claude also offers **Start the draft from v2**. **Not now** opens the project as it was, and Claude asks again next time. Once every Plan changes thread is settled, and settling one changed your draft, the next `/dev-plumbing` re-imports once more, so the items catch up with what you settled. Each item a re-import changed shows **What v2 changed** in its thread.
 - **Whiteboard Defense:** "If you ship it, you should be able to explain it." The header's **Whiteboard Defense** button opens its page, where **Generate** asks Claude to write a defense of the plan, from the final while it's current, else the draft. It follows `outputs/whiteboard-defense.md`: a review level, 13 sections, the questions you should be able to answer, the release concerns and its 20-line checklist, with every statement marked **Known**, **Inferred**, **Unknown** or **Verify before release**.
   - **Study** reads it as a page. **Ask Claude about this**, on any section, question or concern, starts a thread about it. **Send to Questions** turns an unknown into a question, and **Send to Concerns** turns a release concern into a concern, each with Claude's suggested answers.
   - **Practice** shows the questions as flashcards: show the answer, rate yourself, and the next card comes up. Space, 1 to 3 and the arrow keys work too, and **Only shaky and couldn't** keeps the cards you're not sure of. A readiness meter, half flashcards and half checklist, sits with the checklist.
+  - **Present** draws the plan on a hand-drawn whiteboard, one step at a time, in seven chapters from Purpose to Rollback and blast radius: the project's own diagram, tables or system flow, with a caption to say out loud and marker notes. ◀ ▶ and the arrow keys step through it, **Replay** draws the chapter again, and **Full screen** covers the window. On a phone, turn it sideways and use Full screen.
   - When the plan changes, it's marked **Out of date**, and **Regenerate** writes it again. **Export .md** writes it into the repo as `<name>.whiteboard-defense.md`, next to the plan, with its diagram drawn in Mermaid.
 - **Keep chatting:** after two minutes the listening call moves to the background, so you can keep using the Claude window.
 - **No arguments:** `/dev-plumbing` lists this repo's plumbing projects to reopen.
-- **Keep this checkout:** the plugin and the app both run from its build here. After you pull, run `pnpm build`, restart the app (`dev-plumbing stop`, then `dev-plumbing start`), and start a new Claude Code session.
+- **Keep this checkout:** the plugin and the app both run from its build here. After you pull, run `pnpm build`, restart the app (`dev-plumbing stop`, then `dev-plumbing start`), and restart every Claude Code session that was open while you updated, so it picks up the new agents. A session that kept running uses the old ones: after this update, its Whiteboard Defense would be refused with "presenter is missing. Send the seven chapters too."
 
 How the app, the plugin, its agents and its tools fit together is explained in [docs/how-it-works.md](docs/how-it-works.md).
 

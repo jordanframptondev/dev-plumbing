@@ -1,8 +1,9 @@
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { defenseInput, importProject, writeDefense, type TestItem } from './claude';
-import { noSideScroll, readJson } from './env';
+import { e2eTmp, noSideScroll, readJson, repoRoot } from './env';
 
 const system: TestItem = {
   key: 'system',
@@ -343,4 +344,31 @@ test('a defense written before Present says so, and Regenerate is the main actio
   const regenerate = page.getByTestId('defense-generate');
   await expect(regenerate).toHaveText('Regenerate');
   await expect(regenerate).toHaveClass(/bg-button/);
+});
+
+test("the smoke run's look at Present passes on a real board", async () => {
+  test.setTimeout(120_000);
+  const p = await presented('present-smoke');
+  const tmp = e2eTmp();
+  // As smoke-claude.sh runs it: this run's dev-plumbing home, and your own HOME, where Playwright keeps its browsers.
+  // The service is up, so it leaves it running.
+  const env = { ...process.env, DEV_PLUMBING_HOME: path.join(tmp, '.dev-plumbing') };
+  const run = spawnSync(process.execPath, [path.join(repoRoot, 'scripts', 'smoke-present.mjs'), tmp, p.project], { env, encoding: 'utf8' });
+  expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
+  expect(run.stdout).toContain('Parts the steps revealed, drawn: 9 of 9');
+  expect(run.stdout).toContain("Notes with a part, listed at the board's foot (should be none): none");
+  expect(run.stdout).toContain('Full screen on a phone held sideways: the caption and ▶ fit without scrolling');
+  expect(run.stdout).toContain('Present look passed.');
+  expect(fs.readdirSync(path.join(tmp, 'present')).sort()).toEqual([
+    '1280-1-purpose.png',
+    '1280-2-flow.png',
+    '1280-3-data.png',
+    '1280-4-states.png',
+    '1280-5-security.png',
+    '1280-6-failure.png',
+    '1280-7-rollback.png',
+    'dark-1280.png',
+    'fullscreen-1280.png',
+    'fullscreen-812x375.png',
+  ]);
 });

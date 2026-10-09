@@ -4,10 +4,12 @@
 // final, accepts it into the scratch repo and checks the copy. Then the plan changes in the repo: it rewrites a line
 // round 1 changed in the draft, and a section the draft never changed, removes a small one, and asks the runner for a
 // second /dev-plumbing. It checks the update to v2, the merge, the re-import and the Plan changes threads, and accepts
-// Claude's merged version on each. Last, it generates the Whiteboard Defense, checks it against the rules file, asks
-// Claude about its Security model and sends one of its unknowns to Questions. Exits non-zero if anything doesn't happen
-// in time, if a route answers with an error, if a visual type has items without drawings, or if the final, the update
-// or the Whiteboard Defense didn't land.
+// Claude's merged version on each, and checks what the update left: what v2 changed on each changed item, a re-import
+// that finished, and whether a catch-up re-import is due. Last, it generates the Whiteboard Defense, checks it against
+// the rules file and its presenter against the project's drawings, asks Claude about its Security model and sends one
+// of its unknowns to Questions. Exits non-zero if anything doesn't happen in time, if a route answers with an error, if
+// a visual type has items without drawings, or if the final, the update, what the update left or the Whiteboard
+// Defense didn't land.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -364,11 +366,14 @@ await until('the Plan changes threads to come back from Claude', async () => {
 }, 15);
 
 const wrong = [];
+// What the update leaves behind (what v2 changed on an item, a re-import that didn't finish, the catch-up) is checked as
+// it comes up, but failed only at the end, so the Whiteboard Defense still runs.
+const followUps = [];
 const v2Home = (await call(P)).body;
 const project = v2Home.project;
 const v2 = project.versions.find((v) => v.n === 2);
 log(`Versions: ${project.versions.map((v) => `v${v.n}${v.merge ? ` (merge: ${v.merge.clean} clean, ${v.merge.conflicts} in conflict)` : ''}`).join(', ')}`);
-log(`  Status: ${project.status}, import pending: ${project.importPending.join(', ') || 'none'}`);
+log(`  Status: ${project.status}, import pending: ${project.importPending.join(', ') || 'none'}, re-import unfinished for: ${v2Home.importIncomplete?.titles.join(', ') || 'none'}`);
 for (const t of v2Home.types) log(`  ${t.title}: ${t.importFailed ? "didn't finish" : t.noChanges ? 'no changes' : `${t.itemCount} items`}`);
 if (!v2) wrong.push('project.versions has no v2.');
 // The update changed the draft, so the finalized project is active again, and the Finalize page says v2 came in.
@@ -381,6 +386,8 @@ if (!conflictSection) wrong.push("Round 1 didn't change any line of the plan in 
 else if (v2 && !v2.merge?.conflicts) wrong.push(`v2 rewrote a line in ${conflictSection} that the draft changed too, but the merge found no conflict.`);
 if (project.reimporting) wrong.push('project.reimporting is still set.');
 if (project.importPending.length) wrong.push(`Still waiting for importers: ${project.importPending.join(', ')}.`);
+// Every importer's batch came, so the project home has no "didn't finish" line.
+if (v2Home.importIncomplete) followUps.push(`The project home says the v${v2Home.importIncomplete.version} re-import didn't finish for ${v2Home.importIncomplete.titles.join(', ')}.`);
 const versionList = (await call(`${P}/versions`)).body.versions;
 log(`  Versions list: ${versionList.map((v) => `v${v.n}${v.current ? ' (current)' : ''}`).join(', ')}`);
 if (versionList[0]?.n !== 2 || !versionList[0].current) wrong.push("The Versions list doesn't start with v2 as the current version.");
@@ -419,11 +426,21 @@ const lost = imported.filter((r) => !v2ById.has(r.id));
 const removedItems = rowsV2.filter((r) => r.removedIn !== null);
 const newItems = rowsV2.filter((r) => r.type !== 'plan-changes' && !rowsV1.some((x) => x.id === r.id));
 let changedCount = 0;
+// An item flagged as changed in v2 shows "What v2 changed" in its thread: the parts that differ from its copy in
+// docs/versions/v1/items/ (summary, details, fields, drawing), or "Nothing else changed." when only the flag was set.
+const CHANGE_PARTS = [['summary', 'summary'], ['body', 'details'], ['fields', 'fields'], ['drawing', 'drawing']];
+const whatChanged = [];
 for (const r of kept.filter((x) => v2ById.get(x.id).flagged)) {
   const d = (await call(`${P}/threads/${r.threadId}`)).body;
-  if (d.item.flags?.some((f) => f.reason === "Changed in the plan's v2.")) changedCount++;
+  if (!d.item.flags?.some((f) => f.reason === "Changed in the plan's v2.")) continue;
+  changedCount++;
+  const vc = d.versionChange ?? null;
+  const parts = vc ? CHANGE_PARTS.filter(([k]) => vc[k] !== null).map(([, label]) => label) : [];
+  whatChanged.push(`"${r.title}": ${!vc ? 'nothing shown' : parts.length ? parts.join(', ') : 'nothing else changed'}`);
+  if (vc?.version !== 2) followUps.push(`"${r.title}" is flagged as changed in v2, but its thread ${vc ? `shows what v${vc.version} changed` : "doesn't show what v2 changed"}.`);
 }
 log(`Re-import: ${imported.length} imported items before. ${kept.length} kept their ids (${changedCount} flagged as changed in v2), ${newItems.length} new, ${removedItems.length} removed from the plan, ${lost.length} gone.`);
+if (whatChanged.length) log(`  What v2 changed: ${whatChanged.join('; ')}`);
 for (const r of removedItems) log(`  Removed from the plan: "${r.title}" (${r.type}), ${r.status}${r.flagged ? ', flagged' : ''}, removedIn ${r.removedIn}`);
 if (removedSection && !removedItems.length) log(`  No item came only from ${removedSection}, so nothing was parked.`);
 if (imported.length && !kept.length) wrong.push('No imported item kept its id: the importers made everything again.');
@@ -443,6 +460,8 @@ if (takenOut.length) wrong.push(`Answered items removed from the plan although t
 
 // Plan changes: one thread per conflict. Claude proposed a merged version on each, and you accept it.
 const conflicts = rowsV2.filter((r) => r.type === 'plan-changes');
+// The Plan changes threads whose accepted option changed the draft. Only these call for a catch-up (Task 7).
+const editedBySettling = [];
 log(`Plan changes: ${conflicts.length} thread${conflicts.length === 1 ? '' : 's'}`);
 if (v2?.merge && conflicts.length !== v2.merge.conflicts) wrong.push(`v2 counted ${v2.merge.conflicts} conflicts, but there are ${conflicts.length} Plan changes threads.`);
 for (const r of conflicts) {
@@ -457,7 +476,27 @@ for (const r of conflicts) {
   const accepted2 = await call(`${P}/submit`, 'POST', { scope: 'thread', threadId: r.threadId });
   log(`  "${r.title}": accepted Claude's "${pick.label}": ${accepted2.ok ? accepted2.body.message : accepted2.body.error}`);
   if (!accepted2.ok || accepted2.body.resolved !== 1) wrong.push(`Claude's merged version on "${r.title}" wasn't applied.`);
+  else if (pick.change.md?.length) editedBySettling.push(r.title);
 }
+
+// The catch-up. Once every Plan changes thread of v2 is settled, the next /dev-plumbing re-imports once more, so the
+// items catch up with what was settled, but only when settling one changed the draft: an accepted option with edits.
+// Keep my draft, which Claude recommended in the earlier runs, changes nothing, and answers to other items don't
+// count. This run doesn't start a third window, so it checks that the project home offers the catch-up exactly then.
+const settledHome = must(P, await call(P));
+const unsettled = (await itemRows()).filter((r) => r.type === 'plan-changes' && r.status !== 'resolved' && r.status !== 'parked');
+/** Why no catch-up is due, or null when one is. */
+const noCatchUp = !v2?.merge?.conflicts
+  ? 'v2 had nothing to settle'
+  : unsettled.length
+    ? `${unsettled.length} Plan changes threads aren't settled`
+    : !editedBySettling.length
+      ? "every option accepted on them kept the draft as it was, so there's nothing to catch up"
+      : null;
+log(`Catch-up: ${noCatchUp ?? `every Plan changes thread is settled, and settling changed the draft (${editedBySettling.map((t) => `"${t}"`).join(', ')})`}; the project home says one is ${settledHome.catchUpDue ? 'due' : 'not due'}`);
+if (typeof settledHome.catchUpDue !== 'boolean') followUps.push(`The project home's catchUpDue is ${JSON.stringify(settledHome.catchUpDue)}, not true or false.`);
+else if (settledHome.catchUpDue && noCatchUp !== null) followUps.push(`The project home offers a catch-up, but ${noCatchUp}.`);
+else if (!settledHome.catchUpDue && noCatchUp === null) followUps.push("The project home doesn't offer a catch-up, though every Plan changes thread of v2 is settled and settling changed the draft.");
 
 if (wrong.length) throw new Error(`The update didn't land:\n- ${wrong.join('\n- ')}`);
 
@@ -513,7 +552,8 @@ const defenseView = await until("Claude's Whiteboard Defense", async () => {
     log(`  A Claude window picked it up after ${Math.round((Date.now() - generatedAt) / 1000)} s.`);
   }
   return v.request?.state === 'failed' || (v.defense && v.defense.id !== firstView.defense?.id) ? v : null;
-}, 15);
+  // Up to three resends of a defense with its presenter, on opus.
+}, 25);
 if (defenseView.request?.state === 'failed') throw new Error(`The whiteboard subagent gave up: ${defenseView.request.reason}`);
 const generatedIn = Math.round((Date.now() - generatedAt) / 1000);
 
@@ -551,6 +591,70 @@ if (defense.basedOn.doc !== expectDoc || defense.basedOn.version !== currentVers
   flaws.push(`The defense is based on the ${defense.basedOn.doc} (v${defense.basedOn.version}), not the ${expectDoc} (v${currentVersion}).`);
 }
 if (defenseView.stale) flaws.push(`The defense was out of date as soon as it was saved: ${defenseView.stale}`);
+
+// The presenter, which Present draws: the seven chapters in order, each with one to eight steps, and at least one that
+// draws something. A chapter draws one of the project's drawings, or none, and every part its steps reveal, and every
+// part a note is near, is one of that drawing's parts. The service checked all this before it saved the defense. Here
+// it's checked against the drawings of the whiteboard pack, which dp_context's route gives without writing anything:
+// the defense isn't out of date, so they're the drawings the subagent had. Each drawing also has to be an item the
+// project has now, on the right screen and not parked, as the browser's routes list them.
+const PRESENT_CHAPTERS = [
+  ['purpose', 'Purpose'],
+  ['flow', 'System flow'],
+  ['data', 'Data and source of truth'],
+  ['states', 'States'],
+  ['security', 'Security'],
+  ['failure', 'Failure and retries'],
+  ['rollback', 'Rollback and blast radius'],
+];
+const NOTE_INKS = ['ink', 'slate', 'seal', 'moss'];
+/** A drawing as the pack keys it: diagram:<item id>, tables or flow:<item id>. */
+const drawingKey = (d) => (d.kind === 'tables' ? 'tables' : `${d.kind}:${d.itemId}`);
+const presenter = defense.presenter ?? null;
+const presenterSteps = presenter ? presenter.chapters.reduce((n, c) => n + c.steps.length, 0) : 0;
+if (!presenter) flaws.push("The defense has no presenter, so Present can't show it.");
+else {
+  const chapters = presenter.chapters;
+  const pack = must('/api/claude/context', await call('/api/claude/context', 'POST', { repo: 'acme-app', project: project.id, whiteboard: true }));
+  const options = new Map((pack.drawings ?? []).map((o) => [drawingKey(o.drawing), o]));
+  const screens = new Map(must(P, await call(P)).types.map((t) => [t.id, t.screen]));
+  const rows = await itemRows();
+  const live = (r) => r.status !== 'parked' && r.removedIn === null && r.data !== null;
+  /** Why a chapter's drawing isn't one the project has now, or null when it is. */
+  const gone = (d) => {
+    if (d.kind === 'tables') return rows.some((r) => screens.get(r.type) === 'database' && live(r)) ? null : 'the project has no tables to draw';
+    const row = rows.find((r) => r.id === d.itemId);
+    if (!row) return `there's no item ${d.itemId}`;
+    if (!live(row)) return `${d.itemId} is parked, removed from the plan or has no drawing`;
+    if (d.kind === 'diagram' && screens.get(row.type) !== 'diagram') return `${d.itemId} isn't a diagram`;
+    if (d.kind === 'flow' && (screens.get(row.type) !== 'flows' || !['system', 'both'].includes(row.data.kind))) return `${d.itemId} isn't a system flow`;
+    return null;
+  };
+  const drawn = chapters.filter((c) => c.drawing);
+  const notes = chapters.flatMap((c) => c.steps.flatMap((s) => s.notes));
+  log(`  Drawings in the pack: ${[...options.values()].map((o) => `${drawingKey(o.drawing)} (${o.parts.length} parts)`).join(', ') || 'none'}`);
+  log(`  Presenter: ${chapters.length} chapters, ${presenterSteps} steps, ${drawn.length} drawing something (${['diagram', 'tables', 'flow'].map((k) => `${k} ${drawn.filter((c) => c.drawing.kind === k).length}`).join(', ')}), ${notes.length} notes (${NOTE_INKS.map((k) => `${k} ${notes.filter((x) => x.ink === k).length}`).join(', ')})`);
+  if (chapters.map((c) => c.id).join() !== PRESENT_CHAPTERS.map(([id]) => id).join()) flaws.push(`The presenter's chapters are ${chapters.map((c) => c.id).join(', ')}, not the seven in order.`);
+  else if (chapters.some((c, i) => c.title !== PRESENT_CHAPTERS[i][1])) flaws.push(`The presenter's chapter titles are ${chapters.map((c) => `"${c.title}"`).join(', ')}, not Present's.`);
+  if (!drawn.length) flaws.push('No chapter of the presenter draws anything.');
+  /** Parts a step names that aren't in its chapter's drawing. */
+  const strays = [];
+  for (const [i, c] of chapters.entries()) {
+    const option = c.drawing ? options.get(drawingKey(c.drawing)) : undefined;
+    const parts = new Set((option?.parts ?? []).map((p) => p.ref));
+    const revealed = c.steps.reduce((n, s) => n + s.reveal.length, 0);
+    log(`  ${i + 1}. ${c.title}: ${c.steps.length} steps, ${c.drawing ? `draws ${option ? `"${option.title}"` : 'something not in the pack'} (${drawingKey(c.drawing)}), revealing ${revealed} of its ${parts.size} parts` : 'draws nothing'}, ${c.steps.reduce((n, s) => n + s.notes.length, 0)} notes`);
+    if (c.steps.length < 1 || c.steps.length > 8) flaws.push(`${c.title} has ${c.steps.length} steps; a chapter has one to eight.`);
+    if (c.drawing && !option) flaws.push(`${c.title} draws ${drawingKey(c.drawing)}, which isn't one of the pack's drawings.`);
+    const why = c.drawing ? gone(c.drawing) : null;
+    if (why) flaws.push(`${c.title} draws ${drawingKey(c.drawing)}, but ${why}.`);
+    for (const [s, step] of c.steps.entries()) {
+      for (const ref of step.reveal) if (!parts.has(ref)) strays.push(`${c.id} step ${s + 1} reveals "${ref}"`);
+      for (const note of step.notes) if (note.near !== '' && !parts.has(note.near)) strays.push(`${c.id} step ${s + 1} has a note near "${note.near}"`);
+    }
+  }
+  if (strays.length) flaws.push(`The presenter names parts that aren't in its chapter's drawing: ${strays.join('; ')}.`);
+}
 
 // Ask Claude about 5. Security model, as "Ask Claude about this" does. The question is the thread's first message,
 // sent like Send this thread. Claude answers in a Defense thread, which never offers to change the draft. When the answer
@@ -630,6 +734,9 @@ const endView = await whiteboardView();
 if (!endView.asked.some((l) => l.threadId === askThread)) flaws.push("The page doesn't list the thread that asked about the Security model.");
 if (sentThread && !endView.sent.some((l) => l.threadId === sentThread)) flaws.push("The page doesn't show what was sent as sent.");
 await notOnFinalize('at the end', askThread);
-log(`Whiteboard Defense: written in ${generatedIn} s, level ${defense.level}, ${defense.questions.length} questions, ${defense.concerns.length} concerns, ${claims.length} claims; asked ${endView.asked.length}, sent ${endView.sent.length}; out of date: ${endView.stale ?? 'no'}`);
-if (flaws.length) throw new Error(`The Whiteboard Defense isn't right:\n- ${flaws.join('\n- ')}`);
+log(`Whiteboard Defense: written in ${generatedIn} s, level ${defense.level}, ${defense.questions.length} questions, ${defense.concerns.length} concerns, ${claims.length} claims, ${presenterSteps} presenter steps; asked ${endView.asked.length}, sent ${endView.sent.length}; out of date: ${endView.stale ?? 'no'}`);
+const failures = [];
+if (followUps.length) failures.push(`What the update left isn't right:\n- ${followUps.join('\n- ')}`);
+if (flaws.length) failures.push(`The Whiteboard Defense isn't right:\n- ${flaws.join('\n- ')}`);
+if (failures.length) throw new Error(failures.join('\n'));
 log('Smoke test passed.');
