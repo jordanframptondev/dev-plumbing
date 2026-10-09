@@ -43,8 +43,8 @@ const RULES = `## What to look for
 /**
  * Defense ships in code, like Plan changes: it needs no setup, and it's never imported, listed among the rules files,
  * turned off or put on the Finalize checklist, and never goes into the final. Its order puts it after every shipped
- * type, and the navigation shows it only once the project has a Defense item. loadConfig adds it, unless the user has
- * their own plumbing/defense.md.
+ * type, and the navigation shows it only once the project has a Defense item. loadConfig always adds it, and its id is
+ * kept for it: a plumbing/defense.md is reported and ignored.
  */
 export const DEFENSE_TYPE: PlumbingType = {
   id: DEFENSE,

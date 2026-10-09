@@ -35,7 +35,8 @@ const RULES = `## What to look for
 
 /**
  * Plan changes ships in code, not as a rules file: it needs no setup, and it's never imported, listed among the rules
- * files or turned off. loadConfig adds it, unless the user has their own plumbing/plan-changes.md.
+ * files or turned off. loadConfig always adds it, and its id is kept for it: a plumbing/plan-changes.md is reported and
+ * ignored.
  */
 export const PLAN_CHANGES_TYPE: PlumbingType = {
   id: PLAN_CHANGES,
@@ -55,8 +56,7 @@ export const PLAN_CHANGES_TYPE: PlumbingType = {
 
 /**
  * The types an import (or a re-import) runs an importer for: the enabled ones that aren't built in. Plan changes items
- * are made by an update and Defense items by the Whiteboard Defense page, never by an importer, so a user's own
- * plan-changes.md or defense.md isn't imported either.
+ * are made by an update and Defense items by the Whiteboard Defense page, never by an importer.
  */
 export function importableTypes(types: PlumbingType[]): PlumbingType[] {
   return types.filter((t) => t.enabled && !t.builtIn && t.id !== PLAN_CHANGES && t.id !== DEFENSE);
