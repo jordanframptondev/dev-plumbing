@@ -145,6 +145,13 @@ export type DiffSegment = {
   changedBy?: { changeId: string; threadId: string; summary: string; threadTitle: string }[];
 };
 export type FieldChange = { field: string; before: string; after: string };
+/**
+ * What the newest plan version that changed an item changed in it: its summary, body, fields (as `key: value` lines)
+ * and drawing (as summary lines), each as a line diff from the item before that version's re-import to the item as the
+ * re-import left it, or null when that part is the same. `since`: the re-import kept no copy (it ran before Plan 7),
+ * so it's compared with the item as it is now, which may hold changes made after it.
+ */
+export type ItemVersionChange = { version: number; since: boolean; summary: DiffSegment[] | null; body: DiffSegment[] | null; fields: DiffSegment[] | null; drawing: DiffSegment[] | null };
 export type ChangePreview = {
   md: DiffSegment[] | null;
   /** `data` is set when a patch changes a drawn item's data: what it does, in words, and the proposed data. */
@@ -167,6 +174,8 @@ export type ThreadDetail = {
   checks: DataChecks | null;
   /** For a pin ("Ask about this box", + Pin): the item it's on. */
   anchorParent: { itemId: string; threadId: string; title: string; typeId: string } | null;
+  /** What the newest plan version whose re-import changed the item changed in it, or null when none did. */
+  versionChange: ItemVersionChange | null;
 };
 export type SubmitResponse = { resolved: number; sent: number; skipped: { threadId: string; reason: string }[]; listening: ListeningState; message: string };
 export type ChangeEntry = { id: string; at: string; kind: 'small-edit' | 'accept'; summary: string; state: ChangeState; threadId: string; threadTitle: string };

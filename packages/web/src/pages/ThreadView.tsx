@@ -9,6 +9,7 @@ import { StatusMark } from '../components/StatusMark';
 import { ItemCard } from './ItemCard';
 import { MessageList } from './MessageList';
 import { ReviewedMark } from './ReviewedMark';
+import { VersionChange } from './VersionChange';
 
 const STATUS_TEXT: Record<DisplayStatus, string> = {
   your_turn: 'Your turn',
@@ -44,6 +45,7 @@ function ThreadBody() {
         ‹ {d.type.title}
       </Link>
       <ItemCard detail={d} repo={repo} project={project} />
+      {d.versionChange && <VersionChange change={d.versionChange} />}
       <div className="mt-5 flex items-center gap-2">
         <StatusMark status={status} />
         <span className="text-[12px] text-ink-2" data-testid="thread-status">

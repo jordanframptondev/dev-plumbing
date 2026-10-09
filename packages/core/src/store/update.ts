@@ -165,7 +165,8 @@ async function removeSnapshot(dir: string, n: number): Promise<string[]> {
 /**
  * When putting an update back left a changed working file as it is, moves that update's snapshot and journal to
  * docs/versions/v<n>.unfinished-<UTC time>/, in one rename: nothing in them is lost, and v<n> is free for the next
- * update's snapshot. A merged.md from the update that brought v<n> in belongs to v<n>, so it goes back there.
+ * update's snapshot. A merged.md from the update that brought v<n> in, and the reimported/ copies its re-import kept,
+ * belong to v<n>, so they go back there.
  * Returns the new folder, relative to the project.
  */
 async function setAside(dir: string, n: number, now: Date): Promise<string> {
@@ -175,11 +176,12 @@ async function setAside(dir: string, n: number, now: Date): Promise<string> {
   const folder = docPath(dir, `docs/versions/v${n}`);
   const aside = docPath(dir, rel);
   await fs.rename(folder, aside);
-  if (await lstat(path.join(aside, 'merged.md'))) {
+  for (const own of ['merged.md', 'reimported']) {
+    if (!(await lstat(path.join(aside, own)))) continue;
     // If it can't go back, it stays with the rest: nothing is lost, and v<n> isn't left as an empty folder.
     await fs
       .mkdir(folder, { recursive: true })
-      .then(() => fs.rename(path.join(aside, 'merged.md'), path.join(folder, 'merged.md')))
+      .then(() => fs.rename(path.join(aside, own), path.join(folder, own)))
       .catch(() => fs.rmdir(folder).catch(quiet));
   }
   return rel;

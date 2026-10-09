@@ -337,7 +337,7 @@ const DIAGRAM_KIND = { system: 'System diagram', data_flow: 'Data flow diagram' 
 const FLOW_KIND = { user: 'User flow', system: 'System flow', both: 'User and system flow' } as const;
 
 /** A short phrase saying what an item's drawing holds, or null when it has none, or none that parses. */
-function dataSummary(item: Item, type: PlumbingType | undefined): string | null {
+export function dataSummary(item: Item, type: PlumbingType | undefined): string | null {
   const kind = type ? dataKindOf(type) : null;
   if (!kind || item.data === undefined) return null;
   if (kind === 'diagram') {

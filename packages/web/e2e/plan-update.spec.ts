@@ -30,8 +30,10 @@ test("a passage both sides changed becomes a Plan changes thread, and a removed 
       project: p.project,
       type: t.id,
       cwd: fixtureRepo(),
-      // Questions says v2 took out the part How long to keep reminder rows? came from. Which channels? is untouched.
-      ...(t.id === 'questions' ? { removed: ['log'] } : { noChanges: 'Nothing changed for this type.' }),
+      // Questions says v2 took out the part How long to keep reminder rows? came from, and Which channels? now says push.
+      ...(t.id === 'questions'
+        ? { items: [{ key: 'channels', summary: 'SMS, push or both.' }], removed: ['log'] }
+        : { noChanges: 'Nothing changed for this type.' }),
     });
   }
   const [conflict] = (await api(`${P}/types/plan-changes`)).items;
@@ -96,6 +98,17 @@ test("a passage both sides changed becomes a Plan changes thread, and a removed 
   await expect(parked.getByRole('img', { name: 'Parked' })).toBeVisible();
   await expect(parked.getByTestId('removed-from-plan')).toHaveText('· removed from the plan in v2');
   await expect(page.getByTestId('removed-from-plan')).toHaveCount(1);
+
+  // Which channels? changed in v2: its thread says what, folded away until you open it.
+  await page.goto(`${p.url}/th/t-questions-channels`);
+  const changed = page.getByTestId('version-change');
+  await expect(changed.getByText('What v2 changed', { exact: true })).toBeVisible();
+  await expect(changed.getByRole('region', { name: 'Summary' })).toBeHidden();
+  await changed.getByText('What v2 changed', { exact: true }).click();
+  const summary = changed.getByRole('region', { name: 'Summary' });
+  await expect(summary).toContainText('− SMS, email or both.');
+  await expect(summary).toContainText('+ SMS, push or both.');
+  await expect(changed.getByRole('heading')).toHaveText(['Summary']);
 
   // Finalize leaves it out, and says why. The settled conflict no longer blocks.
   await page.goto(`${p.url}/finalize`);

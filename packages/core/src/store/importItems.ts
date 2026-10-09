@@ -1,9 +1,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { writeJsonAtomic } from '../atomic';
 import { dataKindOf, dataProblems, parseData, type CodeRef, type ImportBatch, type Item, type Message, type PlumbingProject, type PlumbingType } from '../schemas';
 import { stable } from './changes';
 import { statusWhenUnparked } from './decisions';
-import { InputError, newId, readDocText, readItems, readProjectFile, readThread, writeItem, writeProjectFile, writeThread } from './io';
+import { docPath, InputError, newId, readDocText, readItems, readProjectFile, readThread, writeItem, writeProjectFile, writeThread } from './io';
 import { withFlag } from './reviewed';
 import { fieldProblems, itemDataKinds, messageProblems, nothingSaved, optionDataProblems } from './validate';
 
@@ -68,6 +69,12 @@ const withoutEmpty = (item: Item): Item =>
   ) as Item;
 
 const systemLine = (now: Date, text: string): Message => ({ id: newId('m', now), at: now.toISOString(), author: 'system', text });
+
+/**
+ * Where a re-import of v<n> keeps an item it changed, as it left it, beside v<n>'s merged.md: "What v<n> changed"
+ * (itemVersionChange) compares it with the item before v<n>, so changes accepted afterwards don't show.
+ */
+export const reimportedRel = (n: number, itemId: string) => `docs/versions/v${n}/reimported/${itemId}.json`;
 /** What a catch-up (Task 7) says on a changed item's thread: the change came from your settled Plan changes. */
 const CAUGHT_UP = 'Updated to match your settled Plan changes.';
 
@@ -86,12 +93,13 @@ async function reimportItem(dir: string, old: Item, given: Given, opening: Messa
   if (!back && !changed) return;
   const thread = await readThread(dir, old.threadId).catch(() => null);
   const { removedIn: _removedIn, ...kept } = old;
-  await writeItem(
-    dir,
-    changed
-      ? withoutEmpty(withFlag({ ...kept, ...given }, { reason: `Changed in the plan's v${version}.`, fromThreadId: old.threadId, at: now.toISOString() }))
-      : kept,
-  );
+  const after = changed
+    ? withoutEmpty(withFlag({ ...kept, ...given }, { reason: `Changed in the plan's v${version}.`, fromThreadId: old.threadId, at: now.toISOString() }))
+    : kept;
+  await writeItem(dir, after);
+  // The item as this re-import left it. A catch-up's re-import of v<n> writes it again. It's written after the update
+  // committed, so no update journal lists it, and putting an update to v<n+1> back leaves it with v<n>.
+  if (changed) await writeJsonAtomic(docPath(dir, reimportedRel(version, after.id)), after);
   if (!thread) return;
   let status = thread.status;
   const messages = [...thread.messages];

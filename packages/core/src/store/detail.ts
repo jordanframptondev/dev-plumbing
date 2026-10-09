@@ -4,6 +4,7 @@ import type { DataChecker } from './checks';
 import { activeDecisions } from './decisions';
 import { readDecisions, readDocText, readHistory, readItem, readItems, readProjectFile, readThread, readThreads } from './io';
 import { openOptions } from './threads';
+import { itemVersionChange } from './versionChange';
 
 export const NO_WINDOW = 'Saved. No Claude window is listening. Run /dev-plumbing in any clone.';
 
@@ -84,6 +85,7 @@ export async function loadThreadDetail(o: { dir: string; threadId: string; types
     decisions: activeDecisions(await readDecisions(o.dir)).filter((d) => d.itemIds.includes(item.id) || d.threadId === thread.id),
     checks: o.checker ? await o.checker.check(kindOf(item), item.data) : null,
     anchorParent: parent ? { itemId: parent.id, threadId: parent.threadId, title: parent.title, typeId: parent.type } : null,
+    versionChange: await itemVersionChange(o.dir, item.id, o.types),
   };
 }
 
