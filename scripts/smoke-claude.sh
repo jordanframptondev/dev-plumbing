@@ -126,8 +126,10 @@ round2="$work/round2"
 DP_SMOKE_ROUND2="$round2" node "$root/scripts/smoke-user.mjs" &
 user=$!
 # exec, so $! is Claude itself and not a subshell that would leave it running.
+# Turns off the old dev-plumbing plugin, if installed, for these sessions only, so only --plugin-dir's plumb loads.
+old_off='{"enabledPlugins":{"dev-plumbing@dev-plumbing":false}}'
 ( cd "$repo" && exec claude -p "Use the /plumb:rough-in skill to plumb docs/specs/restock-reminders.md." \
-    --plugin-dir "$root/plugin" --permission-mode bypassPermissions \
+    --plugin-dir "$root/plugin" --settings "$old_off" --permission-mode bypassPermissions \
     --output-format stream-json --verbose > "$work/transcript.jsonl" 2> "$work/claude.err" ) &
 claude=$!
 # Round 2: once the plan has changed, stop this window and run /plumb:rough-in again, as you would. Claude asks whether
@@ -136,7 +138,7 @@ while [ ! -e "$round2" ] && kill -0 "$user" 2>/dev/null; do sleep 2; done
 if [ -e "$round2" ]; then
   stop_claude
   ( cd "$repo" && exec claude -p "Use the /plumb:rough-in skill to plumb docs/specs/restock-reminders.md. If it asks whether to update to v2, the answer is yes: merge it into my draft." \
-      --plugin-dir "$root/plugin" --permission-mode bypassPermissions \
+      --plugin-dir "$root/plugin" --settings "$old_off" --permission-mode bypassPermissions \
       --output-format stream-json --verbose > "$work/transcript-2.jsonl" 2> "$work/claude-2.err" ) &
   claude=$!
 fi
@@ -157,8 +159,32 @@ report() {
   echo "Transcript lines with a refused write (\"Nothing was saved\"):"
   grep -c 'Nothing was saved' "$t" || true
 }
+# Which plugins and dp tools the session's init line lists. It fails when the old dev-plumbing plugin's tools (or the
+# plugin itself) loaded too: a main window could then call either server's dp_open and dp_wait, as two windows.
+plugins_loaded() {
+  node -e '
+    const fs = require("fs");
+    let init = null;
+    for (const line of fs.readFileSync(process.argv[1], "utf8").split("\n")) {
+      try { const e = JSON.parse(line); if (e.type === "system" && e.subtype === "init") { init = e; break; } } catch {}
+    }
+    if (!init) { console.log("No init line in the transcript."); process.exit(1); }
+    const tools = Array.isArray(init.tools) ? init.tools : [];
+    const plugins = (Array.isArray(init.plugins) ? init.plugins : []).map((p) => (typeof p === "string" ? p : p?.name ?? "?"));
+    const plumb = tools.filter((t) => t.startsWith("mcp__plugin_plumb_dp__"));
+    const old = tools.filter((t) => t.startsWith("mcp__plugin_dev-plumbing_dp__"));
+    console.log("Plugins in the init line: " + (plugins.join(", ") || "none listed"));
+    console.log("mcp__plugin_plumb_dp__ tools in the init line (should be more than 0): " + plumb.length);
+    console.log("mcp__plugin_dev-plumbing_dp__ tools in the init line (should be 0): " + old.length);
+    if (old.length || plugins.some((p) => p === "dev-plumbing" || p.startsWith("dev-plumbing@"))) {
+      console.log("The old dev-plumbing plugin loaded next to plumb.");
+      process.exit(1);
+    }
+  ' "$1"
+}
 echo "== Round 1: import, one thread, Finalize"
 report "$work/transcript.jsonl"
+plugins_loaded "$work/transcript.jsonl" || status=1
 echo "Finalizer subagents started by the main window:"
 grep -h '"parent_tool_use_id":null' "$work/transcript.jsonl" | grep -o '"name":"Agent","input":{[^}]*"subagent_type":"plumb:finalizer"' | wc -l | tr -d ' ' || true
 echo "dp_finalize refusals (\"Fix these and call dp_finalize again\"):"
@@ -213,6 +239,7 @@ if [ -e "$work/transcript-2.jsonl" ]; then
   t2="$work/transcript-2.jsonl"
   echo "== Round 2: the plan changed, and /plumb:rough-in ran again"
   report "$t2"
+  plugins_loaded "$t2" || status=1
   # dp_open's results are JSON inside the transcript's JSON, so their quotes may be escaped. A result sits on one
   # transcript line (twice on it, so count lines), and an input is read from the call itself, not from its copy.
   echo "dp_open results that offered the update (kind plan-changed):"
