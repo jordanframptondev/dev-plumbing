@@ -742,7 +742,7 @@ The plugin's server is `dp`, so Claude Code names each tool `mcp__plugin_plumb_d
 
 | Tool | Used by | Purpose |
 |---|---|---|
-| `dp_open` | main window | Work out the repo, then create or reopen a plumbing project and make sure the service is running. `/plumb:listen` never passes a plan, and answers a changed plan with `update: false`. |
+| `dp_open` | main window | Work out the repo, then create or reopen a plumbing project and make sure the service is running. When the plan in the clone changed since the current version, it answers `plan-changed` and writes nothing: the version, the lines added and removed, the conflicts a merge would leave, and `sourcePath`, the plan's path in the repo. `/plumb:listen` never passes a plan, and answers a changed plan with `update: false`. |
 | `dp_repo_profile` | repo-setup | Read the repo profile, or propose one for you to confirm |
 | `dp_write_items` | importer | Add or change items, or mark the type "no changes". Validated as a batch that fully succeeds or fully fails. |
 | `dp_wait` | main window | Wait for the next submission, with a heartbeat. Returns the threads, linked groups and models from `agents.json`. |
