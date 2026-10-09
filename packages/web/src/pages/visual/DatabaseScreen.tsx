@@ -1,4 +1,4 @@
-import { migrationKindValues, type DataChecks, type DiagramData, type TableDiff, type TypeItemRow } from '@dev-plumbing/core/schemas';
+import { migrationKindValues, tablesDrawing, type DataChecks, type DiagramData, type TableDiff, type TypeItemRow } from '@dev-plumbing/core/schemas';
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 import { Segmented } from '../../components/Segmented';
@@ -12,40 +12,10 @@ import type { ScreenProps } from './VisualScreen';
 type Field = TableDiff['fields'][number];
 type MigrationKind = (typeof migrationKindValues)[number];
 
-const PRISMA_SCALARS = new Set(['String', 'Boolean', 'Int', 'BigInt', 'Float', 'Decimal', 'DateTime', 'Json', 'Bytes']);
-
-/** The model a field points at, or null. Enums look like models, so a field counts as a relation only when its type is
- *  another table on this screen, a list (`Order[]`), or comes with a matching foreign key (`customer Customer` + `customerId`). */
-export function relationTarget(field: Field, table: TableDiff, models: Set<string>): string | null {
-  const written = field.type.trim().split(/\s+/)[0] ?? '';
-  const base = written.replace(/\?$/, '').replace(/\[\]$/, '');
-  if (!/^[A-Z]\w*$/.test(base) || PRISMA_SCALARS.has(base)) return null;
-  if (models.has(base) || written.endsWith('[]')) return base;
-  return table.fields.some((f) => f.name === `${field.name}Id`) ? base : null;
-}
-
-/** The relationship strip: a box per table (removed ones marked), unchanged boxes for the models they point at, a line per relation. */
+/** The relationship strip: core's tablesDrawing, which Present draws too, left out with fewer than two boxes. */
 export function relationshipStrip(tables: TableDiff[]): DiagramData | null {
-  const models = new Set(tables.map((t) => t.model));
-  const nodes = new Map<string, DiagramData['nodes'][number]>();
-  for (const t of tables) {
-    if (nodes.has(t.model)) continue;
-    nodes.set(t.model, { id: t.model, label: t.change === 'removed' ? `${t.model} (removed)` : t.model, status: t.change === 'new' ? 'new' : 'changed' });
-  }
-  const edges = new Map<string, DiagramData['edges'][number]>();
-  const related = new Set<string>();
-  for (const t of tables) {
-    for (const f of t.fields) {
-      if (f.change === 'removed') continue;
-      const to = relationTarget(f, t, models);
-      if (!to || to === t.model) continue;
-      if (!models.has(to)) related.add(to);
-      const id = `${t.model}.${f.name}`;
-      if (!edges.has(id)) edges.set(id, { id, from: t.model, to, label: f.name });
-    }
-  }
-  for (const m of [...related].sort()) nodes.set(m, { id: m, label: m, status: 'unchanged' });
-  return nodes.size < 2 ? null : { kind: 'system', groups: [], nodes: [...nodes.values()], edges: [...edges.values()] };
+  const strip = tablesDrawing(tables);
+  return strip.nodes.length < 2 ? null : strip;
 }
 
 /** The migration panel's one-word answer: destructive beats data risk beats a backfill; otherwise it's additive only. */

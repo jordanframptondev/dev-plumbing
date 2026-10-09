@@ -2,11 +2,14 @@ import fs from 'node:fs/promises';
 import { writeJsonAtomic } from '../atomic';
 import { DEFENSE, defenseThreadIds } from '../defenseType';
 import {
+  chapterIds,
   DEFENSE_SECTIONS,
-  dataKindOf,
   defenseInputSchema,
   displayStatus,
+  drawingKey,
+  MAX_PRESENTER_CHARS,
   practiceSchema,
+  PRESENT_CHAPTERS,
   sectionIds,
   severityValues,
   whiteboardDefenseSchema,
@@ -15,6 +18,7 @@ import {
   type PlumbingProject,
   type PlumbingType,
   type Practice,
+  type PresentChapterId,
   type ProjectHome,
   type WhiteboardDefense,
   type WhiteboardRequest,
@@ -22,6 +26,7 @@ import {
 import { stable } from './changes';
 import { changesSinceFinal } from './checklist';
 import { activeDecisions } from './decisions';
+import { drawnItems, projectDrawings, type ProjectDrawing } from './drawings';
 import { draftHash } from './finalize';
 import { ConflictError, newId, projectFiles, readDecisions, readDocText, readHistory, readItems, readJsonFile, readProjectFile, readThreads, StoreError } from './io';
 import { planVersionSinceFinal } from './update';
@@ -199,13 +204,7 @@ export async function pickUpWhiteboard(dir: string, windowId: string, now: Date 
  * drawing. In id order. saveDefense checks against these, and the whiteboard subagent's pack offers exactly these.
  */
 export async function defenseDiagramItemIds(dir: string, types: PlumbingType[]): Promise<string[]> {
-  const [{ values: items }, { values: threads }] = await Promise.all([readItems(dir), readThreads(dir)]);
-  const statusByThread = new Map(threads.map((t) => [t.id, displayStatus(t)]));
-  const diagramTypes = new Set(types.filter((t) => t.enabled && dataKindOf(t) === 'diagram').map((t) => t.id));
-  return items
-    .filter((i) => diagramTypes.has(i.type) && statusByThread.get(i.threadId) !== 'parked' && i.data !== undefined)
-    .map((i) => i.id)
-    .sort((a, b) => a.localeCompare(b));
+  return (await drawnItems(dir, types)).diagram.map((i) => i.id);
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -282,15 +281,112 @@ function repeats(texts: unknown, where: string, noun: string): string[] {
   return problems;
 }
 
+/** How a refused drawing ends: the ones the project has, or that it has none. */
+const candidates = (ids: string[]) => (ids.length ? `Use one of: ${ids.join(', ')}.` : 'There are none, so pick another drawing or none.');
+
+/**
+ * The project's drawing a chapter names: null for a chapter that draws nothing, and undefined when it names one the
+ * project doesn't have (its line is added to `problems`) or one the schema refuses.
+ */
+function chapterDrawing(where: string, drawing: unknown, drawings: ProjectDrawing[], problems: string[]): ProjectDrawing | null | undefined {
+  if (drawing === null) return null;
+  if (!isObject(drawing)) return undefined;
+  if (drawing.kind === 'tables') {
+    const tables = drawings.find((d) => d.drawing.kind === 'tables');
+    if (!tables) problems.push(`${where}: this project has no tables to draw.`);
+    return tables;
+  }
+  const { kind, itemId } = drawing;
+  if ((kind !== 'diagram' && kind !== 'flow') || typeof itemId !== 'string') return undefined;
+  const key = drawingKey({ kind, itemId });
+  const found = drawings.find((d) => drawingKey(d.drawing) === key);
+  if (!found) {
+    const ids = drawings.flatMap((d) => (d.drawing.kind === kind ? [d.drawing.itemId] : []));
+    problems.push(`${where}: there's no ${kind === 'diagram' ? 'diagram item' : 'system flow'} "${itemId}". ${candidates(ids)}`);
+  }
+  return found;
+}
+
+/**
+ * One chapter's drawing and steps. Each step reveals only parts of the chapter's drawing, each once in the chapter, and
+ * none when it draws nothing. Each note is near a part already on the board at its step, or "" for the board's foot.
+ * The board holds what the steps so far revealed and what that brought along: a line's ends, a flow step's lanes, and
+ * a box's group. A drawing the project doesn't have is its own line, and its steps aren't checked against it.
+ */
+function chapterProblems(where: string, chapter: Record<string, unknown>, drawings: ProjectDrawing[]): string[] {
+  const problems: string[] = [];
+  const drawing = chapterDrawing(where, chapter.drawing, drawings, problems);
+  if (drawing === undefined) return problems;
+  const parts = new Set(drawing?.parts.map((p) => p.ref));
+  const revealedIn = new Map<string, number>();
+  const board = new Set<string>();
+  const draw = (ref: string) => {
+    if (board.has(ref)) return;
+    board.add(ref);
+    for (const more of drawing?.brings[ref] ?? []) draw(more);
+  };
+  (Array.isArray(chapter.steps) ? chapter.steps : []).forEach((step, i) => {
+    if (!isObject(step)) return;
+    const s = i + 1;
+    const reveal = Array.isArray(step.reveal) ? step.reveal.filter((ref): ref is string => typeof ref === 'string') : [];
+    if (drawing === null && reveal.length) problems.push(`${where} step ${s}: this chapter draws nothing, so leave reveal empty.`);
+    for (const ref of drawing ? reveal : []) {
+      const t = revealedIn.get(ref);
+      if (!parts.has(ref)) problems.push(`${where} step ${s}: "${ref}" isn't in this drawing.`);
+      else if (t !== undefined) problems.push(`${where} step ${s}: "${ref}" was already revealed in step ${t}.`);
+      else {
+        revealedIn.set(ref, s);
+        draw(ref);
+      }
+    }
+    (Array.isArray(step.notes) ? step.notes : []).forEach((note, k) => {
+      if (isObject(note) && typeof note.near === 'string' && note.near !== '' && !board.has(note.near)) {
+        problems.push(`${where} step ${s} note ${k + 1}: "${note.near}" isn't on the board yet.`);
+      }
+    });
+  });
+  return problems;
+}
+
+/**
+ * What the schema can't say about the presenter: that it's there; its size; the seven chapters, each once and in
+ * order; and each chapter against this project's own drawings (chapterProblems). Read from the payload as sent, as the
+ * sections are, so these are listed alongside the schema's own problems.
+ */
+function presenterProblems(defense: unknown, drawings: ProjectDrawing[]): string[] {
+  const presenter = isObject(defense) ? defense.presenter : undefined;
+  if (presenter === undefined) return ['presenter is missing. Send the seven chapters too.'];
+  const problems: string[] = [];
+  const size = JSON.stringify(presenter).length;
+  if (size > MAX_PRESENTER_CHARS) problems.push(`presenter: the presenter is ${size.toLocaleString('en-US')} characters of JSON; the most is 20,000.`);
+  const chapters = isObject(presenter) && Array.isArray(presenter.chapters) ? presenter.chapters.filter(isObject) : [];
+  // Each chapter's place among the seven, -1 for an id that isn't one. A doubled chapter counts where it first comes.
+  const places = chapters.map((c) => chapterIds.indexOf(c.id as PresentChapterId));
+  const firsts = places.filter((n, i) => places.indexOf(n) === i);
+  if (places.includes(-1) || firsts.some((n, i) => i > 0 && n < firsts[i - 1])) {
+    problems.push('presenter: chapters must come in this order: purpose, flow, data, states, security, failure, rollback.');
+  }
+  for (const id of chapterIds) {
+    const where = `presenter.chapters: ${id}`;
+    const found = chapters.filter((c) => c.id === id);
+    if (found.length === 0) problems.push(`${where} is missing.`);
+    if (found.length > 1) problems.push(`${where} is there more than once.`);
+    for (const chapter of found) problems.push(...chapterProblems(where, chapter, drawings));
+  }
+  // A doubled chapter with the same problem in both copies says it once.
+  return [...new Set(problems)];
+}
+
 const severityRank = (s: DefenseInput['concerns'][number]) => severityValues.indexOf(s.severity);
 
 /**
  * Saves the subagent's defense for a request that's writing: ConflictError for any other id or state. The whole
  * payload is checked first (the schema, then its size, then the sections, claims, tables and diagram items, then
- * repeated questions, then the checklist) and any problem refuses all of it, listing every problem: nothing is written,
- * the last saved defense stays as it was, and the request stays writing so the subagent can send it again. Otherwise
- * the defense gets its ids (q1…, c1…, k1…, w-…), the section titles and order, its concerns most severe first, and
- * basedOn from the request; defense.json is written, then request.json removed.
+ * repeated questions, then the checklist, then the presenter against the project's own drawings) and any problem
+ * refuses all of it, listing every problem: nothing is written, the last saved defense stays as it was, and the request
+ * stays writing so the subagent can send it again. Otherwise the defense gets its ids (q1…, c1…, k1…, w-…), the
+ * section titles and order, its concerns most severe first, the presenter's chapter titles, and basedOn from the
+ * request; defense.json is written, then request.json removed.
  *
  * `checklist` is the rules file's (checklistLines), which the service passes. When it has lines, they're the
  * defense's checklist and the payload's is ignored. Otherwise the payload's is used, and must have lines, each once.
@@ -315,6 +411,7 @@ export async function saveDefense(
     if (Array.isArray(sent.checklist) && sent.checklist.length === 0) problems.push('checklist: the rules file has no checklist, so send one.');
     problems.push(...repeats(sent.checklist, 'checklist', 'line'));
   }
+  problems.push(...presenterProblems(o.defense, await projectDrawings(dir, o.types)));
   if (problems.length || !parsed.success) throw nothingSaved(problems, WHITEBOARD_RETRY);
   const input = parsed.data;
 
@@ -322,6 +419,8 @@ export async function saveDefense(
   const basis = current.basedOn ?? (await defenseBasis(dir));
   const inputsHash = current.inputsHash ?? (await defenseInputsHash(dir));
   const sections = new Map(input.sections.map((s) => [s.id, s]));
+  // presenterProblems saw to it: the presenter is there, with each chapter once.
+  const chapters = new Map((input.presenter?.chapters ?? []).map((c) => [c.id, c]));
   const defense: WhiteboardDefense = {
     id: newId('w', now),
     generatedAt: now.toISOString(),
@@ -336,6 +435,12 @@ export async function saveDefense(
     // Most severe first; concerns of the same severity keep the subagent's order.
     concerns: [...input.concerns].sort((a, b) => severityRank(a) - severityRank(b)).map((c, i) => ({ id: `c${i + 1}`, severity: c.severity, text: c.text, basis: c.basis })),
     checklist: (fromRules ?? input.checklist).map((text, i) => ({ id: `k${i + 1}`, text })),
+    presenter: {
+      chapters: PRESENT_CHAPTERS.map(({ id, title }) => {
+        const c = chapters.get(id)!;
+        return { id, title, drawing: c.drawing, steps: c.steps };
+      }),
+    },
   };
   await writeDefense(dir, defense);
   await removeWhiteboardRequest(dir);

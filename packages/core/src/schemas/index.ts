@@ -12,3 +12,4 @@ export * from './markdown';
 export * from './data';
 export * from './finalize';
 export * from './whiteboard';
+export * from './drawings';

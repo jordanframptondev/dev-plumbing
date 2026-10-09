@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { DEFENSE_TYPE } from '../src/defenseType';
-import { itemSchema, type DefenseInput, type DiagramData, type Item, type Practice, type WhiteboardRequest } from '../src/schemas';
+import { itemSchema, MAX_PRESENTER_CHARS, PRESENT_CHAPTERS, type DefenseInput, type DiagramData, type Item, type Practice, type WhiteboardRequest } from '../src/schemas';
 import { addDecision } from '../src/store/decisions';
 import { projectFiles, readItem, readProjectFile, writeDocText, writeHistoryEntry, writeItem, writeProjectFile, writeThread } from '../src/store/io';
 import { setReviewed } from '../src/store/reviewed';
@@ -29,7 +29,7 @@ import {
   writeWhiteboardRequest,
 } from '../src/store/whiteboard';
 import { removeTempDirs } from '../../../testkit/tmp';
-import { DRAFT, pair, seedProject, storedDefense, TYPES, validDefenseInput } from './fixtures';
+import { DRAFT, listType, pair, seedProject, storedDefense, TYPES, validDefenseInput } from './fixtures';
 
 afterAll(removeTempDirs);
 
@@ -445,6 +445,144 @@ describe('checking the defense before it is saved', () => {
         message: `${RETRY}\n- sections: diagram: diagramItemId "${id}" isn't an item with a diagram, and this project has none. Leave diagramItemId out.`,
       });
     }
+  });
+});
+
+describe("the defense's presenter", () => {
+  const presentTypes = [...types, listType('database', { title: 'Database', screen: 'database', order: 2 }), listType('flows', { title: 'Flows', screen: 'flows', order: 4 })];
+  /** Two boxes in a group, one outside it, and a line to each. */
+  const BOARD: DiagramData = {
+    kind: 'system',
+    groups: [{ id: 'aws', label: 'AWS' }],
+    nodes: [
+      { id: 'job', label: 'Daily reminder job', group: 'aws', status: 'new' },
+      { id: 'db', label: 'Postgres', group: 'aws', status: 'unchanged' },
+      { id: 'mailer', label: 'Mailer', status: 'external' },
+    ],
+    edges: [
+      { id: 'reads', from: 'job', to: 'db', label: 'finds due subscriptions' },
+      { id: 'sends', from: 'job', to: 'mailer' },
+    ],
+  };
+  /** A project with a diagram item drawn as BOARD, a parked diagram item, a user flow, and no tables or system flows. */
+  async function presentSeed(): Promise<string> {
+    const diagram = pair('architecture-system', { type: 'architecture', title: 'System overview', status: 'resolved' });
+    diagram.item.data = BOARD;
+    const parked = pair('architecture-old', { type: 'architecture', title: 'Old overview', status: 'parked' });
+    parked.item.data = BOARD;
+    const browse = pair('flows-browse', { type: 'flows', title: 'Browsing', status: 'resolved' });
+    browse.item.data = { kind: 'user', steps: [{ n: 1, label: 'Opens the reminder' }] };
+    return seedProject({ pairs: [diagram, parked, browse, pair('q1', { title: 'Who gets reminders?' })] });
+  }
+  /** A presenter the project above can draw: System flow and Security draw the diagram, the rest draw nothing. */
+  const GOOD = {
+    chapters: [
+      // Notes may be left out, and a caption is trimmed.
+      { id: 'purpose', drawing: null, steps: [{ caption: '  Customers forget to reorder, so a daily job reminds them.  ', reveal: [] }] },
+      {
+        id: 'flow',
+        drawing: { kind: 'diagram', itemId: 'architecture-system' },
+        steps: [
+          // The job's group comes with it, and a line's ends with the line.
+          { caption: 'Each morning the job wakes up.', reveal: ['node:job'], notes: [{ near: 'group:aws', text: 'one region', ink: 'slate' }] },
+          { caption: 'It finds the subscriptions due soon.', reveal: ['edge:reads'], notes: [{ near: 'node:db', text: 'billing owns the renewal date', ink: 'slate' }] },
+          { caption: 'And hands each reminder to the mailer.', reveal: ['edge:sends'], notes: [{ near: 'node:mailer', text: 'runs twice? → one per subscription per day', ink: 'seal' }] },
+        ],
+      },
+      { id: 'data', drawing: null, steps: [{ caption: 'The reminders table records what was sent.', reveal: [], notes: [{ near: '', text: 'source of truth: the reminders table', ink: 'slate' }] }] },
+      { id: 'states', drawing: null, steps: [{ caption: 'A subscription is due, or reminded today.', reveal: [] }] },
+      { id: 'security', drawing: { kind: 'diagram', itemId: 'architecture-system' }, steps: [{ caption: 'Only the job talks to the mailer.', reveal: ['edge:sends'], notes: [{ near: 'group:aws', text: 'inside the account', ink: 'moss' }] }] },
+      { id: 'failure', drawing: null, steps: [{ caption: 'A failed send is tried again on the next run.', reveal: [] }] },
+      { id: 'rollback', drawing: null, steps: [{ caption: 'Turn the job off: nothing else depends on it.', reveal: [], notes: [{ near: '', text: 'blast radius: reminder emails only', ink: 'moss' }] }] },
+    ],
+  };
+  /** A step at the schema's limits: a 300-character caption and four 120-character notes at the board's foot. */
+  const fullStep = (n: number) => ({
+    caption: `${n}. ${'Say this part out loud. '.repeat(20)}`.slice(0, 300),
+    reveal: [],
+    notes: Array.from({ length: 4 }, (_, k) => ({ near: '', text: `${k + 1}. ${'Mark this on the board. '.repeat(10)}`.slice(0, 120), ink: 'ink' })),
+  });
+  const fullSteps = Array.from({ length: 8 }, (_, i) => fullStep(i + 1));
+
+  it("a presenter is checked against the project's own drawings", async () => {
+    const dir = await presentSeed();
+    const request0 = await requestWhiteboard(dir, { now: T0 });
+    await pickUpWhiteboard(dir, 'w-a', T1);
+    await saveDefense(dir, { requestId: request0.id, defense: validDefenseInput(), types: presentTypes, now: T2 });
+    const before = await fs.readFile(projectFiles(dir).defense, 'utf8');
+    const request = await requestWhiteboard(dir);
+    const writing = await pickUpWhiteboard(dir, 'w-a');
+    const save = (presenter: unknown) => refusal(saveDefense(dir, { requestId: request.id, defense: { ...validDefenseInput(), presenter }, types: presentTypes }));
+
+    // Every kind of problem at once.
+    const bad = {
+      chapters: [
+        // A chapter that draws nothing reveals nothing.
+        { id: 'purpose', drawing: null, steps: [{ caption: 'Why it exists.', reveal: ['node:job'] }] },
+        {
+          id: 'flow',
+          drawing: { kind: 'diagram', itemId: 'architecture-system' },
+          steps: [
+            // A box the drawing doesn't have, and a note near one that isn't drawn yet.
+            { caption: 'The job.', reveal: ['node:job', 'node:queue'], notes: [{ near: 'node:mailer', text: 'external', ink: 'seal' }] },
+            // A box revealed again. The line brings the mailer, so the note is fine now.
+            { caption: 'It sends.', reveal: ['edge:sends', 'node:job'], notes: [{ near: 'node:mailer', text: 'retries are theirs', ink: 'seal' }] },
+          ],
+        },
+        // States comes before Data, and draws a parked item.
+        { id: 'states', drawing: { kind: 'diagram', itemId: 'architecture-old' }, steps: [{ caption: 'Due or reminded.', reveal: ['node:job'] }] },
+        // The project has no tables, and its only flow is a user's.
+        { id: 'data', drawing: { kind: 'tables' }, steps: [{ caption: 'The reminders table.', reveal: ['table:RestockReminder'] }] },
+        { id: 'security', drawing: { kind: 'flow', itemId: 'flows-browse' }, steps: fullSteps },
+        // Failure and retries is missing, and Rollback is there twice: with all these long steps, it's too big.
+        { id: 'rollback', drawing: null, steps: fullSteps },
+        { id: 'rollback', drawing: null, steps: fullSteps },
+      ],
+    };
+    const size = JSON.stringify(bad).length;
+    expect(size).toBeGreaterThan(MAX_PRESENTER_CHARS);
+    expect(await save(bad)).toEqual({
+      type: 'InputError',
+      message: [
+        RETRY,
+        `- presenter: the presenter is ${size.toLocaleString('en-US')} characters of JSON; the most is 20,000.`,
+        '- presenter: chapters must come in this order: purpose, flow, data, states, security, failure, rollback.',
+        '- presenter.chapters: purpose step 1: this chapter draws nothing, so leave reveal empty.',
+        '- presenter.chapters: flow step 1: "node:queue" isn\'t in this drawing.',
+        '- presenter.chapters: flow step 1 note 1: "node:mailer" isn\'t on the board yet.',
+        '- presenter.chapters: flow step 2: "node:job" was already revealed in step 1.',
+        '- presenter.chapters: data: this project has no tables to draw.',
+        '- presenter.chapters: states: there\'s no diagram item "architecture-old". Use one of: architecture-system.',
+        '- presenter.chapters: security: there\'s no system flow "flows-browse". There are none, so pick another drawing or none.',
+        '- presenter.chapters: failure is missing.',
+        '- presenter.chapters: rollback is there more than once.',
+      ].join('\n'),
+    });
+    expect(await fs.readFile(projectFiles(dir).defense, 'utf8')).toBe(before);
+    expect(await readWhiteboardRequest(dir)).toEqual(writing);
+
+    // A defense with no presenter is refused too, in its own words.
+    const { presenter: _presenter, ...without } = validDefenseInput();
+    expect(await refusal(saveDefense(dir, { requestId: request.id, defense: without, types: presentTypes }))).toEqual({
+      type: 'InputError',
+      message: `${RETRY}\n- presenter is missing. Send the seven chapters too.`,
+    });
+    expect(await fs.readFile(projectFiles(dir).defense, 'utf8')).toBe(before);
+    expect(await readWhiteboardRequest(dir)).toEqual(writing);
+
+    // A valid one is saved with the chapters' titles, in order.
+    const saved = await saveDefense(dir, { requestId: request.id, defense: { ...validDefenseInput(), presenter: GOOD }, types: presentTypes });
+    expect(saved.presenter!.chapters.map((c) => [c.id, c.title])).toEqual(PRESENT_CHAPTERS.map((c) => [c.id, c.title]));
+    expect(saved.presenter!.chapters[0].steps).toEqual([{ caption: 'Customers forget to reorder, so a daily job reminds them.', reveal: [], notes: [] }]);
+    expect(saved.presenter!.chapters[1]).toEqual({ id: 'flow', title: 'System flow', drawing: { kind: 'diagram', itemId: 'architecture-system' }, steps: GOOD.chapters[1].steps });
+    expect(await readDefense(dir)).toEqual(saved);
+    expect(await readWhiteboardRequest(dir)).toBeNull();
+
+    // A defense saved before Present, with no presenter, still reads.
+    const { presenter: _saved, ...old } = saved;
+    await writeDefense(dir, old);
+    expect(await readDefense(dir)).toEqual(old);
+    expect((await readDefense(dir))!.presenter).toBeUndefined();
   });
 });
 

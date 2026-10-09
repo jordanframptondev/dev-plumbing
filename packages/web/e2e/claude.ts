@@ -74,12 +74,19 @@ export async function importProject(name: string, title: string, items: Record<s
 }
 
 const claim = (text: string, basis = 'known') => ({ text, basis });
+/** A Present chapter that draws nothing: one step, its caption, and its notes at the board's foot. */
+const chapter = (id: string, caption: string, notes: { text: string; ink: string }[] = []) => ({
+  id,
+  drawing: null,
+  steps: [{ caption, reveal: [], notes: notes.map((n) => ({ near: '', ...n })) }],
+});
 
 /**
  * A whole Whiteboard Defense, as the whiteboard subagent sends it with dp_whiteboard: level 2, all ten sections, three
  * questions, two concerns (high, then informational) and no checklist, since the service copies the rules file's 20
  * lines. Security model's second claim (security.1) is Unknown, so it can go to Questions; Data and state has a table,
- * and Whiteboard diagram a text drawing.
+ * and Whiteboard diagram a text drawing. Its presenter has the seven chapters, each drawing nothing with one step, so
+ * it's valid in any project.
  */
 export function defenseInput(): Json {
   return {
@@ -111,6 +118,17 @@ export function defenseInput(): Json {
       { severity: 'info', text: 'SMS costs grow with customers.', basis: 'inferred' },
     ],
     checklist: [],
+    presenter: {
+      chapters: [
+        chapter('purpose', 'A daily job reminds customers before an item runs out.'),
+        chapter('flow', 'The job runs at 9:00, picks the subscriptions that are due and sends each an SMS.'),
+        chapter('data', 'Each reminder sent is a row in the reminders table.', [{ text: 'source of truth: the reminders table', ink: 'slate' }]),
+        chapter('states', 'A subscription is not due, due, or reminded today.'),
+        chapter('security', 'Only the job sends reminders.'),
+        chapter('failure', 'A second run would send every reminder again.', [{ text: 'runs twice? → one per subscription per day', ink: 'seal' }]),
+        chapter('rollback', 'Turn the job off: nothing else depends on it.', [{ text: 'blast radius: reminder SMS only', ink: 'moss' }]),
+      ],
+    },
   };
 }
 

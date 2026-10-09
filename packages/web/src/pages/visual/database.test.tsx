@@ -1,7 +1,7 @@
-import type { TableDiff } from '@dev-plumbing/core/schemas';
+import { tablesDrawing, type TableDiff } from '@dev-plumbing/core/schemas';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DatabaseScreen, migrationHeadline, relationshipStrip, relationTarget, TableCard } from './DatabaseScreen';
+import { DatabaseScreen, migrationHeadline, relationshipStrip, TableCard } from './DatabaseScreen';
 import { row } from './testkit';
 
 const navigate = vi.hoisted(() => vi.fn());
@@ -37,31 +37,13 @@ const subscription: TableDiff = {
 };
 
 describe('the relationship strip', () => {
-  it('draws each table, the models they point at, and a line per relation, and skips enums', () => {
-    const strip = relationshipStrip([reminder, subscription, { ...reminder, model: 'OldLog', change: 'removed', fields: [], migration: [] }])!;
-    expect(strip.nodes).toEqual([
-      { id: 'RestockReminder', label: 'RestockReminder', status: 'new' },
-      { id: 'Subscription', label: 'Subscription', status: 'changed' },
-      { id: 'OldLog', label: 'OldLog (removed)', status: 'changed' },
-      { id: 'Customer', label: 'Customer', status: 'unchanged' },
-    ]);
-    expect(strip.edges.map((e) => [e.from, e.to, e.label])).toEqual([
-      ['RestockReminder', 'Subscription', 'subscription'],
-      ['Subscription', 'Customer', 'customer'],
-      ['Subscription', 'RestockReminder', 'reminders'],
-    ]);
+  // How the tables are drawn is core's tablesDrawing, tested there. The screen leaves out a strip of fewer than two boxes.
+  it("is core's tables drawing", () => {
+    expect(relationshipStrip([reminder, subscription])).toEqual(tablesDrawing([reminder, subscription]));
   });
 
   it('is left out with fewer than two boxes', () => {
     expect(relationshipStrip([{ ...reminder, fields: [{ name: 'id', type: 'String', change: 'added' }] }])).toBeNull();
-  });
-
-  it('only counts a single model field as a relation with its foreign key', () => {
-    const models = new Set(['Subscription']);
-    expect(relationTarget({ name: 'status', type: 'SubscriptionStatus', change: 'unchanged' }, subscription, models)).toBeNull();
-    expect(relationTarget({ name: 'customer', type: 'Customer', change: 'unchanged' }, subscription, models)).toBe('Customer');
-    expect(relationTarget({ name: 'orders', type: 'Order[]', change: 'added' }, subscription, models)).toBe('Order');
-    expect(relationTarget({ name: 'when', type: 'DateTime?', change: 'added' }, subscription, models)).toBeNull();
   });
 });
 

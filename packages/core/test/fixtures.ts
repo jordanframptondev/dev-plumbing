@@ -4,6 +4,7 @@ import path from 'node:path';
 import { writeFileAtomic, writeJsonAtomic } from '../src/atomic';
 import {
   DEFENSE_SECTIONS,
+  PRESENT_CHAPTERS,
   type DefenseInput,
   type Item,
   type Message,
@@ -153,7 +154,9 @@ const DEFENSE_CHECKLIST = [
 /**
  * A whole Whiteboard Defense of the Restock reminders plan, as the whiteboard subagent sends it: all ten sections in
  * order, each with a claim (security's second claim is unknown, and data has a source-of-truth table), three questions,
- * a high and an info concern, and the 20 checklist lines of the shipped rules file.
+ * a high and an info concern, the 20 checklist lines of the shipped rules file, and a presenter: the seven chapters in
+ * order, each drawing nothing (so it's valid in any project), with one step each but two in System flow, and notes at
+ * the board's foot.
  */
 export function validDefenseInput(): DefenseInput {
   return {
@@ -191,12 +194,46 @@ export function validDefenseInput(): DefenseInput {
       { severity: 'info', text: "The reminder copy isn't final yet.", basis: 'known' },
     ],
     checklist: [...DEFENSE_CHECKLIST],
+    presenter: {
+      chapters: [
+        {
+          id: 'purpose',
+          drawing: null,
+          steps: [{ caption: 'Customers run out before they reorder, so a daily job reminds them a few days ahead.', reveal: [], notes: [{ near: '', text: 'one reminder per subscription', ink: 'ink' }] }],
+        },
+        {
+          id: 'flow',
+          drawing: null,
+          steps: [
+            { caption: 'Each morning the job reads the subscriptions due within five days.', reveal: [], notes: [] },
+            { caption: 'It hands each reminder to the mailer and logs it.', reveal: [], notes: [{ near: '', text: 'runs twice? → the log stops a second email', ink: 'seal' }] },
+          ],
+        },
+        {
+          id: 'data',
+          drawing: null,
+          steps: [{ caption: 'Billing owns the renewal date; the reminders table records what was sent.', reveal: [], notes: [{ near: '', text: 'source of truth: the reminders table', ink: 'slate' }] }],
+        },
+        { id: 'states', drawing: null, steps: [{ caption: 'A subscription is not due yet, due, or reminded today.', reveal: [], notes: [] }] },
+        {
+          id: 'security',
+          drawing: null,
+          steps: [{ caption: 'Reminders go only to the address on the subscription.', reveal: [], notes: [{ near: '', text: 'unsubscribe token? not decided', ink: 'seal' }] }],
+        },
+        { id: 'failure', drawing: null, steps: [{ caption: 'When the mailer is down the send fails, and the next run tries again.', reveal: [], notes: [] }] },
+        {
+          id: 'rollback',
+          drawing: null,
+          steps: [{ caption: 'Turn the job off: nothing else depends on it.', reveal: [], notes: [{ near: '', text: 'blast radius: reminder emails only', ink: 'moss' }] }],
+        },
+      ],
+    },
   };
 }
 
 /**
  * validDefenseInput() as saveDefense saves it: the section titles, ids q1–q3, c1–c2 (the high concern first) and
- * k1–k20, id w-test, and based on the draft at v1. `overrides` replace whole fields.
+ * k1–k20, the presenter's chapter titles, id w-test, and based on the draft at v1. `overrides` replace whole fields.
  */
 export function storedDefense(overrides: Partial<WhiteboardDefense> = {}): WhiteboardDefense {
   const input = validDefenseInput();
@@ -217,6 +254,12 @@ export function storedDefense(overrides: Partial<WhiteboardDefense> = {}): White
     questions: input.questions.map((q, i) => ({ id: `q${i + 1}`, ...q })),
     concerns: input.concerns.map((c, i) => ({ id: `c${i + 1}`, ...c })),
     checklist: input.checklist.map((text, i) => ({ id: `k${i + 1}`, text })),
+    presenter: {
+      chapters: PRESENT_CHAPTERS.map(({ id, title }) => {
+        const c = input.presenter!.chapters.find((chapter) => chapter.id === id)!;
+        return { id, title, drawing: c.drawing, steps: c.steps };
+      }),
+    },
     ...overrides,
   };
 }

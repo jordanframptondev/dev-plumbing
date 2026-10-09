@@ -2,11 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { storedDefense, validDefenseInput } from '../../test/fixtures';
 import {
   BASIS_LABELS,
+  chapterIds,
   DEFENSE_PARTS,
   DEFENSE_SECTIONS,
   defenseInputSchema,
   LEVEL_NAMES,
+  MAX_PRESENTER_CHARS,
+  noteInkValues,
   practiceSchema,
+  PRESENT_CHAPTERS,
+  presenterInputSchema,
+  presenterSchema,
   sectionIds,
   SEVERITY_LABELS,
   whiteboardDefenseSchema,
@@ -79,6 +85,75 @@ describe('the Whiteboard Defense schemas', () => {
     expect(storedDefense()).toMatchObject({ id: 'w-test', basedOn: { kind: 'plan', doc: 'draft', version: 1, inputsHash: 'test' } });
     expect(storedDefense().exportedTo).toBeUndefined();
     expect(whiteboardDefenseSchema.safeParse({ ...defense, basedOn: { ...defense.basedOn, doc: 'original' } }).success).toBe(false);
+  });
+
+  it('has seven Present chapters in order, four inks for notes, and a presenter of at most 20,000 characters', () => {
+    expect(PRESENT_CHAPTERS.map((c) => [c.id, c.title])).toEqual([
+      ['purpose', 'Purpose'],
+      ['flow', 'System flow'],
+      ['data', 'Data and source of truth'],
+      ['states', 'States'],
+      ['security', 'Security'],
+      ['failure', 'Failure and retries'],
+      ['rollback', 'Rollback and blast radius'],
+    ]);
+    expect(chapterIds).toEqual(['purpose', 'flow', 'data', 'states', 'security', 'failure', 'rollback']);
+    expect(noteInkValues).toEqual(['ink', 'slate', 'seal', 'moss']);
+    expect(MAX_PRESENTER_CHARS).toBe(20_000);
+    expect(validDefenseInput().presenter!.chapters.map((c) => c.id)).toEqual(chapterIds);
+  });
+
+  it("takes a presenter's chapters, drawings and steps, trimming what's written, and refuses what's past its limits", () => {
+    const chapter = (over: Record<string, unknown> = {}) => ({ id: 'flow', drawing: null, steps: [{ caption: 'It runs daily.', reveal: [] }], ...over });
+    const step = (over: Record<string, unknown> = {}) => ({ caption: 'It runs daily.', reveal: [], ...over });
+    // Notes default to none; captions and notes are trimmed; a drawing is a diagram item, the tables, a flow or null.
+    const parsed = presenterInputSchema.parse({
+      chapters: [
+        chapter({ steps: [step({ caption: '  It runs daily.  ', reveal: ['node:job'], notes: [{ near: 'node:job', text: ' once a day ', ink: 'seal' }] }), step({ caption: 'Then it sends.' })] }),
+        chapter({ drawing: { kind: 'diagram', itemId: 'architecture-system' } }),
+        chapter({ drawing: { kind: 'tables', itemId: 'database-reminder' } }),
+        chapter({ drawing: { kind: 'flow', itemId: 'flows-send' } }),
+      ],
+    });
+    expect(parsed.chapters[0].steps).toEqual([
+      { caption: 'It runs daily.', reveal: ['node:job'], notes: [{ near: 'node:job', text: 'once a day', ink: 'seal' }] },
+      { caption: 'Then it sends.', reveal: [], notes: [] },
+    ]);
+    expect(parsed.chapters.map((c) => c.drawing)).toEqual([null, { kind: 'diagram', itemId: 'architecture-system' }, { kind: 'tables' }, { kind: 'flow', itemId: 'flows-send' }]);
+    // Any chapter id is taken here: saveDefense says which are missing, doubled or out of order.
+    expect(presenterInputSchema.safeParse({ chapters: [chapter({ id: 'intro' })] }).success).toBe(true);
+
+    const input = validDefenseInput();
+    const paths = (...chapters: unknown[]) => problemPaths({ ...input, presenter: { chapters } });
+    const note = { near: '', text: 'Careful.', ink: 'seal' };
+    expect(paths(chapter({ steps: [] }))).toEqual(['presenter.chapters.0.steps']);
+    expect(paths(chapter({ steps: Array.from({ length: 9 }, () => step()) }))).toEqual(['presenter.chapters.0.steps']);
+    expect(paths(chapter({ drawing: { kind: 'mockup', itemId: 'ui-card' } }))).toEqual(['presenter.chapters.0.drawing']);
+    expect(paths(chapter({ drawing: { kind: 'diagram' } }))).toEqual(['presenter.chapters.0.drawing']);
+    expect(paths(chapter({ drawing: undefined }))).toEqual(['presenter.chapters.0.drawing']);
+    expect(paths(chapter({ steps: [step({ caption: '  ' })] }))).toEqual(['presenter.chapters.0.steps.0.caption']);
+    expect(paths(chapter({ steps: [step({ caption: 'x'.repeat(301) })] }))).toEqual(['presenter.chapters.0.steps.0.caption']);
+    expect(paths(chapter({ steps: [step({ reveal: Array.from({ length: 41 }, (_, i) => `node:n${i}`) })] }))).toEqual(['presenter.chapters.0.steps.0.reveal']);
+    expect(paths(chapter({ steps: [step({ notes: [note, note, note, note, note] })] }))).toEqual(['presenter.chapters.0.steps.0.notes']);
+    expect(paths(chapter({ steps: [step({ notes: [{ ...note, text: 'x'.repeat(121) }] })] }))).toEqual(['presenter.chapters.0.steps.0.notes.0.text']);
+    expect(paths(chapter({ steps: [step({ notes: [{ ...note, near: 'x'.repeat(121) }] })] }))).toEqual(['presenter.chapters.0.steps.0.notes.0.near']);
+    expect(paths(chapter({ steps: [step({ notes: [{ ...note, ink: 'red' }] })] }))).toEqual(['presenter.chapters.0.steps.0.notes.0.ink']);
+    expect(paths(...Array.from({ length: 11 }, () => chapter()))).toEqual(['presenter.chapters']);
+    // A missing presenter is saveDefense's own line, so the schema takes a defense without one.
+    const { presenter: _presenter, ...without } = input;
+    expect(problemPaths(without)).toEqual([]);
+  });
+
+  it('reads a stored defense with its presenter, and one saved before Present without one', () => {
+    const defense = storedDefense();
+    expect(defense.presenter!.chapters.map((c) => c.title)).toEqual(PRESENT_CHAPTERS.map((c) => c.title));
+    expect(whiteboardDefenseSchema.parse(JSON.parse(JSON.stringify(defense)))).toEqual(defense);
+    const { presenter: _presenter, ...old } = defense;
+    const parsed = whiteboardDefenseSchema.parse(JSON.parse(JSON.stringify(old)));
+    expect(parsed).toEqual(old);
+    expect(parsed.presenter).toBeUndefined();
+    // A stored chapter is one of the seven.
+    expect(presenterSchema.safeParse({ chapters: [{ id: 'intro', title: 'Intro', drawing: null, steps: [] }] }).success).toBe(false);
   });
 
   it('keeps one request, in one of three states', () => {

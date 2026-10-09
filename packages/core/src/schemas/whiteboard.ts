@@ -44,6 +44,53 @@ export const defenseTableSchema = z.object({
 });
 export type DefenseTable = z.infer<typeof defenseTableSchema>;
 
+/** Present's seven chapters (spec §12), in order. The subagent sends their ids; the service fills in the titles. */
+export const PRESENT_CHAPTERS = [
+  { id: 'purpose', title: 'Purpose' },
+  { id: 'flow', title: 'System flow' },
+  { id: 'data', title: 'Data and source of truth' },
+  { id: 'states', title: 'States' },
+  { id: 'security', title: 'Security' },
+  { id: 'failure', title: 'Failure and retries' },
+  { id: 'rollback', title: 'Rollback and blast radius' },
+] as const;
+export type PresentChapterId = (typeof PRESENT_CHAPTERS)[number]['id'];
+export const chapterIds = PRESENT_CHAPTERS.map((c) => c.id) as [PresentChapterId, ...PresentChapterId[]];
+/** A note's marker: ink for structure, slate for data, seal for a risk, moss for what's safe. */
+export const noteInkValues = ['ink', 'slate', 'seal', 'moss'] as const;
+export type NoteInk = (typeof noteInkValues)[number];
+/** A presenter is at most this many characters of JSON. */
+export const MAX_PRESENTER_CHARS = 20_000;
+/** What a chapter draws: a diagram item, the project's tables, a system flow, or nothing (null). */
+export const drawingSchema = z
+  .union([
+    z.object({ kind: z.literal('diagram'), itemId: z.string().min(1) }),
+    z.object({ kind: z.literal('tables') }),
+    z.object({ kind: z.literal('flow'), itemId: z.string().min(1) }),
+  ])
+  .nullable();
+export type Drawing = z.infer<typeof drawingSchema>;
+/**
+ * One step of a chapter: the caption to say out loud, the parts of the chapter's drawing it adds to the board (typed
+ * refs such as node:job, see schemas/drawings.ts), and up to four marker notes. A note's `near` is a part already on
+ * the board, or "" for a note written at the board's foot.
+ */
+export const presentStepSchema = z.object({
+  caption: z.string().trim().min(1).max(300),
+  reveal: z.array(z.string().min(1).max(200)).max(40),
+  notes: z.array(z.object({ near: z.string().max(120), text: z.string().trim().min(1).max(120), ink: z.enum(noteInkValues) })).max(4).default([]),
+});
+export type PresentStep = z.infer<typeof presentStepSchema>;
+/** What the subagent sends (no titles). Missing, doubled and out-of-order chapters: saveDefense says so. */
+export const presenterInputSchema = z.object({
+  chapters: z.array(z.object({ id: z.string(), drawing: drawingSchema, steps: z.array(presentStepSchema).min(1).max(8) })).max(10),
+});
+/** Stored: exactly PRESENT_CHAPTERS, in order, with titles. */
+export const presenterSchema = z.object({
+  chapters: z.array(z.object({ id: z.enum(chapterIds), title: z.string(), drawing: drawingSchema, steps: z.array(presentStepSchema) })),
+});
+export type Presenter = z.infer<typeof presenterSchema>;
+
 /** What the whiteboard subagent sends with dp_whiteboard. */
 export const defenseInputSchema = z.object({
   level: z.union([z.literal(1), z.literal(2), z.literal(3)]),
@@ -70,6 +117,8 @@ export const defenseInputSchema = z.object({
   concerns: z.array(z.object({ severity: z.enum(severityValues), text: z.string().trim().min(1).max(2000), basis: z.enum(basisValues) })).max(40),
   // Empty when the rules file has a checklist: the service copies that one (saveDefense).
   checklist: z.array(z.string().trim().min(1).max(300)).max(40),
+  // Required: saveDefense says so in its own words, so a missing one is listed with the rest.
+  presenter: presenterInputSchema.optional(),
 });
 export type DefenseInput = z.infer<typeof defenseInputSchema>;
 
@@ -101,6 +150,8 @@ export const whiteboardDefenseSchema = z.object({
   checklist: z.array(z.object({ id: z.string(), text: z.string() })),
   /** Where Export .md last wrote it. */
   exportedTo: z.object({ clone: z.string(), path: z.string(), at: z.string() }).optional(),
+  /** Present's chapters. A defense saved before Present has none, and still reads. */
+  presenter: presenterSchema.optional(),
 });
 export type WhiteboardDefense = z.infer<typeof whiteboardDefenseSchema>;
 export type DefenseExport = NonNullable<WhiteboardDefense['exportedTo']>;
