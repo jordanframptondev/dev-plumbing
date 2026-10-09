@@ -74,7 +74,8 @@ function ThreadBody() {
             defaultValue={d.item.fields?.default}
             draft={d.thread.draft}
             previews={d.previews}
-            canPark={status !== 'resolved'}
+            // A resolved thread can be parked only when its item was removed from the plan, to keep it out of the final.
+            canPark={status !== 'resolved' || d.item.removedIn !== undefined}
             onSent={(r) => setNotice(r.message)}
           />
         )}

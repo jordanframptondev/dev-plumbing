@@ -11,7 +11,7 @@ import { finishSubmission, pendingSubmissions, pickUp } from '../src/store/queue
 import { postReply } from '../src/store/reply';
 import { submit } from '../src/store/submit';
 import { saveDraft, setParked } from '../src/store/threads';
-import { catchUpDue, catchUpWaiting, startCatchUp, updatePlan } from '../src/store/update';
+import { catchUpDue, catchUpWaiting, resumeIncompleteImport, startCatchUp, updatePlan } from '../src/store/update';
 import { planHash } from '../src/store/versions';
 import { removeTempDirs } from '../../../testkit/tmp';
 import { DRAFT, pair, seedProject, TYPES } from './fixtures';
@@ -248,6 +248,37 @@ describe('catching the items up with settled Plan changes', () => {
     expect((await readProjectFile(again)).status).toBe('finalized');
   });
 });
+
+describe('a catch-up that was cut short', () => {
+  it('is finished as the catch-up it was, with only the settled edits and no conflicts', async () => {
+    const dir = await atV2();
+    await accept(dir, CONFLICT, 'merged');
+    expect(await startCatchUp(dir, { version: 2, types, windowId: 'w-a', now: T })).toEqual({ importTypes: IMPORTABLE });
+    // Only Architecture's importer came back before the window ended the import.
+    await runImporters(dir, ['architecture']);
+    expect(await finishImport(dir, { windowId: 'w-a' })).toBe(true);
+    expect(await readProjectFile(dir)).toMatchObject({
+      status: 'active',
+      caughtUp: 2,
+      importIncomplete: ['questions', 'concerns'],
+      importIncompleteCatchUp: true,
+      importIncompleteTries: 1,
+    });
+    // The next /dev-plumbing finishes it as a catch-up: caughtUp is already set, so nothing else would bring the
+    // settled edits to those types.
+    expect(await resumeIncompleteImport(dir, { types, now: T })).toEqual({ kind: 'resumed', version: 2, importTypes: ['questions', 'concerns'] });
+    expect((await readProjectFile(dir)).reimporting).toEqual({ version: 2, from: 'active', catchUp: true });
+    const pack = await importPack({ dir, typeId: 'questions', types });
+    expect(pack.reimport).toMatchObject({ from: 2, to: 2, catchUp: true, conflicts: [] });
+    expect(pack.reimport!.changes).toBe(['@@ Approach', '- sends an email reminder.', '+ sends an email or a text message.'].join('\n'));
+    expect(await runImporters(dir, ['questions', 'concerns'])).toEqual([false, true]);
+    const done = await readProjectFile(dir);
+    expect(done).toMatchObject({ status: 'active', importPending: [], caughtUp: 2 });
+    for (const field of ['reimporting', 'importIncomplete', 'importIncompleteCatchUp', 'importIncompleteTries']) expect(done).not.toHaveProperty(field);
+    expect((await readThread(dir, 't-questions-approach')).messages.at(-1)).toMatchObject({ author: 'system', text: 'Updated to match your settled Plan changes.' });
+  });
+});
+
 
 describe("a catch-up importer's pack", () => {
   it("taking the repo's version runs one catch-up, whose changes hold only that edit, and no conflicts", async () => {

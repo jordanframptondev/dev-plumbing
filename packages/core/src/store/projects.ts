@@ -254,7 +254,12 @@ export async function loadProjectHome(ref: ProjectRef, types: PlumbingType[]): P
   };
   const version = { current: currentVersion(project).n, count: projectVersions(project).length };
   const catchUpDue = (await catchUpWaiting(ref.dir)) !== null;
-  return { summary, project, types: typeEntries, inbox, documents, version, catchUpDue, finalize, defense: await defenseStatus(ref.dir) };
+  // While it's importing again, the re-import is under way, so there's nothing to say yet.
+  const incomplete = project.status === 'importing' ? [] : (project.importIncomplete ?? []);
+  const importIncomplete = incomplete.length
+    ? { version: version.current, titles: incomplete.map((id) => titleOf.get(id) ?? id), again: (project.importIncompleteTries ?? 1) >= 2 }
+    : null;
+  return { summary, project, types: typeEntries, inbox, documents, version, catchUpDue, finalize, defense: await defenseStatus(ref.dir), importIncomplete };
 }
 
 const byTitle = (a: TypeItemRow, b: TypeItemRow) => a.title.localeCompare(b.title);

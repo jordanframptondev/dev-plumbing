@@ -510,6 +510,26 @@ describe('catching the items up with settled Plan changes', () => {
     expect(pack.reimport.changes).toContain('+ Log one row per reminder sent, in the events table.');
   });
 
+  it('waits for a re-import that was ended early, which the same /dev-plumbing finishes first', async () => {
+    const t = await atV2();
+    await settle(t, 'merged');
+    // The update's re-import had been ended before Flows' importer came back.
+    await writeJsonAtomic(path.join(t.dir, 'project.json'), { ...(await readProjectFile(t.dir)), importIncomplete: ['flows'] });
+    const open = await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a' });
+    // It's finished first, and the catch-up says it waits for another /dev-plumbing.
+    expect(open.body).toMatchObject({
+      kind: 'reopened',
+      next: `Tell the user: "The v2 re-import didn't finish for Flows. Finishing it now. Your settled Plan changes still need a re-import. It waits until Claude has answered: run /dev-plumbing again then." ${IMPORT_NEXT}`,
+    });
+    expect(open.body.importTypes).toEqual([{ id: 'flows', title: 'Flows', afterOthers: true }]);
+    const project = await readProjectFile(t.dir);
+    expect(project).toMatchObject({ status: 'importing', importPending: ['flows'], reimporting: { version: 2, from: 'active' }, importBy: 'w-a' });
+    // The catch-up waits for it: nothing recorded it yet.
+    expect(project.caughtUp).toBeUndefined();
+    await importAll(t, open.body.importTypes, []);
+    // Then the next /dev-plumbing catches the items up.
+    expect((await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a' })).body).toMatchObject({ kind: 'reopened', next: CATCH_UP });
+  });
   it("doesn't re-import when you kept your draft, and says it waits while Claude has a thread to answer", async () => {
     const kept = await atV2();
     await settle(kept, 'keep');
@@ -573,6 +593,73 @@ describe('an update that stopped part-way', () => {
     expect((await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a', update: false })).body.next).toBe(WAIT_NEXT);
   });
 });
+
+describe('a re-import that was ended early', () => {
+  it('is finished by the next /dev-plumbing, for just the types whose batch never came', async () => {
+    const t = await setup();
+    await rewritePlan(t, V2);
+    const yes = await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a', update: true });
+    // Every importer but Architecture's and Flows' comes back. Then the window listens, which ends the import.
+    const back = (yes.body.importTypes as { id: string }[]).filter((x) => x.id !== 'architecture' && x.id !== 'flows');
+    await importAll(t, back, QUESTIONS.map(({ message: _message, ...item }) => item));
+    expect((await t.claude('/wait', { ...base, windowId: 'w-a', timeoutSeconds: 0 })).body).toEqual({ kind: 'timeout' });
+    expect(await readProjectFile(t.dir)).toMatchObject({ status: 'active', importIncomplete: ['architecture', 'flows'] });
+    expect((await t.send('GET', P)).body.importIncomplete).toEqual({ version: 2, titles: ['Architecture', 'Flows'], again: false });
+
+    const again = await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a' });
+    expect(again.body).toMatchObject({ kind: 'reopened', next: `Tell the user: "The v2 re-import didn't finish for Architecture and Flows. Finishing it now." ${IMPORT_NEXT}` });
+    expect(again.body.importTypes).toEqual([
+      { id: 'architecture', title: 'Architecture' },
+      { id: 'flows', title: 'Flows', afterOthers: true },
+    ]);
+    expect(await readProjectFile(t.dir)).toMatchObject({ status: 'importing', importPending: ['architecture', 'flows'], reimporting: { version: 2, from: 'active' }, importBy: 'w-a' });
+    expect((await t.send('GET', P)).body.importIncomplete).toBeNull();
+
+    const results = await importAll(t, again.body.importTypes, []);
+    expect(results.at(-1)).toMatchObject({ importFinished: true });
+    expect((await readProjectFile(t.dir)).importIncomplete).toBeUndefined();
+    expect((await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a' })).body).toMatchObject({ kind: 'reopened', importTypes: [], next: WAIT_NEXT });
+  });
+
+  it('waits while Claude has a thread to answer, and ended early again, says so before it tries once more', async () => {
+    const t = await setup();
+    await rewritePlan(t, V2);
+    const yes = await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a', update: true });
+    const back = (yes.body.importTypes as { id: string }[]).filter((x) => x.id !== 'architecture' && x.id !== 'flows');
+    await importAll(t, back, QUESTIONS.map(({ message: _message, ...item }) => item));
+    expect((await t.claude('/wait', { ...base, windowId: 'w-a', timeoutSeconds: 0 })).body).toEqual({ kind: 'timeout' });
+
+    // You asked something Claude hasn't answered yet: it waits, and says so.
+    await t.send('PUT', `${P}/threads/t-questions-who/draft`, { text: 'Everyone.' });
+    expect((await t.send('POST', `${P}/submit`, { scope: 'thread', threadId: 't-questions-who' })).body).toMatchObject({ sent: 1 });
+    expect((await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a' })).body).toMatchObject({
+      kind: 'reopened',
+      importTypes: [],
+      next: `Tell the user: "The v2 re-import still needs to finish for Architecture and Flows. It waits until Claude has answered: run /dev-plumbing again then." ${WAIT_NEXT}`,
+    });
+    const wait = await t.claude('/wait', { ...base, windowId: 'w-a', timeoutSeconds: 0 });
+    expect(wait.body).toMatchObject({ kind: 'submission' });
+    expect((await t.claude('/reply', { ...base, threadId: 't-questions-who', text: 'Everyone gets them.', resolve: { decision: 'Everyone gets reminders.' } })).status).toBe(200);
+
+    // Then the next /dev-plumbing finishes it, but it's ended early again.
+    expect((await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a' })).body.next).toBe(
+      `Tell the user: "The v2 re-import didn't finish for Architecture and Flows. Finishing it now." ${IMPORT_NEXT}`,
+    );
+    expect((await t.claude('/wait', { ...base, windowId: 'w-a', timeoutSeconds: 0, finished: { submission: wait.body.submission } })).body).toEqual({ kind: 'timeout' });
+    expect((await t.send('GET', P)).body.importIncomplete).toEqual({ version: 2, titles: ['Architecture', 'Flows'], again: true });
+
+    // Not a third time on its own: it says so, and the /dev-plumbing after that tries once more.
+    expect((await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a' })).body).toMatchObject({
+      kind: 'reopened',
+      importTypes: [],
+      next: `Tell the user: "The v2 re-import didn't finish again for Architecture and Flows. Run /dev-plumbing to try again." ${WAIT_NEXT}`,
+    });
+    expect((await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a' })).body.next).toBe(
+      `Tell the user: "The v2 re-import didn't finish for Architecture and Flows. Finishing it now." ${IMPORT_NEXT}`,
+    );
+  });
+});
+
 
 describe('versions', () => {
   it('lists every version, newest first, with the current one marked', async () => {

@@ -56,6 +56,15 @@ export const plumbingProjectSchema = z.object({
   caughtUp: z.number().int().min(2).optional(),
   /** While importing: the Claude window that runs the importers. Only it, or another once it's gone, ends the import. */
   importBy: z.string().optional(),
+  /**
+   * The plumbing types (ids) whose batch never came in a re-import that was ended early. The project home says so,
+   * and the next /dev-plumbing re-imports just those. Cleared once an import finishes with every batch in.
+   */
+  importIncomplete: z.array(z.string()).optional(),
+  /** The re-import that was ended early was a catch-up, so finishing it is one too (reimporting.catchUp). */
+  importIncompleteCatchUp: z.boolean().optional(),
+  /** How many times this version's re-import was ended early. From 2, /dev-plumbing says so rather than run it again. */
+  importIncompleteTries: z.number().int().min(1).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

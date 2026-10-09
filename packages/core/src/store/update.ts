@@ -391,8 +391,10 @@ export async function startCatchUp(dir: string, o: { version: number; types: Plu
   if (project.status === 'importing') throw new ConflictError("This project is still importing. Run /dev-plumbing again once that's done.");
   const importPending = importableTypes(o.types).map((t) => t.id);
   const from = project.status === 'finalized' ? 'finalized' : 'active';
+  // It imports every type again, so a re-import that was ended early has nothing left to finish.
+  const { importIncomplete: _incomplete, importIncompleteCatchUp: _catchUp, importIncompleteTries: _tries, ...rest } = project;
   await writeProjectFile(dir, {
-    ...project,
+    ...rest,
     caughtUp: o.version,
     ...(importPending.length ? { status: 'importing' as const, importPending, reimporting: { version: o.version, from, catchUp: true }, importBy: o.windowId } : {}),
     updatedAt: (o.now ?? new Date()).toISOString(),
@@ -520,7 +522,8 @@ export async function updatePlan(
   const importPending = importableTypes(o.types).map((t) => t.id);
   // A finalized project stays Finalized only when the update left its draft as it was.
   const from = project.status === 'finalized' && !changedDraft(version) ? 'finalized' : 'active';
-  const { reimporting: _earlier, importBy: _importer, ...rest } = project;
+  // Nothing of an earlier re-import that was ended early is left to finish: this one imports every type again.
+  const { reimporting: _earlier, importBy: _importer, importIncomplete: _incomplete, importIncompleteCatchUp: _catchUp, importIncompleteTries: _tries, ...rest } = project;
   // A catch-up still waiting for the version being replaced rides along with this re-import (importPack appends its
   // settled edits to `changes`), so those edits aren't lost when the newer version comes in first.
   const carried = await catchUpWaiting(dir);
@@ -635,4 +638,48 @@ export async function removeLeftover(dir: string, name: string): Promise<void> {
   if (!(await lstat(folder))?.isDirectory()) throw new StoreError(NOT_A_LEFTOVER);
   await fs.rm(folder, { recursive: true, force: true });
   await fs.rmdir(docPath(dir, 'docs/versions')).catch(quiet);
+}
+
+/**
+ * What /open did about a re-import that was ended early: `resumed` it (the types are importing again), it `waits` for
+ * work under way, or it was ended early `again` after one resume, so it isn't run on its own a third time.
+ * `importTypes` are the types still to finish.
+ */
+export type IncompleteImport = { kind: 'resumed' | 'waits' | 'again'; version: number; importTypes: string[] };
+
+/**
+ * Finishes a re-import that was ended early (finishImport recorded importIncomplete): the types whose batch never came
+ * are imported again, as a re-import of the current version (matched by key, new items added, removed ones parked),
+ * and only those, as a catch-up again when it was one. Null, writing nothing, when there's nothing to finish or the
+ * project is importing. Types that can't be imported any more (turned off since) are dropped; with none left, the
+ * record is cleared and it's null. While updateRefusal says an update would have to wait, it `waits`, writing nothing.
+ * It runs once on its own: ended early again (importIncompleteTries 2), it's `again`, and the count goes back to 1, so
+ * the next /dev-plumbing, after the user is told, tries once more. Under the project's lock, after
+ * recoverUnfinishedUpdate.
+ */
+export async function resumeIncompleteImport(dir: string, o: { types: PlumbingType[]; now?: Date }): Promise<IncompleteImport | null> {
+  const project = await readProjectFile(dir);
+  const incomplete = project.importIncomplete ?? [];
+  if (!incomplete.length || project.status === 'importing') return null;
+  const version = currentVersion(project).n;
+  const importTypes = importableTypes(o.types)
+    .map((t) => t.id)
+    .filter((id) => incomplete.includes(id));
+  const updatedAt = (o.now ?? new Date()).toISOString();
+  const { importIncomplete: _incomplete, importIncompleteCatchUp: _catchUp, importIncompleteTries: _tries, ...rest } = project;
+  // v1 has no re-import to finish.
+  if (!importTypes.length || version < 2) {
+    await writeProjectFile(dir, { ...rest, updatedAt });
+    return null;
+  }
+  if (await updateRefusal(dir)) return { kind: 'waits', version, importTypes };
+  if ((project.importIncompleteTries ?? 1) >= 2) {
+    await writeProjectFile(dir, { ...project, importIncompleteTries: 1, updatedAt });
+    return { kind: 'again', version, importTypes };
+  }
+  const from = project.status === 'finalized' ? 'finalized' : 'active';
+  // A catch-up that was ended early is finished as one, with the settled edits as its changes.
+  const reimporting: PlumbingProject['reimporting'] = { version, from, ...(project.importIncompleteCatchUp ? { catchUp: true } : {}) };
+  await writeProjectFile(dir, { ...project, importPending: importTypes, status: 'importing', reimporting, updatedAt });
+  return { kind: 'resumed', version, importTypes };
 }

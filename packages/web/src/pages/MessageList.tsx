@@ -6,6 +6,8 @@ import remarkGfm from 'remark-gfm';
 import { api } from '../api/client';
 import { formatUpdated } from '../lib/time';
 
+/** When an importer raised this question: at import, or with a later version of the plan (a re-import). */
+const openingLabel = (m: ClaudeMessage) => (m.raisedIn ? `raised in the plan's v${m.raisedIn}` : 'raised when the plan was imported');
 const seconds = (from: string, to: string) => Math.max(0, Math.round((Date.parse(to) - Date.parse(from)) / 1000));
 const took = (s: number) => (s < 90 ? `${s} s` : `${Math.round(s / 60)} min`);
 
@@ -44,7 +46,7 @@ export function MessageList({ detail, repo, project }: { detail: ThreadDetail; r
     return (
       <div>
         <div className="text-[11.5px] text-ink-3">
-          <span className="font-semibold text-ink-2">Claude</span> · {m.opening ? 'raised when the plan was imported' : formatUpdated(m.at)}
+          <span className="font-semibold text-ink-2">Claude</span> · {m.opening ? openingLabel(m) : formatUpdated(m.at)}
         </div>
         <div className="doc mt-0.5 text-[13.5px]">
           <Markdown remarkPlugins={[remarkGfm]}>{m.text}</Markdown>

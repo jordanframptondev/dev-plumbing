@@ -13,7 +13,7 @@ const FINALIZE_PAGE = '/p/acme-app/restock/finalize';
 const EXPORTED = { clone: '~/Source/acme-app', path: 'docs/specs/restock.final.md', at: '2026-10-03T09:00:00.000Z', assets: [] };
 
 /** The parts of the project home the header reads, with Finalize blocked by two items unless overridden. */
-function home(o: { finalized?: boolean; canStart?: boolean } = {}): ProjectHome {
+function home(o: { finalized?: boolean; canStart?: boolean; importIncomplete?: ProjectHome['importIncomplete'] } = {}): ProjectHome {
   return {
     summary: { counts: { total: 3, resolved: 1, withClaude: 0, drafts: 0 } },
     project: {
@@ -23,6 +23,7 @@ function home(o: { finalized?: boolean; canStart?: boolean } = {}): ProjectHome 
       docs: { original: 'docs/original.md', draft: 'docs/draft.md', ...(o.finalized ? { exportedTo: EXPORTED } : {}) },
     },
     finalize: { canStart: o.canStart ?? false, blockingCount: 2, state: null, changesSinceFinal: 0 },
+    importIncomplete: o.importIncomplete ?? null,
   } as unknown as ProjectHome;
 }
 
@@ -70,5 +71,26 @@ describe('Whiteboard Defense in the project header', () => {
     expect(link.getAttribute('href')).toBe('/p/acme-app/restock/defense');
     expect(link.className).not.toContain('bg-button');
     expect(screen.queryByRole('button', { name: 'Whiteboard Defense' })).toBeNull();
+  });
+});
+
+describe('a re-import that was ended early, in the project header', () => {
+  it('names the version and the types that never came back, and says how to finish it', () => {
+    show(home({ importIncomplete: { version: 2, titles: ['Architecture', 'Flows', 'Testing & rollout'], again: false } }));
+    expect(screen.getByTestId('import-incomplete').textContent).toBe(
+      "The v2 re-import didn't finish for Architecture, Flows and Testing & rollout. Run /dev-plumbing to try again.",
+    );
+    cleanup();
+    show(home({ importIncomplete: { version: 3, titles: ['Architecture'], again: false } }));
+    expect(screen.getByTestId('import-incomplete').textContent).toBe("The v3 re-import didn't finish for Architecture. Run /dev-plumbing to try again.");
+    // Ended early again after /dev-plumbing tried once more.
+    cleanup();
+    show(home({ importIncomplete: { version: 3, titles: ['Architecture'], again: true } }));
+    expect(screen.getByTestId('import-incomplete').textContent).toBe("The v3 re-import didn't finish again for Architecture. Run /dev-plumbing to try again.");
+  });
+
+  it('says nothing otherwise', () => {
+    show(home());
+    expect(screen.queryByTestId('import-incomplete')).toBeNull();
   });
 });

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import {
+  andList,
   catchUpDue,
   catchUpWaiting,
   checklistLines,
@@ -56,6 +57,7 @@ import {
   requeueUnfinished,
   requeueWhiteboard,
   resolvePlan,
+  resumeIncompleteImport,
   saveDefense,
   saveProposal,
   startCatchUp,
@@ -71,6 +73,7 @@ import {
   type FinalizeRequest,
   type LoadedConfig,
   type PlanChange,
+  type IncompleteImport,
   type PlumbingType,
   type ProjectRef,
   type Submission,
@@ -119,6 +122,17 @@ function updatedLine(u: UpdateResult): string {
   if (u.fresh) return `v${u.version}: the draft now starts from the plan's v${u.version}. Your earlier draft is kept under Versions.`;
   const merged = `${u.clean} ${u.clean === 1 ? 'change' : 'changes'} merged`;
   return u.conflicts ? `v${u.version}: ${merged}, ${u.conflicts} to settle in Plan changes.` : `v${u.version}: ${merged}, nothing to settle.`;
+}
+
+/**
+ * What the skill tells the user about a re-import that was ended early: /open is finishing it, it waits for what Claude
+ * has under way, or it was ended early again and the user runs /dev-plumbing to try once more.
+ */
+function incompleteLine(r: IncompleteImport, types: PlumbingType[]): string {
+  const titles = andList(r.importTypes.map((id) => types.find((t) => t.id === id)?.title ?? id));
+  if (r.kind === 'resumed') return `The v${r.version} re-import didn't finish for ${titles}. Finishing it now.`;
+  if (r.kind === 'waits') return `The v${r.version} re-import still needs to finish for ${titles}. It waits until Claude has answered: run /dev-plumbing again then.`;
+  return `The v${r.version} re-import didn't finish again for ${titles}. Run /dev-plumbing to try again.`;
 }
 
 /** `next` with lines the skill tells the user first, as one "Tell the user" sentence, or `next` itself when there are none. */
@@ -365,6 +379,24 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
         if (outcome?.kind === 'tell') tell = outcome.line;
         if (outcome?.kind === 'updated') update = outcome.result;
       }
+      // A re-import that was ended early is finished first, for just the types whose batch never came. A catch-up that's
+      // due too then waits (the project is importing) for a later /dev-plumbing. This runs after Not now as well: Not now
+      // answers the new version's question, not this version's unfinished re-import. When it waits, or was ended early
+      // again, the user is told.
+      let incomplete: IncompleteImport | null = null;
+      if (!created && !update) {
+        incomplete = await rt.withLock(key, async () => {
+          await putBackFirst();
+          const r = await resumeIncompleteImport(ref.dir, { types: cfg.types, now: new Date(rt.now()) });
+          // Claimed under the same lock, as an update's re-import is, so another window's dp_wait can't end it first.
+          if (r?.kind === 'resumed' && body.windowId) {
+            rt.listeners.seen(body.windowId, key);
+            await claimImport(ref.dir, body.windowId);
+          }
+          return r;
+        });
+        if (incomplete?.kind === 'resumed') changed(ref);
+      }
       // Once every Plan changes thread of the current version is settled, and settling them changed the draft, the
       // items catch up with that: one re-import, run by this window, as an update's is. After Not now too, which only
       // declines a newer version. While Claude has work under way it waits, and the user is told to run /dev-plumbing
@@ -440,7 +472,7 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
         models,
         maxParallel: cfg.agents.maxParallel,
         waitingSubmissions,
-        next: telling([...recovery, ...(tell ? [tell] : []), ...(caughtUp ? [CATCH_UP] : []), ...waits], next),
+        next: telling([...recovery, ...(tell ? [tell] : []), ...(caughtUp ? [CATCH_UP] : []), ...(incomplete ? [incompleteLine(incomplete, cfg.types)] : []), ...waits], next),
       });
     }),
   );

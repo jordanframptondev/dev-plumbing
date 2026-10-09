@@ -18,7 +18,7 @@ type Props = {
   draft?: ThreadDraft | null;
   previews?: Record<string, ChangePreview>;
   compact?: boolean;
-  /** Resolved threads can't be parked, so the thread view hides Park for them. */
+  /** Resolved threads can't be parked, except one whose item was removed from the plan, so the thread view hides Park for the rest. */
   canPark?: boolean;
   onSent?: (r: SubmitResponse) => void;
 };

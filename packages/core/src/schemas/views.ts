@@ -114,6 +114,11 @@ export type ProjectHome = {
    * state of the request for a new one, or null when none is waiting, being written or failed.
    */
   defense: { ready: boolean; stale: boolean; state: WhiteboardState | null };
+  /**
+   * A re-import that was ended early, once the project isn't importing: the version it imported, the titles of the
+   * types whose batch never came, and `again` when it was ended early again after /dev-plumbing tried once more; or null.
+   */
+  importIncomplete: { version: number; titles: string[]; again: boolean } | null;
 };
 
 /** One version in the Versions list (GET …/versions, newest first). `current` marks the one the working files hold. */

@@ -133,9 +133,16 @@ async function markRemoved(dir: string, item: Item, version: number, now: Date):
   if (thread) await writeThread(dir, { ...thread, status: withClaude ? thread.status : 'parked', messages: [...thread.messages, systemLine(now, text)] });
 }
 
-/** The project once its import has finished: Active, or, after a re-import, whatever it was before the update. */
-function importDone(project: PlumbingProject, changes: Pick<PlumbingProject, 'importPending' | 'emptyTypes' | 'updatedAt'>): PlumbingProject {
-  const { reimporting, importBy: _importBy, ...rest } = project;
+/**
+ * The project once its import has finished: Active, or, after a re-import, whatever it was before the update. An import
+ * that finished clears importIncomplete and what goes with it; finishImport records them again when a re-import ends
+ * with types missing.
+ */
+function importDone(
+  project: PlumbingProject,
+  changes: Pick<PlumbingProject, 'importPending' | 'emptyTypes' | 'updatedAt' | 'importIncomplete' | 'importIncompleteCatchUp' | 'importIncompleteTries'>,
+): PlumbingProject {
+  const { reimporting, importBy: _importBy, importIncomplete: _incomplete, importIncompleteCatchUp: _catchUp, importIncompleteTries: _tries, ...rest } = project;
   return { ...rest, ...changes, status: reimporting?.from ?? 'active' };
 }
 
@@ -251,6 +258,8 @@ export async function writeImportBatch(o: {
           opening: true,
           ...(it.message.options ? { options: it.message.options } : {}),
           ...(it.message.recommended ? { recommended: it.message.recommended } : {}),
+          // A re-import's question names the version it came with.
+          ...(reimport ? { raisedIn: reimport.version } : {}),
         }
       : null;
     itemIds.push(id);
@@ -288,9 +297,10 @@ export async function writeImportBatch(o: {
 
 /**
  * Ends an import whose importers have all returned. Types that never wrote and have no items are marked "didn't
- * finish" (in a re-import, a type whose importer didn't return keeps its items as they were). The project goes back
- * to Active, or to Finalized after a finalized project's re-import. Only the window that runs the importers
- * (`importBy`) ends it, or another one once that window is no longer alive.
+ * finish" (in a re-import, a type whose importer didn't return keeps its items as they were). A re-import records
+ * every type whose batch never came in importIncomplete, so the project home says so and the next /dev-plumbing
+ * re-imports just those. The project goes back to Active, or to Finalized after a finalized project's re-import. Only
+ * the window that runs the importers (`importBy`) ends it, or another one once that window is no longer alive.
  */
 export async function finishImport(dir: string, o: { windowId?: string; isAlive?: (windowId: string) => boolean; now?: Date } = {}): Promise<boolean> {
   const now = o.now ?? new Date();
@@ -302,6 +312,23 @@ export async function finishImport(dir: string, o: { windowId?: string; isAlive?
   const missing = project.importPending
     .filter((type) => !project.emptyTypes.some((e) => e.type === type) && !items.some((i) => i.type === type))
     .map((type) => ({ type, reason: IMPORT_DID_NOT_FINISH }));
-  await writeProjectFile(dir, importDone(project, { importPending: [], emptyTypes: [...project.emptyTypes, ...missing], updatedAt: now.toISOString() }));
+  // A re-import ended early: the types whose batch never came, how many times this version's re-import was cut, and
+  // whether it was a catch-up, so the next /dev-plumbing finishes it the same way.
+  const incomplete = project.reimporting ? project.importPending : [];
+  await writeProjectFile(
+    dir,
+    importDone(project, {
+      importPending: [],
+      emptyTypes: [...project.emptyTypes, ...missing],
+      updatedAt: now.toISOString(),
+      ...(incomplete.length
+        ? {
+            importIncomplete: incomplete,
+            importIncompleteTries: (project.importIncompleteTries ?? 0) + 1,
+            ...(project.reimporting?.catchUp ? { importIncompleteCatchUp: true } : {}),
+          }
+        : {}),
+    }),
+  );
   return true;
 }

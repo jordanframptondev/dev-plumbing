@@ -647,6 +647,49 @@ describe('re-import', () => {
     expect(back.reimporting).toBeUndefined();
   });
 
+  it('a question a re-import adds names the version it was raised in, and one at import does not', async () => {
+    const dir = await reimporting([imported('who', { status: 'idle', messages: [] })]);
+    await send(dir, [
+      { ...same('who'), summary: 'Now about email and SMS.', message: { text: 'Email or SMS first?' } },
+      { key: 'how-often', title: 'How often?', summary: 'Once, or until they reorder?', message: { text: 'Remind once?' } },
+    ]);
+    // A changed item's thread, and a new item's.
+    expect((await readThread(dir, 't-questions-who')).messages.at(-1)).toMatchObject({ author: 'claude', text: 'Email or SMS first?', opening: true, raisedIn: 2 });
+    expect((await readThread(dir, 't-questions-how-often')).messages).toMatchObject([{ author: 'claude', text: 'Remind once?', opening: true, raisedIn: 2 }]);
+
+    const first = await seedProject({ project: { status: 'importing', importPending: ['questions'] } });
+    await send(first, [{ key: 'who', title: 'Who first?', summary: 'Everyone?', message: { text: 'Everyone?' } }]);
+    const [opening] = (await readThread(first, 't-questions-who')).messages;
+    expect(opening).toMatchObject({ author: 'claude', opening: true });
+    expect(opening).not.toHaveProperty('raisedIn');
+  });
+
+  it('a re-import ended early records the types whose batch never came, and one that finishes clears them', async () => {
+    const dir = await reimporting([imported('who')], { pending: ['questions', 'architecture', 'concerns'] });
+    await send(dir, [same('who')]);
+    expect(await finishImport(dir)).toBe(true);
+    // Architecture had items, so it isn't marked "didn't finish", but its batch never came either. The cut is counted.
+    const ended = await readProjectFile(dir);
+    expect(ended).toMatchObject({ status: 'active', importPending: [], importIncomplete: ['architecture', 'concerns'], importIncompleteTries: 1 });
+    // It was an update's re-import, not a catch-up.
+    expect(ended.importIncompleteCatchUp).toBeUndefined();
+
+    // The types run again, and the last batch ends the import: nothing is left to finish.
+    await writeProjectFile(dir, { ...ended, status: 'importing', importPending: ['architecture', 'concerns'], reimporting: { version: 2, from: 'active' } });
+    await writeImportBatch({ dir, type: architecture, types: TYPES, clone: '/x', batch: { noChanges: 'Nothing structural changes.' } });
+    expect((await readProjectFile(dir)).importIncomplete).toEqual(['architecture', 'concerns']);
+    await writeImportBatch({ dir, type: TYPES.find((t) => t.id === 'concerns')!, types: TYPES, clone: '/x', batch: { noChanges: 'No new risks.' } });
+    const done = await readProjectFile(dir);
+    expect(done).toMatchObject({ status: 'active', importPending: [] });
+    expect(done.importIncomplete).toBeUndefined();
+    expect(done.importIncompleteTries).toBeUndefined();
+
+    // A first import ended early records nothing: its types say "Didn't finish" on their own.
+    const first = await seedProject({ project: { status: 'importing', importPending: ['architecture', 'questions'] } });
+    await finishImport(first);
+    expect((await readProjectFile(first)).importIncomplete).toBeUndefined();
+  });
+
   it("finishing early marks only the types with no items as didn't finish", async () => {
     const dir = await reimporting([imported('who')], { from: 'finalized', pending: ['questions', 'architecture'] });
     expect(await finishImport(dir)).toBe(true);

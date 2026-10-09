@@ -80,6 +80,8 @@ export const claudeMessageSchema = z
     resolved: z.boolean().optional(),
     /** The message an importer wrote when the item was created. */
     opening: z.boolean().optional(),
+    /** On an opening a re-import wrote: the plan version it was raised in (the app says "raised in the plan's v<n>"). */
+    raisedIn: z.number().int().min(2).optional(),
   })
   .passthrough();
 

@@ -47,8 +47,9 @@ import type { PlumbingProject } from '../src/schemas';
 import { pickUpFinalize, requestFinalize } from '../src/store/finalize';
 import { finalizeChecklist } from '../src/store/checklist';
 import { ConflictError, InputError, readItem, readItems, readProjectFile, readSubmissions, readThread, readThreads, StoreError, writeItem, writeProjectFile, writeThread } from '../src/store/io';
+import { finishImport, writeImportBatch } from '../src/store/importItems';
 import { finishSubmission, pendingSubmissions, pickUp } from '../src/store/queue';
-import { listLeftovers, NOT_A_LEFTOVER, planChange, recoverUnfinishedUpdate, recoveryLines, removeLeftover, updatePlan } from '../src/store/update';
+import { listLeftovers, NOT_A_LEFTOVER, planChange, recoverUnfinishedUpdate, recoveryLines, removeLeftover, resumeIncompleteImport, updatePlan } from '../src/store/update';
 import { planHash, snapshotVersion } from '../src/store/versions';
 import { removeTempDirs } from '../../../testkit/tmp';
 import { DRAFT, listType, pair, seedProject, TYPES } from './fixtures';
@@ -819,5 +820,96 @@ describe('leftover folders', () => {
       expect((error as Error).message, name).toBe(NOT_A_LEFTOVER);
     }
     expect(await snapshot(dir)).toEqual(before);
+  });
+});
+
+describe('finishing a re-import that was ended early', () => {
+  const T4 = new Date('2026-10-07T10:00:00.000Z');
+  /** Brought v2 in, then only Questions' importer came back before the window ended the import. */
+  async function endedEarly(): Promise<string> {
+    const dir = await seed({ pairs: [pair('q1')] });
+    await update(dir, CLEAN);
+    const questions = types.find((t) => t.id === 'questions')!;
+    await writeImportBatch({ dir, type: questions, types, clone: '/x', batch: { noChanges: 'Nothing new.' } });
+    await finishImport(dir);
+    return dir;
+  }
+
+  it('imports again just the types whose batch never came, as a re-import of the same version', async () => {
+    const dir = await endedEarly();
+    expect(await readProjectFile(dir)).toMatchObject({ status: 'active', importIncomplete: ['architecture', 'concerns'], importIncompleteTries: 1 });
+    expect(await resumeIncompleteImport(dir, { types, now: T4 })).toEqual({ kind: 'resumed', version: 2, importTypes: ['architecture', 'concerns'] });
+    const project = await readProjectFile(dir);
+    expect(project).toMatchObject({
+      status: 'importing',
+      importPending: ['architecture', 'concerns'],
+      reimporting: { version: 2, from: 'active' },
+      importIncomplete: ['architecture', 'concerns'],
+      importIncompleteTries: 1,
+      updatedAt: T4.toISOString(),
+    });
+    // An update's re-import, not a catch-up.
+    expect(project.reimporting).not.toHaveProperty('catchUp');
+    // Once it's importing again, there's nothing more to start.
+    expect(await resumeIncompleteImport(dir, { types })).toBeNull();
+    // Both batches come: the import ends, and nothing is left to finish.
+    for (const id of ['architecture', 'concerns']) {
+      await writeImportBatch({ dir, type: types.find((t) => t.id === id)!, types, clone: '/x', batch: { noChanges: 'Nothing new.' } });
+    }
+    const done = await readProjectFile(dir);
+    expect(done).toMatchObject({ status: 'active', importPending: [] });
+    expect(done.importIncomplete).toBeUndefined();
+    expect(await resumeIncompleteImport(dir, { types })).toBeNull();
+  });
+
+  it('goes back to Finalized afterwards when the project was', async () => {
+    // An update that left a finalized project's draft as it was keeps it Finalized.
+    const dir = await endedEarly();
+    await writeProjectFile(dir, { ...(await readProjectFile(dir)), status: 'finalized' });
+    await resumeIncompleteImport(dir, { types });
+    expect((await readProjectFile(dir)).reimporting).toEqual({ version: 2, from: 'finalized' });
+  });
+
+  it('waits, writing nothing, while an update would have to, and says so', async () => {
+    const dir = await endedEarly();
+    const thread = await readThread(dir, 't-q1');
+    await writeThread(dir, { ...thread, status: 'with_claude' });
+    const before = await snapshot(dir);
+    expect(await resumeIncompleteImport(dir, { types })).toEqual({ kind: 'waits', version: 2, importTypes: ['architecture', 'concerns'] });
+    expect(await snapshot(dir)).toEqual(before);
+  });
+
+  it('is tried once on its own: cut short again, it says so, and the next /dev-plumbing tries once more', async () => {
+    const dir = await endedEarly();
+    expect(await resumeIncompleteImport(dir, { types })).toMatchObject({ kind: 'resumed' });
+    // Cut short again: the second cut is counted.
+    await finishImport(dir);
+    expect(await readProjectFile(dir)).toMatchObject({ status: 'active', importIncomplete: ['architecture', 'concerns'], importIncompleteTries: 2 });
+    // Not a third time on its own: it says so, and the count goes back, so the next run, after the user was told, tries.
+    expect(await resumeIncompleteImport(dir, { types, now: T4 })).toEqual({ kind: 'again', version: 2, importTypes: ['architecture', 'concerns'] });
+    expect(await readProjectFile(dir)).toMatchObject({ status: 'active', importIncomplete: ['architecture', 'concerns'], importIncompleteTries: 1 });
+    expect(await resumeIncompleteImport(dir, { types })).toMatchObject({ kind: 'resumed', version: 2 });
+  });
+
+  it("is forgotten by an update to a newer version, which re-imports every type", async () => {
+    const dir = await endedEarly();
+    await update(dir, CLEAN.replace('take two', 'take three'), { now: T4 });
+    const project = await readProjectFile(dir);
+    expect(project).toMatchObject({ status: 'importing', importPending: IMPORTABLE, reimporting: { version: 3, from: 'active' } });
+    for (const field of ['importIncomplete', 'importIncompleteCatchUp', 'importIncompleteTries']) expect(project).not.toHaveProperty(field);
+  });
+
+  it("drops types that can't be imported any more, and clears the record when none is left", async () => {
+    const dir = await endedEarly();
+    const withoutConcerns = types.map((t) => (t.id === 'concerns' ? { ...t, enabled: false } : t));
+    expect(await resumeIncompleteImport(dir, { types: withoutConcerns })).toEqual({ kind: 'resumed', version: 2, importTypes: ['architecture'] });
+
+    const other = await endedEarly();
+    const neither = types.map((t) => (t.id === 'concerns' || t.id === 'architecture' ? { ...t, enabled: false } : t));
+    expect(await resumeIncompleteImport(other, { types: neither })).toBeNull();
+    const project = await readProjectFile(other);
+    expect(project).toMatchObject({ status: 'active', importPending: [] });
+    expect(project.importIncomplete).toBeUndefined();
+    expect(project.importIncompleteTries).toBeUndefined();
   });
 });

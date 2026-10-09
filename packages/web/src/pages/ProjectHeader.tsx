@@ -1,4 +1,4 @@
-import type { ProjectHome } from '@dev-plumbing/core/schemas';
+import { andList, type ProjectHome } from '@dev-plumbing/core/schemas';
 import { useMutation } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { api } from '../api/client';
@@ -71,6 +71,11 @@ export function ProjectHeader({ home, repo, project, submitAll, submitPrimary = 
         </button>
         {open.error && <span className="text-seal">{(open.error as Error).message}</span>}
       </div>
+      {home.importIncomplete && (
+        <p className="mt-2 text-[12.5px] text-ink-2" data-testid="import-incomplete">
+          {`The v${home.importIncomplete.version} re-import didn't finish${home.importIncomplete.again ? ' again' : ''} for ${andList(home.importIncomplete.titles)}. Run /dev-plumbing to try again.`}
+        </p>
+      )}
       {/* Phones hide the buttons above, so Finalize gets its own row, with the reason it's off spelled out. */}
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 md:hidden">
         <FinalizeButton home={home} repo={repo} project={project} />

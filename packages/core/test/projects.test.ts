@@ -336,6 +336,27 @@ describe('the project home for plan versions', () => {
   });
 });
 
+describe('the project home after a re-import that was ended early', () => {
+  it('names the version and the types whose batch never came, once the project is not importing', async () => {
+    const dir = await seedProject();
+    const restock = { repo: 'acme', id: 'restock', dir };
+    expect((await loadProjectHome(restock, TYPES)).importIncomplete).toBeNull();
+    const v = { at: '2026-10-05T09:00:00.000Z', clone: '/tmp/acme', branch: 'main', commit: null };
+    const versions = [{ ...v, n: 1, hash: 'x' }, { ...v, n: 2, hash: 'y', merge: { clean: 1, conflicts: 0 } }];
+    const project = { ...(await readProjectFile(dir)), versions, importIncomplete: ['architecture', 'concerns', 'gone'] };
+    await writeProjectFile(dir, project);
+    // A type that isn't configured any more shows its id.
+    expect((await loadProjectHome(restock, TYPES)).importIncomplete).toEqual({ version: 2, titles: ['Architecture', 'Concerns', 'gone'], again: false });
+    // Cut short a second time, it says so.
+    await writeProjectFile(dir, { ...project, importIncompleteTries: 2 });
+    expect((await loadProjectHome(restock, TYPES)).importIncomplete).toEqual({ version: 2, titles: ['Architecture', 'Concerns', 'gone'], again: true });
+    // While the re-import runs again, there's nothing to say.
+    await writeProjectFile(dir, { ...project, status: 'importing', importPending: ['architecture', 'concerns'], reimporting: { version: 2, from: 'active' } });
+    expect((await loadProjectHome(restock, TYPES)).importIncomplete).toBeNull();
+  });
+});
+
+
 describe('the project home for Plan changes', () => {
   it('shows Plan changes in the navigation only when the project has such items, and first', async () => {
     const types = await defaultTypes();
