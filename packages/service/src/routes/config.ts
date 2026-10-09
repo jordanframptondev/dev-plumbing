@@ -16,6 +16,8 @@ import {
   pendingDetect,
   repoProfileSchema,
   requestDetect,
+  reservedIdProblem,
+  reservedType,
   resetToDefault,
   settingsFields,
   unflatten,
@@ -158,6 +160,9 @@ export function configRoutes(ctx: AppContext, rt: Runtime): Hono {
     const id = String(body.id ?? '').trim();
     const title = String(body.title ?? '').trim();
     if (!/^[a-z][a-z0-9-]*$/.test(id)) return c.json({ error: 'Use lowercase letters, numbers and dashes for the id, starting with a letter.' }, 400);
+    // Plan changes and Defense keep their ids: loadConfig would only report a rules file that took one.
+    const builtIn = reservedType(id);
+    if (builtIn) return c.json({ error: `The id "${id}" is kept for dev-plumbing's built-in ${builtIn.title} type. Pick another.` }, 400);
     if (!title) return c.json({ error: 'Give the plumbing type a title.' }, 400);
     const file = `${id}.md`;
     const target = path.join(ctx.configDir, 'plumbing', file);
@@ -182,6 +187,10 @@ export function configRoutes(ctx: AppContext, rt: Runtime): Hono {
     r.put(`/${segment}/:file`, async (c) => {
       const file = c.req.param('file');
       if (!FILE.test(file)) return c.json({ error: 'Unknown file.' }, 404);
+      // plumbing/plan-changes.md and plumbing/defense.md stay ignored whatever they say, so saving one is refused with
+      // what to do instead.
+      const reserved = folder === 'plumbing' ? reservedIdProblem(file.replace(/\.md$/, '')) : null;
+      if (reserved) return c.json({ error: reserved }, 400);
       const target = path.join(ctx.configDir, folder, file);
       if (!(await exists(target))) return c.json({ error: `${file} doesn't exist.` }, 404);
       const body = await readJsonObject(c);

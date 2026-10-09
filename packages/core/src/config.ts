@@ -31,6 +31,32 @@ export type LoadedConfig = {
   problems: ConfigProblem[];
 };
 
+/**
+ * The built-in types, by id. Their ids are kept for them: a rules file of that id is reported and ignored, and the
+ * built-in type is used.
+ */
+const RESERVED_TYPE_IDS = new Map<string, PlumbingType>([
+  [PLAN_CHANGES_TYPE.id, PLAN_CHANGES_TYPE],
+  [DEFENSE_TYPE.id, DEFENSE_TYPE],
+]);
+
+/** The built-in type whose id this is, or undefined. The service asks too, before it makes a new plumbing type. */
+export function reservedType(id: string): PlumbingType | undefined {
+  return RESERVED_TYPE_IDS.get(id);
+}
+
+/**
+ * What's wrong with a rules file whose id (its file name) is a built-in type's, and what to do about it, or null. A
+ * file's id must equal its name and the app can't rename or delete one, so it says how. loadConfig reports it, and
+ * the service refuses to save such a file with it.
+ */
+export function reservedIdProblem(id: string): string | null {
+  const reserved = reservedType(id);
+  return reserved
+    ? `The id "${id}" is kept for dev-plumbing's built-in ${reserved.title} type, so this file is ignored. To keep it as your own type, rename the file and the id inside it, or delete the file.`
+    : null;
+}
+
 const isMissing = (e: unknown) => (e as NodeJS.ErrnoException).code === 'ENOENT';
 const getErrorCode = (e: unknown) => (e as NodeJS.ErrnoException).code || 'UNKNOWN';
 
@@ -100,16 +126,20 @@ export async function loadConfig(dir: string): Promise<LoadedConfig> {
 
   const results: RulesFileResult[] = [];
   for (const f of await listFiles(path.join(dir, 'plumbing'), '.md', 'plumbing', problems)) {
+    // A rules file's id is its file name, so plumbing/plan-changes.md or plumbing/defense.md would take a built-in
+    // type's id. It's reported and ignored, unread, whatever is in it.
+    const reserved = reservedIdProblem(f.replace(/\.md$/, ''));
+    if (reserved) {
+      problems.push({ file: `plumbing/${f}`, message: reserved });
+      continue;
+    }
     const fileContent = await readText(path.join(dir, 'plumbing', f), `plumbing/${f}`, problems);
     const parsed = parseRulesFile(f, fileContent ?? '');
     // A rules file is the user's, so it's never built in, whatever its header says.
     results.push(parsed.ok ? { ...parsed, type: { ...parsed.type, builtIn: false } } : parsed);
   }
-  // Plan changes and Defense ship in code. The user's own plumbing/plan-changes.md or plumbing/defense.md, when it
-  // loads, replaces the built-in one.
-  for (const builtIn of [PLAN_CHANGES_TYPE, DEFENSE_TYPE]) {
-    if (!results.some((r) => r.ok && r.type.id === builtIn.id)) results.push({ ok: true, type: builtIn });
-  }
+  // Plan changes and Defense ship in code, and are always there.
+  for (const builtIn of RESERVED_TYPE_IDS.values()) results.push({ ok: true, type: builtIn });
   const { types, errors } = resolveTypes(results);
   errors.forEach((e) => problems.push({ file: `plumbing/${e.file}`, message: e.error }));
 

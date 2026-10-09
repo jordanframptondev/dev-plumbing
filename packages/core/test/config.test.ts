@@ -103,7 +103,7 @@ describe('config folder', () => {
     await expect(fs.access(marker)).rejects.toThrow();
   });
 
-  it('adds the built-in Plan changes type, which a rules file of yours replaces', async () => {
+  it('adds the built-in Plan changes type', async () => {
     await installDefaults({ configDir: dir, defaultsDir });
     const c = await loadConfig(dir);
     expect(c.types.filter((t) => t.builtIn)).toEqual([PLAN_CHANGES_TYPE, DEFENSE_TYPE]);
@@ -126,26 +126,50 @@ describe('config folder', () => {
     // A merged version that changes nothing isn't offered: Keep my draft says the same.
     expect(PLAN_CHANGES_TYPE.sections.Rules).toContain('If the merged version is the draft as it is, leave `merged` out and recommend Keep my draft.');
     expect(importableTypes(c.types).map((t) => t.id)).not.toContain('plan-changes');
-    // Yours wins, and no rules file is built in, whatever its header says.
-    await write('plumbing/plan-changes.md', '---\nid: plan-changes\ntitle: Repo changes\norder: 12\nscreen: list\nemptyMessage: None.\nbuiltIn: true\n---\n\n## Rules\n- Keep it short.\n');
+    // No rules file is built in, whatever its header says.
     await write('plumbing/rollout.md', '---\nid: rollout\ntitle: Rollout\norder: 11\nscreen: list\nemptyMessage: None.\nbuiltIn: true\n---\n\n## Rules\n- Say who flips the flag.\n');
     const mine = await loadConfig(dir);
     expect(mine.problems).toEqual([]);
-    expect(mine.types.filter((t) => t.id === 'plan-changes')).toEqual([expect.objectContaining({ title: 'Repo changes', file: 'plan-changes.md', builtIn: false })]);
-    expect(mine.types.filter((t) => t.builtIn)).toEqual([DEFENSE_TYPE]);
+    expect(mine.types.find((t) => t.id === 'rollout')).toMatchObject({ file: 'rollout.md', builtIn: false });
+    expect(mine.types.filter((t) => t.builtIn)).toEqual([PLAN_CHANGES_TYPE, DEFENSE_TYPE]);
     expect(importableTypes(mine.types).map((t) => t.id)).toContain('rollout');
   });
 
-  it('never imports Plan changes, even from a rules file of yours', async () => {
+  it('a rules file with a built-in id is reported and the built-in is used', async () => {
     await installDefaults({ configDir: dir, defaultsDir });
-    await write('plumbing/plan-changes.md', '---\nid: plan-changes\ntitle: Repo changes\norder: 12\nscreen: list\nemptyMessage: None.\n---\n\n## Rules\n- Keep it short.\n');
+    await write('plumbing/plan-changes.md', '---\nid: plan-changes\ntitle: Repo changes\norder: 12\nscreen: list\nemptyMessage: None.\nbuiltIn: true\n---\n\n## Rules\n- Keep it short.\n');
+    await write('plumbing/defense.md', '---\nid: defense\ntitle: Whiteboard questions\norder: 11\nscreen: list\nemptyMessage: None.\n---\n\n## Rules\n- Answer in a line.\n');
     const c = await loadConfig(dir);
-    expect(c.types.find((t) => t.id === 'plan-changes')).toMatchObject({ title: 'Repo changes', enabled: true, builtIn: false });
+    expect(c.problems).toEqual([
+      { file: 'plumbing/defense.md', message: 'The id "defense" is kept for dev-plumbing\'s built-in Defense questions type, so this file is ignored. To keep it as your own type, rename the file and the id inside it, or delete the file.' },
+      { file: 'plumbing/plan-changes.md', message: 'The id "plan-changes" is kept for dev-plumbing\'s built-in Plan changes type, so this file is ignored. To keep it as your own type, rename the file and the id inside it, or delete the file.' },
+    ]);
+    // As the Settings page shows it: the file, then the message.
+    expect(c.problems.map((p) => `${p.file}: ${p.message}`)).toContain(
+      'plumbing/plan-changes.md: The id "plan-changes" is kept for dev-plumbing\'s built-in Plan changes type, so this file is ignored. To keep it as your own type, rename the file and the id inside it, or delete the file.',
+    );
+    // The built-in types are the ones used, first and last, and neither file is a type of its own.
+    expect(c.types).toHaveLength(12);
+    expect(c.types[0]).toEqual(PLAN_CHANGES_TYPE);
+    expect(c.types.at(-1)).toEqual(DEFENSE_TYPE);
+    expect(c.types.filter((t) => t.id === 'plan-changes' || t.id === 'defense')).toEqual([PLAN_CHANGES_TYPE, DEFENSE_TYPE]);
+    expect(c.types.some((t) => t.file === 'plan-changes.md' || t.file === 'defense.md')).toBe(false);
+    // Neither is ever offered to an importer.
     expect(importableTypes(c.types).map((t) => t.id)).not.toContain('plan-changes');
+    expect(importableTypes(c.types).map((t) => t.id)).not.toContain('defense');
     expect(importableTypes(c.types)).toHaveLength(10);
   });
 
-  it('adds the built-in Defense type last, which a rules file of yours replaces, and never imports it', async () => {
+  it("reports a broken rules file with a built-in id the same way, without reading what's in it", async () => {
+    await write('plumbing/plan-changes.md', 'no header at all');
+    const c = await loadConfig(dir);
+    expect(c.problems).toEqual([
+      { file: 'plumbing/plan-changes.md', message: 'The id "plan-changes" is kept for dev-plumbing\'s built-in Plan changes type, so this file is ignored. To keep it as your own type, rename the file and the id inside it, or delete the file.' },
+    ]);
+    expect(c.types).toEqual([PLAN_CHANGES_TYPE, DEFENSE_TYPE]);
+  });
+
+  it('adds the built-in Defense type last, and never imports it', async () => {
     await installDefaults({ configDir: dir, defaultsDir });
     const c = await loadConfig(dir);
     expect(DEFENSE_TYPE).toMatchObject({
@@ -169,14 +193,6 @@ describe('config folder', () => {
     expect(DEFENSE_TYPE.sections.Rules).toContain('with `newItems` (type `questions` or `concerns`)');
     expect(DEFENSE_TYPE.sections.Rules).toContain('send it with `resolve` and a one-line decision that sums it up');
     expect(importableTypes(c.types).map((t) => t.id)).not.toContain('defense');
-    // Yours wins, and is never imported either.
-    await write('plumbing/defense.md', '---\nid: defense\ntitle: Whiteboard questions\norder: 11\nscreen: list\nemptyMessage: None.\n---\n\n## Rules\n- Answer in a line.\n');
-    const mine = await loadConfig(dir);
-    expect(mine.problems).toEqual([]);
-    expect(mine.types.filter((t) => t.id === 'defense')).toEqual([expect.objectContaining({ title: 'Whiteboard questions', file: 'defense.md', builtIn: false })]);
-    expect(mine.types.filter((t) => t.builtIn)).toEqual([PLAN_CHANGES_TYPE]);
-    expect(importableTypes(mine.types).map((t) => t.id)).not.toContain('defense');
-    expect(importableTypes(mine.types)).toHaveLength(10);
   });
 
   it('reads repo profiles and reports broken or duplicate ones', async () => {

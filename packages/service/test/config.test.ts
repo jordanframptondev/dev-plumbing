@@ -112,6 +112,57 @@ describe('config API', () => {
     expect(body.outputs).toEqual(['finalize.md', 'whiteboard-defense.md']);
   });
 
+  it("lists a rules file that takes a built-in type's id as a file with problems, and keeps the built-in type", async () => {
+    const { ctx } = await makeContext();
+    await fs.writeFile(path.join(ctx.configDir, 'plumbing', 'plan-changes.md'), '---\nid: plan-changes\ntitle: Repo changes\norder: 12\nscreen: list\nemptyMessage: None.\n---\n\n## Rules\n- Keep it short.\n');
+    const app = createApp(ctx);
+    const message = 'The id "plan-changes" is kept for dev-plumbing\'s built-in Plan changes type, so this file is ignored. To keep it as your own type, rename the file and the id inside it, or delete the file.';
+    const rules = (await (await call(app, '/api/rules')).json()) as { types: { id: string }[]; broken: unknown[] };
+    expect(rules.broken).toEqual([{ file: 'plan-changes.md', error: message }]);
+    expect(rules.types.map((t) => t.id)).not.toContain('plan-changes');
+    expect(rules.types).toHaveLength(10);
+    const config = (await (await call(app, '/api/config')).json()) as { problems: unknown[] };
+    expect(config.problems).toEqual([{ file: 'plumbing/plan-changes.md', message }]);
+  });
+
+  it("won't make a new plumbing type with a built-in type's id, and writes nothing", async () => {
+    const { ctx } = await makeContext();
+    const app = createApp(ctx);
+    for (const [id, title] of [
+      ['plan-changes', 'Plan changes'],
+      ['defense', 'Defense questions'],
+    ]) {
+      const res = await call(app, '/api/rules', post({ id, title: 'Mine' }));
+      expect(res.status, id).toBe(400);
+      expect(await res.json()).toEqual({ error: `The id "${id}" is kept for dev-plumbing's built-in ${title} type. Pick another.` });
+      await expect(fs.access(path.join(ctx.configDir, 'plumbing', `${id}.md`)), id).rejects.toThrow();
+    }
+    expect(((await (await call(app, '/api/config')).json()) as { problems: unknown[] }).problems).toEqual([]);
+  });
+
+  it("won't save a rules file that takes a built-in type's id, and says what to do instead", async () => {
+    const { ctx } = await makeContext();
+    const file = path.join(ctx.configDir, 'plumbing', 'plan-changes.md');
+    const text = '---\nid: plan-changes\ntitle: Repo changes\norder: 12\nscreen: list\nemptyMessage: None.\n---\n\n## Rules\n- Keep it short.\n';
+    await fs.writeFile(file, text);
+    const app = createApp(ctx);
+    // "Files with problems" opens it, and it still reads.
+    expect(((await (await call(app, '/api/rules/plan-changes.md')).json()) as { text: string }).text).toBe(text);
+    for (const [name, title] of [
+      ['plan-changes.md', 'Plan changes'],
+      ['defense.md', 'Defense questions'],
+    ]) {
+      const id = name.replace('.md', '');
+      const res = await call(app, `/api/rules/${name}`, put({ text: text.replace('Keep it short.', 'Keep it shorter.') }));
+      expect(res.status, name).toBe(400);
+      expect(await res.json()).toEqual({
+        error: `The id "${id}" is kept for dev-plumbing's built-in ${title} type, so this file is ignored. To keep it as your own type, rename the file and the id inside it, or delete the file.`,
+      });
+    }
+    expect(await fs.readFile(file, 'utf8')).toBe(text);
+    await expect(fs.access(path.join(ctx.configDir, 'plumbing', 'defense.md'))).rejects.toThrow();
+  });
+
   it('creates a new plumbing type once', async () => {
     const { ctx } = await makeContext();
     const app = createApp(ctx);
