@@ -10,16 +10,20 @@ export const execRunner: Runner = (cmd, args) =>
   );
 
 export const MARKETPLACE = 'dev-plumbing';
-export const PLUGIN_ID = `dev-plumbing@${MARKETPLACE}`;
+export const PLUGIN_ID = `plumb@${MARKETPLACE}`;
+/** What the plugin was called before it was plumb. Setup takes it out, so an existing install moves over. */
+export const OLD_PLUGIN_ID = `dev-plumbing@${MARKETPLACE}`;
 
 type Failure = Error & { stdout?: string; stderr?: string; code?: string };
 const output = (e: unknown) => `${(e as Failure).stderr ?? ''} ${(e as Failure).stdout ?? ''}`.trim();
 // Only the command's own output: execFile's message names the command, and so the repo path, which may say "already".
 const already = (e: unknown) => /already/i.test(output(e));
+const notInstalled = (e: unknown) => /not (installed|found)/i.test(output(e));
 const detail = (e: unknown) => (output(e) || (e as Error).message).split('\n')[0];
 
 /**
- * Adds this repo as a local plugin marketplace and installs dev-plumbing for your user. Safe to run again.
+ * Adds this repo as a local plugin marketplace and installs plumb for your user, in place of the old dev-plumbing
+ * plugin. Safe to run again.
  * A local marketplace loads the plugin in place, so a rebuild needs no reinstall.
  */
 export async function installPlugin(repoRoot: string, run: Runner = execRunner): Promise<string> {
@@ -36,9 +40,14 @@ export async function installPlugin(repoRoot: string, run: Runner = execRunner):
     await run('claude', ['plugin', 'marketplace', 'update', MARKETPLACE]).catch(() => undefined);
   }
   try {
+    await run('claude', ['plugin', 'uninstall', OLD_PLUGIN_ID, '--scope', 'user']);
+  } catch (e) {
+    if (!notInstalled(e)) throw new Error(`claude plugin uninstall failed: ${detail(e)}`);
+  }
+  try {
     await run('claude', ['plugin', 'install', PLUGIN_ID, '--scope', 'user']);
   } catch (e) {
     if (!already(e)) throw new Error(`claude plugin install failed: ${detail(e)}`);
   }
-  return 'Installed the Claude Code plugin. Restart any open Claude Code sessions, then run /dev-plumbing in a repo.';
+  return 'Installed the Claude Code plugin. Restart any open Claude Code sessions, then run /plumb:rough-in path/to/plan.md in a repo.';
 }
