@@ -1,30 +1,14 @@
 import type { FlowData, NodeStatus } from '@dev-plumbing/core/schemas';
 import { useId, type KeyboardEvent, type ReactNode } from 'react';
 import type { Tone } from './DiagramView';
-
-// Layout, in SVG units. Lanes are columns; steps are rows under the lane headers, in step order.
-const LANE_W = 160;
-const GAP = 24;
-const PAD = 16;
-const HEAD_H = 32;
-const TOP = PAD + HEAD_H + 20;
-const ROW_H = 44;
-const LOOP_W = 28;
-/** Roughly one character of 12 px text, to cut labels that wouldn't fit. */
-const CHAR_W = 6.5;
+import { ROW_H, sequenceLayout } from './sequenceLayout';
 
 const STROKE: Record<NodeStatus, string> = { new: 'var(--moss)', changed: 'var(--amber)', unchanged: 'var(--mist)', external: 'var(--mist)' };
 
 type Step = FlowData['steps'][number];
-type Shape = { kind: 'arrow'; from: number; to: number } | { kind: 'loop'; x: number } | { kind: 'note' };
-
-const clip = (text: string, room: number) => {
-  const max = Math.max(4, Math.floor(room / CHAR_W));
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
-};
 
 /**
- * A system flow as a sequence diagram: one column per lane, one numbered row per step.
+ * A system flow as a sequence diagram: one column per lane, one numbered row per step, where sequenceLayout puts them.
  * A step between two lanes is an arrow. A step on one lane (or with only one end) is a small loop.
  * A step with no lanes is a note across the whole width.
  */
@@ -41,20 +25,11 @@ export function SequenceView({
 }) {
   // Marker ids must be unique per drawing and safe inside url(#…).
   const uid = `dp-seq-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
+  const layout = sequenceLayout(flow);
+  const { width, height } = layout;
+  // The flow's own lanes and steps, in the layout's order, for their full labels and notes.
   const lanes = flow.lanes ?? [];
-  const columns = Math.max(lanes.length, 1);
-  const width = PAD * 2 + columns * LANE_W + (columns - 1) * GAP;
   const steps = [...flow.steps].sort((a, b) => a.n - b.n);
-  const height = TOP + steps.length * ROW_H + PAD;
-  const centre = new Map(lanes.map((l, i) => [l.id, PAD + i * (LANE_W + GAP) + LANE_W / 2]));
-
-  const shapeOf = (s: Step): Shape => {
-    const a = s.from === undefined ? undefined : centre.get(s.from);
-    const b = s.to === undefined ? undefined : centre.get(s.to);
-    if (a === undefined && b === undefined) return { kind: 'note' };
-    if (a === undefined || b === undefined || a === b) return { kind: 'loop', x: a ?? b ?? PAD };
-    return { kind: 'arrow', from: a, to: b };
-  };
 
   const asButton = (s: Step, on: boolean) =>
     onSelect
@@ -92,76 +67,69 @@ export function SequenceView({
           ))}
         </defs>
 
-        {lanes.map((l, i) => {
-          const x = PAD + i * (LANE_W + GAP);
-          const c = x + LANE_W / 2;
+        {layout.lanes.map((l, i) => {
+          const x = l.x - l.headW / 2;
           return (
             <g key={l.id} data-testid="sequence-lane" data-lane={l.id} data-status={l.status}>
-              <title>{l.label}</title>
-              <line x1={c} y1={PAD + HEAD_H} x2={c} y2={height - PAD} strokeDasharray="4 4" style={{ stroke: 'var(--mist)' }} />
+              <title>{lanes[i]!.label}</title>
+              <line x1={l.x} y1={l.lifeTop} x2={l.x} y2={l.lifeBottom} strokeDasharray="4 4" style={{ stroke: 'var(--mist)' }} />
               <rect
                 x={x}
-                y={PAD}
-                width={LANE_W}
-                height={HEAD_H}
+                y={l.headY}
+                width={l.headW}
+                height={l.headH}
                 rx={6}
                 strokeDasharray={l.status === 'external' ? '4 3' : undefined}
                 style={{ fill: 'var(--cell)', stroke: STROKE[l.status], strokeWidth: 1 }}
               />
-              <text x={c} y={PAD + HEAD_H / 2 + 4} textAnchor="middle" fontSize={12.5} style={{ fill: 'var(--text)' }}>
-                {clip(l.label, LANE_W - 16)}
+              <text x={l.x} y={l.headY + l.headH / 2 + 4} textAnchor="middle" fontSize={12.5} style={{ fill: 'var(--text)' }}>
+                {l.label}
               </text>
             </g>
           );
         })}
 
-        {steps.map((s, k) => {
-          const top = TOP + k * ROW_H;
-          const y = top + 30;
-          const shape = shapeOf(s);
+        {layout.steps.map((shape, k) => {
+          const s = steps[k]!;
+          const { y, top } = shape;
           const on = selected === s.n;
           const line = { stroke: on ? 'var(--slate)' : 'var(--text-3)', strokeWidth: on ? 2 : 1, fill: 'none' };
           const marker = `url(#${uid}-${on ? 'selected' : 'plain'})`;
-          const text = `${s.n}. ${s.label}`;
-          const textStyle = { fill: shape.kind === 'note' ? 'var(--text-2)' : 'var(--text)', fontWeight: on ? 600 : 400 };
+          const textStyle = { fill: shape.shape === 'note' ? 'var(--text-2)' : 'var(--text)', fontWeight: on ? 600 : 400 };
           let drawing: ReactNode;
           let start: { x: number; y: number };
-          if (shape.kind === 'arrow') {
-            const span = Math.abs(shape.to - shape.from);
+          if (shape.shape === 'arrow') {
             drawing = (
               <>
-                <path d={`M${shape.from},${y} H${shape.to}`} markerEnd={marker} style={line} />
-                <text x={Math.min(shape.from, shape.to) + span / 2} y={top + 18} textAnchor="middle" fontSize={12} style={textStyle}>
-                  {clip(text, span + LANE_W - 24)}
+                <path d={`M${shape.x1},${y} H${shape.x2}`} markerEnd={marker} style={line} />
+                <text x={shape.labelX} y={shape.labelY} textAnchor="middle" fontSize={12} style={textStyle}>
+                  {shape.label}
                 </text>
               </>
             );
-            start = { x: shape.from + Math.sign(shape.to - shape.from) * 12, y };
-          } else if (shape.kind === 'loop') {
-            // The label goes on whichever side of the lane has more room.
-            const right = width - PAD - (shape.x + LOOP_W + 6);
-            const left = shape.x - PAD - 6;
-            const onRight = right >= left;
+            start = { x: shape.x1 + Math.sign(shape.x2 - shape.x1) * 12, y };
+          } else if (shape.shape === 'loop') {
+            const reach = shape.x2 - shape.x1;
             drawing = (
               <>
-                <path d={`M${shape.x},${y - 8} h${LOOP_W} v16 h${-LOOP_W}`} markerEnd={marker} style={line} />
-                <text x={onRight ? shape.x + LOOP_W + 6 : shape.x - 6} y={y + 4} textAnchor={onRight ? 'start' : 'end'} fontSize={12} style={textStyle}>
-                  {clip(text, Math.max(right, left))}
+                <path d={`M${shape.x1},${y - 8} h${reach} v16 h${-reach}`} markerEnd={marker} style={line} />
+                <text x={shape.labelX} y={shape.labelY} textAnchor={shape.anchor} fontSize={12} style={textStyle}>
+                  {shape.label}
                 </text>
               </>
             );
-            start = { x: shape.x, y: y - 8 };
+            start = { x: shape.x1, y: y - 8 };
           } else {
             drawing = (
-              <text x={width / 2} y={y} textAnchor="middle" fontSize={12} style={textStyle}>
-                {clip(text, width - PAD * 2)}
+              <text x={shape.labelX} y={shape.labelY} textAnchor="middle" fontSize={12} style={textStyle}>
+                {shape.label}
               </text>
             );
-            start = { x: PAD + 8, y: y - 4 };
+            start = { x: shape.x1 + 8, y: y - 4 };
           }
           const bubble = bubbles?.[s.n];
           return (
-            <g key={s.n} data-testid="sequence-step" data-step={s.n} data-shape={shape.kind} {...asButton(s, on)}>
+            <g key={s.n} data-testid="sequence-step" data-step={s.n} data-shape={shape.shape} {...asButton(s, on)}>
               <title>{s.systemNote ? `${s.label} (${s.systemNote})` : s.label}</title>
               {onSelect && <rect x={0} y={top} width={width} height={ROW_H} rx={6} fill="transparent" className="group-focus-visible:stroke-slate" />}
               {drawing}

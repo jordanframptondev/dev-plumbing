@@ -2,3 +2,8 @@ packages:
   - packages/*
 onlyBuiltDependencies:
   - esbuild
+# Motion's own packages, pinned to the versions framer-motion@13.4.2 names, so nothing it brings is newer than it.
+overrides:
+  framer-motion: 13.4.2
+  motion-dom: 13.4.2
+  motion-utils: 13.3.0

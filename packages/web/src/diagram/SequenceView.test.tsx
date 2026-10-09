@@ -51,6 +51,34 @@ describe('SequenceView', () => {
     expect(screen.getByTestId('sequence-bubble').textContent).toBe('3');
   });
 
+  it('draws each lane and step where it always has', () => {
+    render(<SequenceView flow={flow} />);
+    const svg = screen.getByTestId('sequence').querySelector('svg')!;
+    const attrs = (selector: string, names: string[]) => [...svg.querySelectorAll(selector)].map((el) => names.map((n) => el.getAttribute(n)));
+    expect(attrs('[data-testid=sequence-lane] rect', ['x', 'y', 'width', 'height'])).toEqual([
+      ['16', '16', '160', '32'],
+      ['200', '16', '160', '32'],
+      ['384', '16', '160', '32'],
+    ]);
+    expect(attrs('[data-testid=sequence-lane] line', ['x1', 'y1', 'x2', 'y2'])).toEqual([
+      ['96', '48', '96', '244'],
+      ['280', '48', '280', '244'],
+      ['464', '48', '464', '244'],
+    ]);
+    expect(attrs('[data-testid=sequence-lane] text', ['x', 'y'])).toEqual([
+      ['96', '36'],
+      ['280', '36'],
+      ['464', '36'],
+    ]);
+    expect(attrs('[data-testid=sequence-step] path', ['d'])).toEqual([['M96,98 H280'], ['M96,134 h28 v16 h-28'], ['M96,186 H464']]);
+    expect([...svg.querySelectorAll('[data-testid=sequence-step] text')].map((t) => [t.getAttribute('x'), t.getAttribute('y'), t.getAttribute('text-anchor'), t.textContent])).toEqual([
+      ['188', '86', 'middle', '1. Find subscriptions due soon'],
+      ['130', '146', 'start', '2. Skip paused customers'],
+      ['280', '174', 'middle', '3. Send the reminder'],
+      ['280', '230', 'middle', '4. Wait for tomorrow'],
+    ]);
+  });
+
   it('lets one finger scroll the page and two fingers zoom', () => {
     render(<SequenceView flow={flow} />);
     expect(screen.getByTestId('sequence').querySelector('svg')!.style.touchAction).toBe('pan-x pan-y pinch-zoom');
