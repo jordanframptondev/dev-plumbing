@@ -253,7 +253,7 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
           clone: git.root,
           suggestedName: suggestRepoName(git.remote, git.root),
           model: models.repoSetup,
-          next: `Start the dev-plumbing:repo-setup subagent (model ${models.repoSetup}) with the clone path. When it returns, call dp_open again with the same arguments.`,
+          next: `Start the plumb:repo-setup subagent (model ${models.repoSetup}) with the clone path. When it returns, call dp_open again with the same arguments.`,
         });
       }
       // The user pressed Detect again for this repo's profile: that comes before opening.
@@ -267,7 +267,7 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
           clone: git.root,
           suggestedName: profile.name,
           model: models.repoSetup,
-          next: `The user asked for the ${profile.name} repo profile to be detected again. Start the dev-plumbing:repo-setup subagent (model ${models.repoSetup}) with the clone path. When it returns, call dp_open again with the same arguments.`,
+          next: `The user asked for the ${profile.name} repo profile to be detected again. Start the plumb:repo-setup subagent (model ${models.repoSetup}) with the clone path. When it returns, call dp_open again with the same arguments.`,
         });
       }
       const folder = repoProjectsFolder(cfg.settings, profile, ctx.home);
@@ -347,7 +347,7 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
           await requeueWhiteboard(ref.dir, isAlive);
           const refused = await updateRefusal(ref.dir);
           if (refused) return { kind: 'tell' as const, line: `The plan changed in the repo since v${change.from}. ${refused}` };
-          if (!body.update) return { kind: 'ask' as const, change, title: project.title, branch: git.branch === current.branch ? null : git.branch };
+          if (!body.update) return { kind: 'ask' as const, change, title: project.title, sourcePath: project.source.path, branch: git.branch === current.branch ? null : git.branch };
           const result = await updatePlan(ref.dir, { repoText: text, clone: git.root, branch: git.branch, commit, types: cfg.types, fresh: body.fresh === true, home: ctx.home });
           // Claimed under the same lock, by a window that counts as alive: another window's dp_wait queued behind this
           // lock would otherwise end the re-import before this window starts its importers.
@@ -364,6 +364,7 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
             repo: ref.repo,
             project: ref.id,
             title: outcome.title,
+            sourcePath: outcome.sourcePath,
             url: urlFor(ref.repo, ref.id),
             version: change.from,
             nextVersion: change.to,
@@ -446,7 +447,7 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
       rt.events.emit({ type: 'projects' });
       const waitingSubmissions = (await pendingSubmissions(ref.dir)).length;
       const next = importTypes.length
-        ? `Start one dev-plumbing:importer subagent per import type (model ${models.importer}, at most ${cfg.agents.maxParallel} at a time). Start the ones marked afterOthers only after all the others have returned. When they have all returned, call dp_wait.`
+        ? `Start one plumb:importer subagent per import type (model ${models.importer}, at most ${cfg.agents.maxParallel} at a time). Start the ones marked afterOthers only after all the others have returned. When they have all returned, call dp_wait.`
         : "Call dp_wait to listen for the user's answers.";
       if (update) {
         changed(ref);
@@ -572,7 +573,7 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
       kind: 'finalize' as const,
       request: request.id,
       model,
-      next: `Start one dev-plumbing:finalizer subagent (model ${model}) with the prompt "Write the final spec for repo ${ref.repo}, plumbing project ${ref.id}, request ${request.id}." When it returns, call dp_wait with finished: { finalize: "${request.id}" }.`,
+      next: `Start one plumb:finalizer subagent (model ${model}) with the prompt "Write the final spec for repo ${ref.repo}, plumbing project ${ref.id}, request ${request.id}." When it returns, call dp_wait with finished: { finalize: "${request.id}" }.`,
     };
   }
 
@@ -583,7 +584,7 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
       kind: 'whiteboard' as const,
       request: request.id,
       model,
-      next: `Start one dev-plumbing:whiteboard subagent (model ${model}) with the prompt "Write the Whiteboard Defense for repo ${ref.repo}, plumbing project ${ref.id}, request ${request.id}." When it returns, call dp_wait with finished: { whiteboard: "${request.id}" }.`,
+      next: `Start one plumb:whiteboard subagent (model ${model}) with the prompt "Write the Whiteboard Defense for repo ${ref.repo}, plumbing project ${ref.id}, request ${request.id}." When it returns, call dp_wait with finished: { whiteboard: "${request.id}" }.`,
     };
   }
 
@@ -595,7 +596,7 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
       repo,
       clone,
       model,
-      next: `Start one dev-plumbing:repo-setup subagent (model ${model}) with the prompt "Detect the repo profile for ${repo} again. The clone is at ${clone}." When it returns, call dp_wait with finished: { detect: "${repo}" }.`,
+      next: `Start one plumb:repo-setup subagent (model ${model}) with the prompt "Detect the repo profile for ${repo} again. The clone is at ${clone}." When it returns, call dp_wait with finished: { detect: "${repo}" }.`,
     };
   }
 

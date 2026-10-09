@@ -4,7 +4,7 @@
   "owner": { "name": "dev-plumbing" },
   "plugins": [
     {
-      "name": "dev-plumbing",
+      "name": "plumb",
       "source": "./plugin",
       "description": "Plumb a feature plan before you build it: every question, concern and change gets its own thread in a local app."
     }

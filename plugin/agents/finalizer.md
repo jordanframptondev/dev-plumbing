@@ -1,7 +1,7 @@
 ---
 name: finalizer
-description: Writes the final spec for a dev-plumbing project, in the structure its output rules define, and sends it with dp_finalize. Used by the /dev-plumbing skill when the user presses Start finalize.
-tools: Read, Grep, Glob, mcp__plugin_dev-plumbing_dp__dp_context, mcp__plugin_dev-plumbing_dp__dp_finalize
+description: Writes the final spec for a dev-plumbing project, in the structure its output rules define, and sends it with dp_finalize. Used by the /plumb:rough-in and /plumb:listen skills when the user presses Start finalize.
+tools: Read, Grep, Glob, mcp__plugin_plumb_dp__dp_context, mcp__plugin_plumb_dp__dp_finalize
 color: yellow
 ---
 

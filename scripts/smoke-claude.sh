@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# The real thing. Claude Code runs /dev-plumbing on a small plan, in a scratch repo with a Prisma schema and a
+# The real thing. Claude Code runs /plumb:rough-in on a small plan, in a scratch repo with a Prisma schema and a
 # Tailwind v4 kit. scripts/smoke-user.mjs checks the drawings the importers wrote, answers one thread the way you
 # would in the browser, and a thread subagent replies. Then it finalizes: it applies small edits, accepts Claude's
 # proposals, parks whatever still blocks Finalize, starts it, waits for the finalizer's final, accepts it into the
 # scratch repo and checks the copy. Then it changes the plan in the scratch repo, and this script stops Claude and
-# runs /dev-plumbing again: Claude asks to update to v2, merges, re-imports, and answers the Plan changes threads. It
+# runs /plumb:rough-in again: Claude asks to update to v2, merges, re-imports, and answers the Plan changes threads. It
 # fails when an importable type got no saved dp_write_items batch in the re-import. Last, the user script generates the
 # Whiteboard Defense: the second window writes it, with its presenter, in a whiteboard subagent, then answers a
 # question about it and suggests answers for one of its unknowns, sent to Questions. The report also gives the size of
@@ -126,16 +126,16 @@ round2="$work/round2"
 DP_SMOKE_ROUND2="$round2" node "$root/scripts/smoke-user.mjs" &
 user=$!
 # exec, so $! is Claude itself and not a subshell that would leave it running.
-( cd "$repo" && exec claude -p "Use the dev-plumbing skill to plumb docs/specs/restock-reminders.md." \
+( cd "$repo" && exec claude -p "Use the /plumb:rough-in skill to plumb docs/specs/restock-reminders.md." \
     --plugin-dir "$root/plugin" --permission-mode bypassPermissions \
     --output-format stream-json --verbose > "$work/transcript.jsonl" 2> "$work/claude.err" ) &
 claude=$!
-# Round 2: once the plan has changed, stop this window and run /dev-plumbing again, as you would. Claude asks whether
+# Round 2: once the plan has changed, stop this window and run /plumb:rough-in again, as you would. Claude asks whether
 # to update to v2. The service keeps running in between.
 while [ ! -e "$round2" ] && kill -0 "$user" 2>/dev/null; do sleep 2; done
 if [ -e "$round2" ]; then
   stop_claude
-  ( cd "$repo" && exec claude -p "Use the dev-plumbing skill to plumb docs/specs/restock-reminders.md. If it asks whether to update to v2, the answer is yes: merge it into my draft." \
+  ( cd "$repo" && exec claude -p "Use the /plumb:rough-in skill to plumb docs/specs/restock-reminders.md. If it asks whether to update to v2, the answer is yes: merge it into my draft." \
       --plugin-dir "$root/plugin" --permission-mode bypassPermissions \
       --output-format stream-json --verbose > "$work/transcript-2.jsonl" 2> "$work/claude-2.err" ) &
   claude=$!
@@ -149,9 +149,9 @@ report() {
   local t="$1"
   echo "Transcript: $t"
   echo "dp tool calls made inside subagents (parent_tool_use_id set):"
-  grep -h '"parent_tool_use_id":"' "$t" | grep -o '"name":"mcp__plugin_dev-plumbing_dp__[^"]*"' | sort | uniq -c || true
+  grep -h '"parent_tool_use_id":"' "$t" | grep -o '"name":"mcp__plugin_plumb_dp__[^"]*"' | sort | uniq -c || true
   echo "dp tool calls made by the main window:"
-  grep -h '"parent_tool_use_id":null' "$t" | grep -o '"name":"mcp__plugin_dev-plumbing_dp__[^"]*"' | sort | uniq -c || true
+  grep -h '"parent_tool_use_id":null' "$t" | grep -o '"name":"mcp__plugin_plumb_dp__[^"]*"' | sort | uniq -c || true
   echo "Importers started by the main window, in order (Flows and Phases should come last):"
   grep -h '"parent_tool_use_id":null' "$t" | grep -o 'Import plumbing type `[a-z0-9-]*`' | awk '!seen[$0]++' | nl -w2 -s'. ' || true
   echo "Transcript lines with a refused write (\"Nothing was saved\"):"
@@ -160,13 +160,13 @@ report() {
 echo "== Round 1: import, one thread, Finalize"
 report "$work/transcript.jsonl"
 echo "Finalizer subagents started by the main window:"
-grep -h '"parent_tool_use_id":null' "$work/transcript.jsonl" | grep -o '"name":"Agent","input":{[^}]*"subagent_type":"dev-plumbing:finalizer"' | wc -l | tr -d ' ' || true
+grep -h '"parent_tool_use_id":null' "$work/transcript.jsonl" | grep -o '"name":"Agent","input":{[^}]*"subagent_type":"plumb:finalizer"' | wc -l | tr -d ' ' || true
 echo "dp_finalize refusals (\"Fix these and call dp_finalize again\"):"
 grep -c 'Fix these and call dp_finalize again' "$work/transcript.jsonl" || true
 echo "Tokens in the finalizer's last dp_finalize call, by kind:"
-grep -h '"name":"mcp__plugin_dev-plumbing_dp__dp_finalize"' "$work/transcript.jsonl" | tail -1 | grep -o '{{[a-z]*:' | sort | uniq -c || true
+grep -h '"name":"mcp__plugin_plumb_dp__dp_finalize"' "$work/transcript.jsonl" | tail -1 | grep -o '{{[a-z]*:' | sort | uniq -c || true
 echo "Mermaid the finalizer wrote by hand in its dp_finalize calls (should be 0):"
-grep -h '"name":"mcp__plugin_dev-plumbing_dp__dp_finalize"' "$work/transcript.jsonl" | grep -c '```mermaid' || true
+grep -h '"name":"mcp__plugin_plumb_dp__dp_finalize"' "$work/transcript.jsonl" | grep -c '```mermaid' || true
 # The finalizer's pack names the rules, the draft and the last final as files to Read, so it stays small on a big plan.
 # Read from the transcript's JSON, as the Whiteboard Defense's counts are below. A Read counts when the finalizer
 # subagent made it (its parent is the Agent call that started it) on a path the pack gave. The run fails when the
@@ -174,7 +174,7 @@ grep -h '"name":"mcp__plugin_dev-plumbing_dp__dp_finalize"' "$work/transcript.js
 # them follows no rules. The clipped items' files it read are reported.
 if ! node -e '
   const fs = require("fs"), path = require("path");
-  const DP = "mcp__plugin_dev-plumbing_dp__";
+  const DP = "mcp__plugin_plumb_dp__";
   const calls = new Map();
   const results = new Map();
   for (const line of fs.readFileSync(process.argv[1], "utf8").split("\n")) {
@@ -195,7 +195,7 @@ if ! node -e '
   console.log("JSON characters in the finalize dp_context result: " + text.length);
   let pack = null;
   try { pack = JSON.parse(text); } catch {}
-  const finalizers = new Set(all.filter((c) => c.name === "Agent" && c.input.subagent_type === "dev-plumbing:finalizer").map((c) => c.id));
+  const finalizers = new Set(all.filter((c) => c.name === "Agent" && c.input.subagent_type === "plumb:finalizer").map((c) => c.id));
   const real = (f) => { try { return fs.realpathSync(f); } catch { return path.resolve(f); } };
   const read = new Set(all.filter((c) => c.name === "Read" && finalizers.has(c.parent) && typeof c.input.file_path === "string").map((c) => real(c.input.file_path)));
   const said = (key) => (!pack ? "no pack" : pack[key] == null ? "none" : read.has(real(pack[key])) ? "yes" : "no");
@@ -211,7 +211,7 @@ if ! node -e '
 ' "$work/transcript.jsonl"; then status=1; fi
 if [ -e "$work/transcript-2.jsonl" ]; then
   t2="$work/transcript-2.jsonl"
-  echo "== Round 2: the plan changed, and /dev-plumbing ran again"
+  echo "== Round 2: the plan changed, and /plumb:rough-in ran again"
   report "$t2"
   # dp_open's results are JSON inside the transcript's JSON, so their quotes may be escaped. A result sits on one
   # transcript line (twice on it, so count lines), and an input is read from the call itself, not from its copy.
@@ -220,9 +220,9 @@ if [ -e "$work/transcript-2.jsonl" ]; then
   echo "dp_open results that brought it in (kind updated):"
   grep -c 'kind[\\"]*:[ \\"]*updated' "$t2" || true
   echo "dp_open calls from the main window with update or fresh:"
-  grep -h '"parent_tool_use_id":null' "$t2" | grep -o '"name":"mcp__plugin_dev-plumbing_dp__dp_open","input":{[^}]*}' | grep -oE '"(update|fresh)":(true|false)' | sort | uniq -c || true
+  grep -h '"parent_tool_use_id":null' "$t2" | grep -o '"name":"mcp__plugin_plumb_dp__dp_open","input":{[^}]*}' | grep -oE '"(update|fresh)":(true|false)' | sort | uniq -c || true
   echo "Thread subagents started by the main window (one per Plan changes group, plus the Defense question and the unknown sent to Questions):"
-  grep -h '"parent_tool_use_id":null' "$t2" | grep -o '"name":"Agent","input":{[^}]*"subagent_type":"dev-plumbing:thread"' | wc -l | tr -d ' ' || true
+  grep -h '"parent_tool_use_id":null' "$t2" | grep -o '"name":"Agent","input":{[^}]*"subagent_type":"plumb:thread"' | wc -l | tr -d ' ' || true
   # Every importable type has to get a batch in the re-import: items, removed or noChanges. A type whose importer never
   # wrote keeps its items as they were, and the import still ends once the main window calls dp_wait, so nothing else
   # catches it. Counting calls isn't enough: a refused batch sent again counts twice. So each enabled type needs a
@@ -241,7 +241,7 @@ if [ -e "$work/transcript-2.jsonl" ]; then
       try { entry = JSON.parse(line); } catch { continue; }
       const blocks = Array.isArray(entry.message?.content) ? entry.message.content : [];
       for (const b of blocks) {
-        if (b.type === "tool_use" && b.name === "mcp__plugin_dev-plumbing_dp__dp_write_items") calls.set(b.id, b.input?.type);
+        if (b.type === "tool_use" && b.name === "mcp__plugin_plumb_dp__dp_write_items") calls.set(b.id, b.input?.type);
         if (b.type === "tool_result" && calls.has(b.tool_use_id) && !b.is_error) saved.add(calls.get(b.tool_use_id));
       }
     }
@@ -259,7 +259,7 @@ if [ -e "$work/transcript-2.jsonl" ]; then
   echo "== The Whiteboard Defense, in round 2's window"
   node -e '
     const fs = require("fs");
-    const DP = "mcp__plugin_dev-plumbing_dp__";
+    const DP = "mcp__plugin_plumb_dp__";
     const calls = new Map();
     const results = new Map();
     for (const line of fs.readFileSync(process.argv[1], "utf8").split("\n")) {
@@ -277,7 +277,7 @@ if [ -e "$work/transcript-2.jsonl" ]; then
     const all = [...calls].map(([id, c]) => ({ ...c, result: results.get(id) }));
     const kindOf = (c) => { try { return JSON.parse(c.result?.text ?? "").kind; } catch { return null; } };
     const waits = all.filter((c) => c.main && c.name === DP + "dp_wait");
-    const agents = all.filter((c) => c.main && c.name === "Agent" && c.input.subagent_type === "dev-plumbing:whiteboard");
+    const agents = all.filter((c) => c.main && c.name === "Agent" && c.input.subagent_type === "plumb:whiteboard");
     const saves = all.filter((c) => c.name === DP + "dp_whiteboard");
     const refused = saves.filter((c) => c.result?.error);
     console.log("dp_wait results that handed out the Whiteboard Defense (kind whiteboard): " + waits.filter((c) => kindOf(c) === "whiteboard").length);

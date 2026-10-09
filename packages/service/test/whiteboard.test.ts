@@ -13,7 +13,7 @@ const UNDER_WAY = 'The Whiteboard Defense is already being written.';
 const IMPORTING = "The plan is still importing. Generate the Whiteboard Defense once that's done.";
 /** dp_wait's next for a Whiteboard Defense request, with the default whiteboard model. */
 const next = (id: string) =>
-  `Start one dev-plumbing:whiteboard subagent (model opus) with the prompt "Write the Whiteboard Defense for repo acme-app, plumbing project restock-reminders, request ${id}." When it returns, call dp_wait with finished: { whiteboard: "${id}" }.`;
+  `Start one plumb:whiteboard subagent (model opus) with the prompt "Write the Whiteboard Defense for repo acme-app, plumbing project restock-reminders, request ${id}." When it returns, call dp_wait with finished: { whiteboard: "${id}" }.`;
 const SECTION_IDS = ['summary', 'diagram', 'walkthrough', 'data', 'security', 'failure', 'tradeoffs', 'complexity', 'readiness', 'unknowns'];
 
 /** A valid defense whose Whiteboard diagram section names the project's architecture item. */

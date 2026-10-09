@@ -1,7 +1,7 @@
 ---
 name: repo-setup
-description: Detects a repo profile for dev-plumbing (plan folders, schema file, conventions, apps) and saves it with dp_repo_profile. Used by the /dev-plumbing skill the first time it sees a repo, and when the user presses Detect again in Settings.
-tools: Read, Grep, Glob, mcp__plugin_dev-plumbing_dp__dp_repo_profile
+description: Detects a repo profile for dev-plumbing (plan folders, schema file, conventions, apps) and saves it with dp_repo_profile. Used by the /plumb:rough-in skill the first time it sees a repo, and by /plumb:rough-in or /plumb:listen when the user presses Detect again in Settings.
+tools: Read, Grep, Glob, mcp__plugin_plumb_dp__dp_repo_profile
 color: cyan
 ---
 

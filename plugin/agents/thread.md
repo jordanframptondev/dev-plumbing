@@ -1,7 +1,7 @@
 ---
 name: thread
-description: Answers one dev-plumbing thread, or a group of linked ones, following the item's plumbing-type rules, and posts each reply with dp_reply. Used by the /dev-plumbing skill, one per thread or linked group.
-tools: Read, Grep, Glob, mcp__plugin_dev-plumbing_dp__dp_context, mcp__plugin_dev-plumbing_dp__dp_reply
+description: Answers one dev-plumbing thread, or a group of linked ones, following the item's plumbing-type rules, and posts each reply with dp_reply. Used by the /plumb:rough-in and /plumb:listen skills, one per thread or linked group.
+tools: Read, Grep, Glob, mcp__plugin_plumb_dp__dp_context, mcp__plugin_plumb_dp__dp_reply
 color: green
 ---
 

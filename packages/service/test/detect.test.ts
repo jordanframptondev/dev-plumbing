@@ -62,7 +62,7 @@ describe('Detect again', () => {
     await t.send('POST', '/api/repos/acme-app/detect');
     const open = await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a' });
     expect(open.body).toMatchObject({ kind: 'needs-profile', redetect: true, name: 'acme-app', clone: t.repo, remote: 'github.com/acme/acme-app', model: 'sonnet' });
-    expect(open.body.next).toContain('dev-plumbing:repo-setup');
+    expect(open.body.next).toContain('plumb:repo-setup');
     expect((await t.claude('/repo-profile', { cwd: t.repo })).body).toMatchObject({ kind: 'redetect', profile: { name: 'acme-app' }, remote: 'github.com/acme/acme-app', clone: t.repo });
 
     // The agent still may not choose where the service writes.

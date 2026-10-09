@@ -6,13 +6,16 @@ import { TOOL_NAMES } from '../src/tools';
 
 const root = path.resolve(import.meta.dirname, '../../..');
 const read = (rel: string) => fs.readFileSync(path.join(root, rel), 'utf8');
-const asSeen = (tool: string) => `mcp__plugin_dev-plumbing_dp__${tool}`;
+const asSeen = (tool: string) => `mcp__plugin_plumb_dp__${tool}`;
+const ROUGH_IN = 'plugin/skills/rough-in/SKILL.md';
+const LISTEN = 'plugin/skills/listen/SKILL.md';
 
 describe('the plugin', () => {
-  it('is listed in the repo marketplace', () => {
+  it('is plumb, listed in the repo marketplace, which keeps its name', () => {
     const market = JSON.parse(read('.claude-plugin/marketplace.json'));
-    expect(market).toMatchObject({ name: 'dev-plumbing', owner: { name: expect.any(String) }, plugins: [{ name: 'dev-plumbing', source: './plugin' }] });
-    expect(JSON.parse(read('plugin/.claude-plugin/plugin.json')).name).toBe('dev-plumbing');
+    expect(market).toMatchObject({ name: 'dev-plumbing', owner: { name: expect.any(String) }, plugins: [{ name: 'plumb', source: './plugin' }] });
+    expect(JSON.parse(read('plugin/.claude-plugin/plugin.json')).name).toBe('plumb');
+    expect(fs.readdirSync(path.join(root, 'plugin/skills')).sort()).toEqual(['listen', 'rough-in']);
   });
 
   it('starts the dp server through the launcher, with a 12-hour limit', () => {
@@ -39,22 +42,86 @@ describe('the plugin', () => {
     }
   });
 
-  it('has the /dev-plumbing skill, which uses the tools and subagents by their real names', () => {
-    const skill = parseFrontMatter(read('plugin/skills/dev-plumbing/SKILL.md'));
-    expect(skill.data.name).toBe('dev-plumbing');
-    for (const s of ['dp_open', 'dp_wait', 'dev-plumbing:repo-setup', 'dev-plumbing:importer', 'dev-plumbing:thread', '$ARGUMENTS', 'finished', 'threads:', 'text:']) {
+  it('has the /plumb:rough-in skill, which uses the tools and subagents by their real names', () => {
+    const skill = parseFrontMatter(read(ROUGH_IN));
+    expect(skill.data.name).toBe('rough-in');
+    expect(String(skill.data.description)).toContain('/plumb:rough-in');
+    for (const s of ['dp_open', 'dp_wait', 'plumb:repo-setup', 'plumb:importer', 'plumb:thread', '$ARGUMENTS', 'finished', 'threads:', 'text:']) {
       expect(skill.content).toContain(s);
     }
   });
 
+  it('names the skills, subagents and tools only by their plumb names', () => {
+    const files = [ROUGH_IN, LISTEN, ...fs.readdirSync(path.join(root, 'plugin/agents')).map((f) => `plugin/agents/${f}`)];
+    for (const f of files) {
+      const text = read(f);
+      for (const old of ['/dev-plumbing', 'dev-plumbing:', 'plugin_dev-plumbing']) expect(text, `${f} still says ${old}`).not.toContain(old);
+    }
+  });
+
+  it('reopens with no path from /plumb:rough-in, and asks for a plan when there is nothing to reopen', () => {
+    const skill = parseFrontMatter(read(ROUGH_IN)).content;
+    const open = skill.slice(skill.indexOf('## 1. Open'), skill.indexOf('## 2. Import'));
+    expect(open).toContain('ask which one to open with AskUserQuestion, then call `dp_open` with `project` set to its id.');
+    expect(open).toContain('If the list is empty, this repo has no plumbing projects yet: ask the user for the path to the plan to plumb, and when they give it, call `dp_open` with `plan` set to it.');
+    expect(open).toContain('After **Not now**, the next `/plumb:rough-in` asks again.');
+  });
+
+  it('has the /plumb:listen skill, which opens an existing project without arguments and never brings a plan in', () => {
+    const skill = parseFrontMatter(read(LISTEN));
+    expect(skill.data.name).toBe('listen');
+    expect(skill.data['argument-hint']).toBeUndefined();
+    expect(String(skill.data.description)).toContain('/plumb:listen');
+    expect(String(skill.data.description)).toContain('already exists');
+    const open = skill.content.slice(skill.content.indexOf('## 1. Open'), skill.content.indexOf('## 2. Import'));
+    expect(skill.content).not.toContain('$ARGUMENTS');
+    for (const s of [
+      'Call `dp_open` with no `plan`.',
+      'Tell the user "This repo isn\'t set up for dev-plumbing yet. Run /plumb:rough-in path/to/plan.md first.", and stop.',
+      // Detect again still runs here: it's work the app queued for a listening window.
+      '**needs-profile** with `redetect: true`',
+      'with one project in `projects`, open it straight away: call `dp_open` with `project` set to its id.',
+      'With several, show the user the projects as a short list (title, and how many are waiting), ask which one to open with AskUserQuestion',
+      'If the list is empty, tell the user to run `/plumb:rough-in path/to/plan.md`, and stop.',
+      '**plan-changed**',
+      'Never ask about it',
+      'Call `dp_open` again with the same `project` and `update: false`',
+      '"The plan changed in the repo since v<n>. Run /plumb:rough-in <plan path> to bring it in."',
+      '`sourcePath`',
+      'say "the plan" in its place',
+      '**reopened**, with a non-empty `importTypes`: go to 2.',
+      '**reopened** with no `importTypes`: tell the user the project\'s `url`, then go to 3.',
+      'when `next` starts with `Tell the user: "…"`, tell the user that line first',
+    ]) {
+      expect(open).toContain(s);
+    }
+    for (const never of ['update: true', 'fresh: true', 'Update to v<n+1>']) expect(open).not.toContain(never);
+  });
+
+  it("keeps the two skills' shared steps identical, from the Listen heading to the end", () => {
+    const roughIn = read(ROUGH_IN);
+    const listen = read(LISTEN);
+    // From the start of a heading's line, to the end of the file or to the start of another heading's line.
+    const from = (text: string, heading: string, to?: string) => {
+      const at = text.indexOf(`\n${heading}\n`);
+      expect(at, `${heading} is missing`).toBeGreaterThan(0);
+      return to === undefined ? text.slice(at + 1) : text.slice(at + 1, text.indexOf(`\n${to}\n`) + 1);
+    };
+    const shared = from(roughIn, '## 3. Listen');
+    expect(shared).toContain('## Rules');
+    expect(from(listen, '## 3. Listen')).toBe(shared);
+    // listen runs the importers too, when a reopened project has types to import, and the same way.
+    expect(from(listen, '## 2. Import', '## 3. Listen')).toBe(from(roughIn, '## 2. Import', '## 3. Listen'));
+  });
+
   it('keeps one dp_wait per project, and stops when a newer one took over', () => {
-    const skill = parseFrontMatter(read('plugin/skills/dev-plumbing/SKILL.md')).content;
+    const skill = parseFrontMatter(read(ROUGH_IN)).content;
     expect(skill).toMatch(/Never call `dp_wait` while one is still running in the background for this project/);
     expect(skill).toContain('**kind: replaced**');
   });
 
   it('imports flows and phases in a second wave, and passes on only the decisions that matter', () => {
-    const skill = parseFrontMatter(read('plugin/skills/dev-plumbing/SKILL.md')).content;
+    const skill = parseFrontMatter(read(ROUGH_IN)).content;
     expect(skill).toContain('afterOthers');
     expect(skill).toContain('decisionCount');
     expect(skill).toMatch(/When all of those have returned, start the entries with `afterOthers: true`/);
@@ -102,14 +169,14 @@ describe('the plugin', () => {
     expect(finalizer).not.toContain('anywhere else');
     for (const gone of ['- `rules`:', '- `draft`:', '- `previousFinal`:']) expect(finalizer).not.toContain(gone);
     expect(parseFrontMatter(read('plugin/agents/finalizer.md')).data.color).toBe('yellow');
-    const skill = parseFrontMatter(read('plugin/skills/dev-plumbing/SKILL.md')).content;
-    for (const s of ['dev-plumbing:finalizer', '**kind: finalize**', '> Write the final spec for repo `<repo>`, plumbing project `<project>`, request `<request>`.', 'finished: { finalize:']) {
+    const skill = parseFrontMatter(read(ROUGH_IN)).content;
+    for (const s of ['plumb:finalizer', '**kind: finalize**', '> Write the final spec for repo `<repo>`, plumbing project `<project>`, request `<request>`.', 'finished: { finalize:']) {
       expect(skill).toContain(s);
     }
   });
 
   it('runs the finalizer, the detection subagent and the whiteboard subagent in the foreground, before listening again', () => {
-    const skill = parseFrontMatter(read('plugin/skills/dev-plumbing/SKILL.md')).content;
+    const skill = parseFrontMatter(read(ROUGH_IN)).content;
     const section = (from: string, to: string) => skill.slice(skill.indexOf(from), skill.indexOf(to));
     const foreground = 'Run it in the foreground and wait for its line: calling `dp_wait` before it returns fails the request.';
     expect(section('## 5. Write the final', '## 6.')).toContain(foreground);
@@ -151,9 +218,9 @@ describe('the plugin', () => {
     ]) {
       expect(agent.content).toContain(s);
     }
-    const skill = parseFrontMatter(read('plugin/skills/dev-plumbing/SKILL.md')).content;
+    const skill = parseFrontMatter(read(ROUGH_IN)).content;
     for (const s of [
-      'dev-plumbing:whiteboard',
+      'plumb:whiteboard',
       '**kind: whiteboard**: write the Whiteboard Defense (7)',
       '**Generate**',
       '> Write the Whiteboard Defense for repo `<repo>`, plumbing project `<project>`, request `<request>`.',
@@ -197,13 +264,13 @@ describe('the plugin', () => {
     const setup = parseFrontMatter(read('plugin/agents/repo-setup.md'));
     expect(String(setup.data.description)).toContain('Detect again');
     for (const s of ['`redetect`', 'send the whole detected profile', "the service keeps your name, match and the user's own settings"]) expect(setup.content).toContain(s);
-    const skill = parseFrontMatter(read('plugin/skills/dev-plumbing/SKILL.md')).content;
+    const skill = parseFrontMatter(read(ROUGH_IN)).content;
     for (const s of ['redetect: true', '**kind: detect-profile**', '> Detect the repo profile for `<repo>` again. The clone is at `<clone>`.', 'finished: { detect:']) {
       expect(skill).toContain(s);
     }
   });
   it('asks before bringing a changed plan in, and has importers re-import by key, removing only what they list', () => {
-    const skill = parseFrontMatter(read('plugin/skills/dev-plumbing/SKILL.md')).content;
+    const skill = parseFrontMatter(read(ROUGH_IN)).content;
     const open = skill.slice(skill.indexOf('## 1. Open'), skill.indexOf('## 2. Import'));
     for (const s of [
       '**plan-changed**',

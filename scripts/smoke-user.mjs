@@ -3,7 +3,7 @@
 // small edits, accepts Claude's proposals, parks whatever still blocks Finalize, starts it, waits for the finalizer's
 // final, accepts it into the scratch repo and checks the copy. Then the plan changes in the repo: it rewrites a line
 // round 1 changed in the draft, and a section the draft never changed, removes a small one, and asks the runner for a
-// second /dev-plumbing. It checks the update to v2, the merge, the re-import and the Plan changes threads, and accepts
+// second /plumb:rough-in. It checks the update to v2, the merge, the re-import and the Plan changes threads, and accepts
 // Claude's merged version on each, and checks what the update left: what v2 changed on each changed item, a re-import
 // that finished, and whether a catch-up re-import is due. Last, it generates the Whiteboard Defense, checks it against
 // the rules file and its presenter against the project's drawings, asks Claude about its Security model and sends one
@@ -15,7 +15,7 @@ import path from 'node:path';
 
 const dir = process.env.DEV_PLUMBING_HOME;
 const long = process.env.DP_SMOKE_LONG === '1';
-// The runner watches for this file, then stops the Claude window and runs /dev-plumbing again.
+// The runner watches for this file, then stops the Claude window and runs /plumb:rough-in again.
 const round2 = process.env.DP_SMOKE_ROUND2;
 if (!round2) throw new Error('DP_SMOKE_ROUND2 is not set. Run this through scripts/smoke-claude.sh.');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -281,7 +281,7 @@ if (missing.length) throw new Error(`Finalize didn't land:\n- ${missing.join('\n
 // 1. a line round 1 changed in the draft gets new text in the repo too, so both sides changed it: a conflict;
 // 2. one section the draft never changed gets new text, which should merge cleanly;
 // 3. one small section the draft never changed is removed, and its items should be parked.
-// The runner then stops this Claude window and runs /dev-plumbing again, as you would, saying yes to "Update to v2?".
+// The runner then stops this Claude window and runs /plumb:rough-in again, as you would, saying yes to "Update to v2?".
 const NEW_TEXT = {
   Approach:
     "A daily job at 9:00 in the customer's time zone finds subscriptions due in the next few days and sends a reminder. We haven't decided whether reminders go by SMS, email or both, or how many days before the due date to send them.",
@@ -352,7 +352,7 @@ const edits = [
 ];
 log(`Changed the plan in the repo: ${edits.join('; ')}.`);
 fs.writeFileSync(round2, new Date().toISOString());
-log('Asked the runner to stop this Claude window and run /dev-plumbing again.');
+log('Asked the runner to stop this Claude window and run /plumb:rough-in again.');
 
 const updateAt = Date.now();
 await until('the update to v2 and its re-import', async () => {
@@ -479,7 +479,7 @@ for (const r of conflicts) {
   else if (pick.change.md?.length) editedBySettling.push(r.title);
 }
 
-// The catch-up. Once every Plan changes thread of v2 is settled, the next /dev-plumbing re-imports once more, so the
+// The catch-up. Once every Plan changes thread of v2 is settled, the next /plumb:listen re-imports once more, so the
 // items catch up with what was settled, but only when settling one changed the draft: an accepted option with edits.
 // Keep my draft, which Claude recommended in the earlier runs, changes nothing, and answers to other items don't
 // count. This run doesn't start a third window, so it checks that the project home offers the catch-up exactly then.

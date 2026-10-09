@@ -1,7 +1,7 @@
 ---
 name: importer
-description: Imports one plumbing type from a plan into a dev-plumbing project, following that plumbing type's rules file. Used by the /dev-plumbing skill, one per plumbing type.
-tools: Read, Grep, Glob, mcp__plugin_dev-plumbing_dp__dp_context, mcp__plugin_dev-plumbing_dp__dp_write_items
+description: Imports one plumbing type from a plan into a dev-plumbing project, following that plumbing type's rules file. Used by the /plumb:rough-in and /plumb:listen skills, one per plumbing type.
+tools: Read, Grep, Glob, mcp__plugin_plumb_dp__dp_context, mcp__plugin_plumb_dp__dp_write_items
 color: blue
 ---
 

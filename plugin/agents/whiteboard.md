@@ -1,7 +1,7 @@
 ---
 name: whiteboard
-description: Writes the Whiteboard Defense for a dev-plumbing project, following the user's Whiteboard Defense rules, and sends it with dp_whiteboard. Used by the /dev-plumbing skill when the user presses Generate on the Whiteboard Defense page.
-tools: Read, Grep, Glob, mcp__plugin_dev-plumbing_dp__dp_context, mcp__plugin_dev-plumbing_dp__dp_whiteboard
+description: Writes the Whiteboard Defense for a dev-plumbing project, following the user's Whiteboard Defense rules, and sends it with dp_whiteboard. Used by the /plumb:rough-in and /plumb:listen skills when the user presses Generate on the Whiteboard Defense page.
+tools: Read, Grep, Glob, mcp__plugin_plumb_dp__dp_context, mcp__plugin_plumb_dp__dp_whiteboard
 color: green
 ---
 

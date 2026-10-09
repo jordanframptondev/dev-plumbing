@@ -122,7 +122,7 @@ async function stoppedUpdate(t: Setup, draft: string) {
 const ASK_V2 =
   'Ask the user: "The plan changed in the repo since v1 (3 lines added, 3 removed). Update to v2?" with the options "Update to v2" and "Not now". Then call dp_open again with the same plan or project and update: true or update: false.';
 const IMPORT_NEXT =
-  'Start one dev-plumbing:importer subagent per import type (model sonnet, at most 4 at a time). Start the ones marked afterOthers only after all the others have returned. When they have all returned, call dp_wait.';
+  'Start one plumb:importer subagent per import type (model sonnet, at most 4 at a time). Start the ones marked afterOthers only after all the others have returned. When they have all returned, call dp_wait.';
 const WAIT_NEXT = "Call dp_wait to listen for the user's answers.";
 
 describe('bringing a changed plan in', () => {
@@ -147,6 +147,7 @@ describe('bringing a changed plan in', () => {
       repo: 'acme-app',
       project: 'restock-reminders',
       title: 'Restock reminders',
+      sourcePath: PLAN,
       url: 'http://localhost:4545/p/acme-app/restock-reminders',
       version: 1,
       nextVersion: 2,
@@ -159,6 +160,14 @@ describe('bringing a changed plan in', () => {
       next: ASK_V2,
     });
     expect(await snapshot(t.dir)).toEqual(before);
+  });
+
+  it("names the plan's path when the project was opened by id, as /plumb:listen does", async () => {
+    const t = await setup();
+    await rewritePlan(t, V2);
+    const open = await t.claude('/open', { cwd: t.repo, project: 'restock-reminders', windowId: 'w-a' });
+    expect(open.body).toMatchObject({ kind: 'plan-changed', version: 1, sourcePath: PLAN });
+    expect((await t.claude('/open', { cwd: t.repo, project: 'restock-reminders', windowId: 'w-a', update: false })).body).toMatchObject({ kind: 'reopened' });
   });
 
   it('declining the update changes nothing', async () => {
