@@ -1,13 +1,13 @@
 # How dev-plumbing works with Claude Code
 
-This guide explains, in plain terms, what each part of dev-plumbing does, how it plugs into Claude Code, and what happens between "I ran `/dev-plumbing`" and "Claude answered my thread".
+This guide explains, in plain terms, what each part of dev-plumbing does, how it plugs into Claude Code, and what happens between "I ran `/plumb:rough-in`" and "Claude answered my thread".
 
 ## The short version
 
 - **dev-plumbing has two halves.**
   - **The app:** a small program on your Mac, plus a web page. It stores your plumbing projects and lets you read and answer threads.
   - **The plugin:** an add-on for **Claude Code** that lets Claude work with that app.
-- **`/dev-plumbing` is a Claude Code command, not a terminal command.** You type it inside a Claude Code session (the `claude` CLI, the desktop app or an IDE extension). A plain shell doesn't know it.
+- **`/plumb:rough-in` and `/plumb:listen` are Claude Code commands, not terminal commands.** You type them inside a Claude Code session (the `claude` CLI, the desktop app or an IDE extension). A plain shell doesn't know them.
 - **Claude never edits your plan or your code.** It reads them, and writes only into dev-plumbing's own files, through a few dedicated tools. The only things that land in your repo are the final spec and its mockups in `<name>.assets/`, when you accept the final, and the Whiteboard Defense as `<name>.whiteboard-defense.md`, when you export it.
 - **Your main Claude window stays light.** It hands every real piece of work to **subagents**: helper Claudes, each with its own fresh memory. It only ever sees one-line summaries.
 - **The app works without Claude.** You can read, answer and save drafts any time. You only need a Claude window listening for Claude to reply.
@@ -19,7 +19,7 @@ This guide explains, in plain terms, what each part of dev-plumbing does, how it
 | **The service** | A small Node program that holds everything together. It reads and writes your projects, serves the web app, and answers the plugin's requests. It only listens on your own Mac (`127.0.0.1`, port 4545 by default). | Runs from this checkout's build. `dev-plumbing start`, `stop` and `status` control it. |
 | **The web app** | The pages you use in the browser: projects, threads, lists, drawings, the Draft and Settings. It gets live updates from the service, so replies appear without reloading. | Served by the service at `http://127.0.0.1:4545`. |
 | **The CLI** | The `dev-plumbing` command in your terminal. `setup` creates your config, installs the plugin, and can turn on start-at-login. | `packages/cli` |
-| **The plugin** | The Claude Code add-on: one skill, five agents and one MCP server, all explained below. | `plugin/` in this repo. Claude Code loads it from here. |
+| **The plugin** | The Claude Code add-on, `plumb`: two skills, five agents and one MCP server, all explained below. | `plugin/` in this repo. Claude Code loads it from here. |
 | **Your config** | Settings, models, repo profiles, and the rules for each plumbing type, all in plain files you can edit (or edit in the app). | `~/.dev-plumbing/` |
 | **Your projects** | One folder per plumbing project: the plan's copies, items, threads and history. | The projects folder from Settings (default `~/dev-plumbing-projects`), or the one a repo profile sets. |
 
@@ -27,19 +27,23 @@ This guide explains, in plain terms, what each part of dev-plumbing does, how it
 
 A plugin is a bundle that teaches Claude Code new things. dev-plumbing's plugin bundles three kinds of things.
 
-### 1. A skill: the instructions behind `/dev-plumbing`
+### 1. Two skills: the instructions behind `/plumb:rough-in` and `/plumb:listen`
 
-A **skill** is a Markdown file of instructions Claude follows when you call it. Ours is `plugin/skills/dev-plumbing/SKILL.md`.
-- Claude Code lists it as `/dev-plumbing:dev-plumbing`: plugin name, then skill name. Plain `/dev-plumbing` also works.
-- It tells the main window exactly what to do:
+A **skill** is a Markdown file of instructions Claude follows when you call it. Ours are `plugin/skills/rough-in/SKILL.md` and `plugin/skills/listen/SKILL.md`.
+- Claude Code lists them as `/plumb:rough-in` and `/plumb:listen`: plugin name, then skill name.
+- **`/plumb:rough-in path/to/plan.md`** plumbs a plan. It imports it the first time, and when the plan changed in the repo, it asks to bring the new version in. Without a path, it lists this repo's plumbing projects to reopen. Then it listens.
+- **`/plumb:listen`** takes no arguments. It attaches the window to one of this repo's plumbing projects that already exists, and listens: in a fresh session, or when the app says no Claude window is listening. It never brings a plan in. When the plan changed, it opens the project as it was and tells you to run `/plumb:rough-in`.
+- Each tells the main window exactly what to do:
   - open the project;
   - start subagents;
   - listen for your answers;
   - never read the plan itself.
 
+  Only opening differs: from the import on, their steps are the same, word for word, and a test keeps them so.
+
 ### 2. Agents: the helpers that do the real work
 
-An **agent** (a "subagent" when it runs) is a separate Claude with its own instructions, its own short list of allowed tools, and a fresh, empty memory. Ours are in `plugin/agents/`:
+An **agent** (a "subagent" when it runs) is a separate Claude with its own instructions, its own short list of allowed tools, and a fresh, empty memory. Ours are in `plugin/agents/`, and Claude Code names them `plumb:repo-setup`, `plumb:importer` and so on:
 
 | Agent | When it runs | What it may use |
 |---|---|---|
@@ -59,7 +63,7 @@ Which Claude model each agent uses is set in `~/.dev-plumbing/agents.json`. It a
 
 - **How ours starts.** It is set up in `plugin/.mcp.json` under the name `dp`. Claude Code starts it in the background when a session starts, by running `plugin/bin/dp-mcp.sh`, which runs `dist/mcp.mjs` with Node.
 - **What it does.** It holds no data itself. Each tool call becomes a request to the dev-plumbing service, carrying a secret token that only your user account can read (`~/.dev-plumbing/run/service.json`). If the service isn't running, the MCP server starts it.
-- **Tool names.** Claude Code names plugin tools `mcp__plugin_<plugin>_<server>__<tool>`, so `dp_wait` is really `mcp__plugin_dev-plumbing_dp__dp_wait`.
+- **Tool names.** Claude Code names plugin tools `mcp__plugin_<plugin>_<server>__<tool>`, so `dp_wait` is really `mcp__plugin_plumb_dp__dp_wait`.
 
 | Tool | Used by | What it does |
 |---|---|---|
@@ -74,12 +78,13 @@ Which Claude model each agent uses is set in `~/.dev-plumbing/agents.json`. It a
 
 ### How the plugin gets installed
 
-`dev-plumbing setup` runs two Claude Code commands for you:
-1. `claude plugin marketplace add <this repo>` registers this repo as a **marketplace**, a catalogue of plugins. The catalogue is `.claude-plugin/marketplace.json`.
-2. `claude plugin install dev-plumbing@dev-plumbing --scope user` installs the plugin for your user, so it works in every repo.
+`dev-plumbing setup` runs three Claude Code commands for you:
+1. `claude plugin marketplace add <this repo>` registers this repo as a **marketplace**, a catalogue of plugins, called `dev-plumbing`. The catalogue is `.claude-plugin/marketplace.json`.
+2. `claude plugin uninstall dev-plumbing@dev-plumbing --scope user` takes out the plugin's old name, from before it was `plumb`. When it isn't installed, setup carries on.
+3. `claude plugin install plumb@dev-plumbing --scope user` installs the plugin for your user, so it works in every repo.
 
 Two things to know:
-- **Plugins load when a Claude Code session starts.** A session that was already open before setup won't see `/dev-plumbing`. Start a new one, or run `/reload-plugins` in the open one. To keep a conversation when you start a new session, use `claude --continue`.
+- **Plugins load when a Claude Code session starts.** A session that was already open before setup won't see `/plumb:rough-in` or `/plumb:listen`. Start a new one, or run `/reload-plugins` in the open one. To keep a conversation when you start a new session, use `claude --continue`.
 - **The plugin runs in place from this checkout.** Because the marketplace is a folder on your Mac, Claude Code loads the plugin straight from `plugin/` here, including the built `plugin/dist/mcp.mjs`. It also keeps a copy in `~/.claude/plugins/cache/`, but sessions use this checkout. The app (the service) runs from this checkout's build too. So:
   - **Keep this checkout.** If you move or delete it, the plugin and the app both stop working, until you run `dev-plumbing setup` again from the new location.
   - **After you pull changes:**
@@ -93,7 +98,7 @@ Two things to know:
 ```
  You, in Claude Code              Claude Code                         dev-plumbing service          You, in the browser
  ───────────────────              ───────────                         ────────────────────          ───────────────────
- /dev-plumbing docs/specs/x.md ──► main window follows the skill
+ /plumb:rough-in docs/specs/x.md ► main window follows the skill
                                    dp_open ─────────────────────────► makes the project:
                                                                        original.md + draft.md
                                    (first time in this repo:
@@ -110,7 +115,7 @@ Two things to know:
                                    dp_wait again (listening…) ──────►
 ```
 
-1. **Open.** You run `/dev-plumbing path/to/plan.md`. The main window calls `dp_open`.
+1. **Open.** You run `/plumb:rough-in path/to/plan.md`. The main window calls `dp_open`.
    - The service copies the plan into the project as `original.md`, the plan as the repo has it, and `draft.md`, which is where accepted changes go.
    - The plan in your repo is never edited.
 2. **Repo profile, first time only.** If dev-plumbing hasn't seen this repo before, a `repo-setup` agent detects a profile: plan folders, schema file, conventions and apps. You can change it in **Settings → Repos**. That is also where you choose a separate projects folder for this repo; the agent isn't allowed to.
@@ -133,7 +138,7 @@ Two things to know:
 - **Background.** After two minutes, Claude Code moves the waiting `dp_wait` call into the background. You can keep chatting in that Claude window; when you send something from the app, the result arrives and Claude carries on.
 - **Long waits.** While it waits, the MCP server sends small progress updates, which keep the call from timing out. The plugin allows a wait of up to 12 hours. After about 11.5 hours `dp_wait` returns "still waiting" and Claude simply calls it again.
 - **"Claude listening".** The app shows this mark while a Claude window is actually waiting. If none is, Send still works: your answers are saved and queued, and the app tells you "No Claude window is listening".
-- **Picking up queued answers.** The next time you run `/dev-plumbing` and reopen the project, Claude picks them up.
+- **Picking up queued answers.** Run `/plumb:listen` in any clone of the repo, and Claude picks them up. With one plumbing project in the repo, it opens it straight away; with several, it asks which.
 - **If something fails.** If a Claude window closes mid-answer, or an agent fails, the unanswered threads come back to you as **Your turn**, with your answer kept as a draft, so you can send them again.
 
 ## How your answers change the plan
@@ -210,17 +215,18 @@ When the threads that matter are answered, **Finalize spec** (in the project's h
 
 Plans change after they're imported: someone edits the spec, or you pull a newer one. dev-plumbing never notices by itself. You bring the changes in when you're ready.
 
-1. **Run `/dev-plumbing` again,** with the plan's path or by picking the project. The service compares the plan in this clone with the project's current version. If they differ, nothing is written yet, and Claude asks, for example: "The plan changed in the repo since v1 (12 lines added, 3 removed). Update to v2?"
+1. **Run `/plumb:rough-in` again,** with the plan's path or by picking the project. The service compares the plan in this clone with the project's current version. If they differ, nothing is written yet, and Claude asks, for example: "The plan changed in the repo since v1 (12 lines added, 3 removed). Update to v2?"
    - When this clone is on another branch than that version came from, the question names the branch. When this clone has a version the project already had, for example because it hasn't pulled yet, Claude says there's nothing to bring in.
    - When merging would leave much of your draft to settle, because the repo's version is mostly a rewrite, or when only the formatting changed, Claude says so and offers a third answer, **Start the draft from v2**: the draft becomes the repo's new version, and the one you had stays under **Versions**.
    - **Not now** opens the project as it was. Claude asks again the next time.
-   - The update waits while Claude has threads to answer in the project, or while an import or a finalize is under way. Then the project opens as usual, so Claude can finish that work first, and Claude tells you to run `/dev-plumbing` again afterwards.
+   - `/plumb:listen` never asks: it opens the project as it was, and tells you to run `/plumb:rough-in` with the plan's path to bring the new version in.
+   - The update waits while Claude has threads to answer in the project, or while an import or a finalize is under way. Then the project opens as usual, so Claude can finish that work first, and Claude tells you to run `/plumb:rough-in` again afterwards.
 2. **Update to v2** brings the new version in, in one step:
    - **The version you had is kept.** `original.md`, `draft.md` and the items are copied to `docs/versions/v1/` before anything else is written.
    - **The new plan is merged into your draft.** It's a three-way merge with `git merge-file`, of the old plan, your draft and the repo's new plan. What only the repo changed goes into your draft. Where you and the repo both changed the same passage, your draft keeps your text, so you never see conflict markers, and that passage becomes a **Plan changes** item. The draft as the merge left it is kept too, for the version's page.
    - **`original.md` becomes the repo's new plan,** and the project's title follows its first heading.
 
-   If any part of this fails, what it wrote is put back. If even that stops part-way, the next `/dev-plumbing` finishes putting it back before anything else, and Claude tells you: "An earlier update to v2 didn't finish, and was put back." If your draft was changed in the meantime, it's kept, and your plan and draft from before the update are set aside under `docs/versions/v<n>.unfinished-<stamp>/`; Claude then adds which of your files were kept and where your files from before the update are. That folder is then the only copy of your draft as it was before the update. Nothing removes it by itself: the Versions page lists it, with **Remove** (step 6).
+   If any part of this fails, what it wrote is put back. If even that stops part-way, the next `/plumb:rough-in` or `/plumb:listen` finishes putting it back before anything else, and Claude tells you: "An earlier update to v2 didn't finish, and was put back." If your draft was changed in the meantime, it's kept, and your plan and draft from before the update are set aside under `docs/versions/v<n>.unfinished-<stamp>/`; Claude then adds which of your files were kept and where your files from before the update are. That folder is then the only copy of your draft as it was before the update. Nothing removes it by itself: the Versions page lists it, with **Remove** (step 6).
 3. **Plan changes.** Each passage you both changed is one item, under **Plan changes**, first in the project's navigation. It's only there once an update finds such a passage.
    - The item shows **Your draft**, **The repo (v2)** and **Before (v1)**. When the repo moved the passage elsewhere, it says where, since your draft then has both copies.
    - Its thread goes straight to Claude. When a Claude window listens, a `thread` subagent offers three choices, each ready to accept in one click: a merged version (recommended), **Take the repo's version** and **Keep my draft**. Accept one, or answer, as in any thread.
@@ -233,12 +239,12 @@ Plans change after they're imported: someone edits the spec, or you pull a newer
    - **an item whose part of the plan was removed** is parked, never deleted, with "Removed from the plan in v2.". If Claude is working on its thread right then, it's marked "May need another look" instead, and parked once Claude's reply lands. The list shows "removed from the plan in v2" on it, and Finalize lists a parked one under "Parked: left out of the final". If a later version brings that part back, or you unpark it, it's back in the plan, and resolved again if its answer still stands. Its thread offers **Park** even when it's resolved, so you can leave it out of the final again;
    - **items you or Claude added** are never touched.
 
-   A second listening window can't end a re-import early. If a re-import is cut short anyway, for example because the Claude window closed, the project's header says which types didn't finish, such as "The v2 re-import didn't finish for Flows. Run /dev-plumbing to try again.", and the next `/dev-plumbing` says it's finishing it and runs just those importers again (as a catch-up again, when it was one, step 5, and with the settled Plan changes it carried, when it carried some). While Claude has threads to answer, it waits, and Claude says so: run `/dev-plumbing` again once they're answered. It's tried once on its own: cut short a second time, the header says "The v2 re-import didn't finish again for Flows. Run /dev-plumbing to try again.", the next `/dev-plumbing` says that rather than run it, and the one after tries once more.
+   A second listening window can't end a re-import early. If a re-import is cut short anyway, for example because the Claude window closed, the project's header says which types didn't finish, such as "The v2 re-import didn't finish for Flows. Run /plumb:listen to try again.", and the next `/plumb:listen` or `/plumb:rough-in` says it's finishing it and runs just those importers again (as a catch-up again, when it was one, step 5, and with the settled Plan changes it carried, when it carried some). While Claude has threads to answer, it waits, and Claude says so: run `/plumb:listen` again once they're answered. It's tried once on its own: cut short a second time, the header says "The v2 re-import didn't finish again for Flows. Run /plumb:listen to try again.", the next one says that rather than run it, and the one after tries once more.
 
    When they're done, the project is **Active** again. A **Finalized** project stays Finalized only when the update left its draft as it was; otherwise the Finalize page says "The plan's v2 came in since the last final."
-5. **Catch up.** Settling a Plan changes thread can change your draft, but the importers ran before you settled it, so the items may not match it yet. Once every Plan changes thread of the version is settled (resolved or parked), and settling at least one of them changed your draft, the Plan changes list says "Your Plan changes are settled. Run /dev-plumbing to catch the items up.", and the next `/dev-plumbing` starts with "Your settled Plan changes touch the plan's items. Re-importing to catch them up."
+5. **Catch up.** Settling a Plan changes thread can change your draft, but the importers ran before you settled it, so the items may not match it yet. Once every Plan changes thread of the version is settled (resolved or parked), and settling at least one of them changed your draft, the Plan changes list says "Your Plan changes are settled. Run /plumb:listen to catch the items up.", and the next `/plumb:listen` or `/plumb:rough-in` starts with "Your settled Plan changes touch the plan's items. Re-importing to catch them up."
    - It's step 4 again, for every importable type, matching items by key, but what changed is only what settling did: each change you took in a Plan changes thread, under its passage's heading. Your answers to other items aren't in it, and there are no conflicts left in it. An item it changes is marked "Changed in the plan's v2." as before, and its thread says "Updated to match your settled Plan changes.".
-   - It runs once per version, after **Not now** too, since Not now only declines a newer version. It doesn't run at all when settling changed nothing, for example when you kept your draft everywhere. Like an update, it waits while Claude has threads to answer or an import is under way, and Claude says so: "Your settled Plan changes still need a re-import. It waits until Claude has answered: run /dev-plumbing again then." A re-import that was cut short comes first: while it's being finished, waits, or was cut short twice, the catch-up waits too, and Claude says so. If you update to a newer version before running it, the catch-up isn't run on its own: it rides along with that version's re-import, which adds a "Settled in v<n>'s Plan changes:" part for the items to catch up with. **Start the draft from v<n>** drops it instead, since it replaces the draft those changes were settled into.
+   - It runs once per version, after **Not now** too, since Not now only declines a newer version. It doesn't run at all when settling changed nothing, for example when you kept your draft everywhere. Like an update, it waits while Claude has threads to answer or an import is under way, and Claude says so: "Your settled Plan changes still need a re-import. It waits until Claude has answered: run /plumb:listen again then." A re-import that was cut short comes first: while it's being finished, waits, or was cut short twice, the catch-up waits too, and Claude says so. If you update to a newer version before running it, the catch-up isn't run on its own: it rides along with that version's re-import, which adds a "Settled in v<n>'s Plan changes:" part for the items to catch up with. **Start the draft from v<n>** drops it instead, since it replaces the draft those changes were settled into.
 6. **Versions.** Once there's a v2, **Documents** shows **Original (v2)**, **Draft (v2)** and **Versions**.
    - **Versions** lists every version, the current one first, with its date, its branch and commit, and what its merge did.
    - Open one to read that version's plan and draft, and, for a version an update brought in, what that update changed in your draft.
@@ -250,7 +256,7 @@ Plans change after they're imported: someone edits the spec, or you pull a newer
 "If you ship it, you should be able to explain it." The Whiteboard Defense is Claude's defense of the plan: how it works, what could fail and what's still unknown. You study it, practise explaining it and present it on a whiteboard, before you build. It follows `~/.dev-plumbing/outputs/whiteboard-defense.md`, which you can edit on the Plumbing rules page.
 
 1. **Generate.** The header's **Whiteboard Defense** button, or the **Defense** tab on a phone, opens its page. **Generate** saves a request in the project, as **Start finalize** does. A listening Claude window picks it up through `dp_wait`, after any threads waiting for Claude and any finalize, and starts one `whiteboard` subagent, on the model `agents.json` sets for it (opus by default). Writing it can take ten minutes or more.
-   - With no window listening, the request waits, and the page says "No Claude window is listening. Run /dev-plumbing in any clone."
+   - With no window listening, the request waits, and the page says "No Claude window is listening. Run /plumb:listen in any clone."
    - While it's written, that window is busy: the page says "Claude is writing the Whiteboard Defense. Threads you send now wait until it's done.", and so does what you send meanwhile.
    - If the window goes away, the request goes back in the queue for another window. If the subagent comes back without a defense, the page says why (its own "Failed: …" line, or "The whiteboard subagent didn't send a Whiteboard Defense.") and offers **Try again**, or **Dismiss** to keep the defense you had.
    - **Cancel** clears the request, whatever its state. One is written at a time, and none while the plan is importing.
@@ -336,15 +342,15 @@ Every write is atomic: the file is written in full or not at all. So a crash nev
 
 ## Common questions
 
-**Why does my terminal say it doesn't know `/dev-plumbing`?** It's a Claude Code command. Run `claude` first, then type it inside Claude Code. If Claude Code doesn't know it either, the session was probably started before setup: start a new one, or run `/reload-plugins`.
+**Why does my terminal say it doesn't know `/plumb:rough-in`?** It's a Claude Code command, as `/plumb:listen` is. Run `claude` first, then type it inside Claude Code. If Claude Code doesn't know it either, the session was probably started before setup: start a new one, or run `/reload-plugins`.
 
 **Do I need Claude open to use the app?** No. You can browse, answer and save drafts any time. Claude only needs to be open, and listening, to reply.
 
-**What if I close the Claude window?** Nothing is lost. Your answers stay in the app. Anything you send is queued until a window listens again: run `/dev-plumbing` and reopen the project.
+**What if I close the Claude window?** Nothing is lost. Your answers stay in the app. Anything you send is queued until a window listens again: run `/plumb:listen` in any clone.
 
 **Can two Claude windows listen at once?** Yes. Each submission goes to one window. If a window disappears mid-answer, its unanswered threads come back to you.
 
-**I edited the plan in the repo. Does dev-plumbing pick it up?** Not by itself. Run `/dev-plumbing` with the plan again, and answer **Update to v2**. The version you had stays under **Versions**.
+**I edited the plan in the repo. Does dev-plumbing pick it up?** Not by itself. Run `/plumb:rough-in` with the plan again, and answer **Update to v2**. The version you had stays under **Versions**.
 
 **Does asking Claude about the Whiteboard Defense hold up Finalize?** No. Defense threads never block Finalize and never go into the final. An unknown or a concern you send to Questions or Concerns does count, like any other item there, and so does a Questions or Concerns item Claude adds while answering.
 
@@ -370,7 +376,7 @@ Every write is atomic: the file is written in full or not at all. So a crash nev
 | Whiteboard Defense | Claude's defense of the plan, to study and practise explaining before you build: a review level, 13 sections, flashcards and a checklist. |
 | Defense questions | The plumbing type for your questions to Claude about the Whiteboard Defense, one thread each. It never blocks Finalize or goes into the final. |
 | Present | The Whiteboard Defense's third mode: the plan drawn on a hand-drawn whiteboard, one step at a time, with a caption to say out loud. |
-| Catch-up | The re-import the next `/dev-plumbing` runs once a version's Plan changes are settled and settling changed the draft, so the items match what you settled. |
+| Catch-up | The re-import the next `/plumb:listen` or `/plumb:rough-in` runs once a version's Plan changes are settled and settling changed the draft, so the items match what you settled. |
 | Submission | One Send or Submit all: the answers you sent, saved before Claude sees them. |
 | Repo profile | dev-plumbing's notes about one repo, such as where its plans and schema live. |
 | Skill | A set of instructions Claude follows when you run its command. |

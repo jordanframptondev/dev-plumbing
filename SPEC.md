@@ -6,7 +6,7 @@ Status: design draft for review · 2026-09-30 · no code yet
 
 ## TL;DR
 
-- You write a plan with Superpowers (or any Markdown file), then run **`/dev-plumbing path/to/plan.md`** in Claude Code.
+- You write a plan with Superpowers (or any Markdown file), then run **`/plumb:rough-in path/to/plan.md`** in Claude Code.
 - dev-plumbing turns the plan into a **plumbing project**: a local web app at **`localhost:4545`**. Its views are **plumbing types**:
   - **drawn as diagrams:** Architecture, Database, UI changes, Flows
   - **shown as lists:** Questions, Concerns, Ideas, Phases, Testing & rollout, Security.
@@ -75,7 +75,7 @@ Planning a large feature produces one big Markdown file full of design choices, 
 ## 3. Where it fits
 
 ```
-brainstorming ──► plan .md ──► /dev-plumbing plan.md ──► Finalize spec ──► writing-plans ──► build
+brainstorming ──► plan .md ──► /plumb:rough-in plan.md ──► Finalize spec ──► writing-plans ──► build
                   in git       threads, views, answers   plan.final.md          (or GSD / Deep Trilogy)
                                          └──► Whiteboard Defense (before shipping; later on the code diff)
 ```
@@ -92,7 +92,7 @@ brainstorming ──► plan .md ──► /dev-plumbing plan.md ──► Final
 | **Thread** | The conversation attached to an item. |
 | **Submission** | What happens when you press **Send this thread** or **Submit all**. |
 | **Decision** | A one-line record of how a thread was settled. |
-| **Main window** | The Claude Code session running `/dev-plumbing`. It listens for submissions and starts subagents. |
+| **Main window** | The Claude Code session running `/plumb:rough-in` or `/plumb:listen`. It listens for submissions and starts subagents. |
 
 ---
 
@@ -100,11 +100,11 @@ brainstorming ──► plan .md ──► /dev-plumbing plan.md ──► Final
 
 - **A small Node service on your Mac serves the app at `http://localhost:4545`.** Nothing is deployed.
   - It **starts at login** by default (a macOS login item, managed by the app).
-  - `/dev-plumbing` and `dev-plumbing start` also start it if it isn't running.
+  - `/plumb:rough-in`, `/plumb:listen` and `dev-plumbing start` also start it if it isn't running.
 - **The service runs by itself.** Close every Claude window and you can still open the app, browse, answer, draft and accept proposals. Only Claude's replies, Finalize and Whiteboard Defense generation need a main window.
 - **All state is in files.** Stopping the service loses nothing.
-- **Installed once as a Claude Code plugin,** for your user, and then it works in every repo. The plugin brings:
-  - the `/dev-plumbing` skill
+- **Installed once as a Claude Code plugin,** `plumb@dev-plumbing`, for your user, and then it works in every repo. The plugin brings:
+  - the `/plumb:rough-in` and `/plumb:listen` skills
   - the subagent definitions
   - a small MCP server (the bridge between Claude and the service)
   - the built service and web app.
@@ -129,8 +129,9 @@ flowchart LR
 
 | Piece | What it does |
 |---|---|
-| `/dev-plumbing` skill | Imports a plan, resumes a plumbing project, and keeps the main window listening. Run with no argument, it lists this repo's plumbing projects. |
-| Subagents | Each one follows its rules file (§6). **repo-setup** detects a repo's profile the first time. **importer** runs once per plumbing type. **thread** handles one thread or linked group. **finalizer** writes the final `.md`. **whiteboard** writes the Whiteboard Defense. |
+| `/plumb:rough-in` skill | Imports a plan, brings a changed plan's new version in, resumes a plumbing project, and keeps the main window listening. Run with no argument, it lists this repo's plumbing projects. |
+| `/plumb:listen` skill | Takes no argument. Attaches the main window to an existing plumbing project of this repo and keeps it listening. It never brings a plan in. |
+| Subagents | `plumb:<name>` in Claude Code. Each one follows its rules file (§6). **repo-setup** detects a repo's profile the first time. **importer** runs once per plumbing type. **thread** handles one thread or linked group. **finalizer** writes the final `.md`. **whiteboard** writes the Whiteboard Defense. |
 | MCP server | A thin bridge that turns tool calls into requests to the service. It holds no state. |
 | Local service | HTTP API, live updates (SSE), the web app, validation, checking code references, the original, draft and final documents, exporting the final to the repo, the login item. **The only writer of the projects folder.** |
 | Web app | React. App home, project home, plumbing-type screens, thread view, Finalize, Whiteboard Defense, Settings, Plumbing rules. |
@@ -164,7 +165,7 @@ Everything you might want to fine-tune is a plain file here. The app's **Setting
 | `port` | `4545` | The port the app and service use, on `localhost` only |
 | `projectsFolder` | `~/dev-plumbing-projects` | Where plumbing projects are stored. Each repo gets a subfolder, unless its repo profile sets its own folder. |
 | `startAtLogin` | `true` | Start the service when you log in to your Mac |
-| `openBrowserOnImport` | `true` | Open the plumbing project in your browser after `/dev-plumbing` imports a plan |
+| `openBrowserOnImport` | `true` | Open the plumbing project in your browser after `/plumb:rough-in` imports a plan |
 | `autoApplySmallEdits` | `true` | Apply Claude's wording, typo and layout fixes immediately, each with Undo |
 | `homePageSize` | `10` | How many recent plumbing projects the app home shows before **Load more** |
 | `theme` | `"system"` | `light`, `dark` or `system` |
@@ -184,7 +185,7 @@ Everything you might want to fine-tune is a plain file here. The app's **Setting
 
 ### 6.3 Repo profiles: `repos/<repo>.json`
 
-A profile is created the first time you run `/dev-plumbing` in a repo. The **repo-setup** subagent detects the values, and you confirm them in **Settings → Repos**. The example uses a made-up app.
+A profile is created the first time you run `/plumb:rough-in` in a repo. The **repo-setup** subagent detects the values, and you confirm them in **Settings → Repos**. The example uses a made-up app.
 
 ```jsonc
 {
@@ -321,7 +322,7 @@ Every setting is defined once in code, as a Zod schema with a description. `dev-
 
 ### 8.1 Import
 
-1. You run `/dev-plumbing docs/specs/restock-reminders.md` in any clone.
+1. You run `/plumb:rough-in docs/specs/restock-reminders.md` in any clone.
 2. The main window works out the repo from its git remote. If the repo has no profile yet, the **repo-setup** subagent detects one and asks you to confirm it.
 3. The main window creates the plumbing project, or reopens it if it exists. On create, the service copies the plan into the project as `docs/original.md` and `docs/draft.md`.
 4. It starts **one importer subagent per enabled plumbing type**, in parallel. Each follows its rules file, reads the draft and the relevant code (read-only), and writes items through the MCP tools. It writes either:
@@ -364,7 +365,7 @@ sequenceDiagram
     participant SV as Local service
     participant BR as Browser
 
-    You->>MW: /dev-plumbing plan.md
+    You->>MW: /plumb:rough-in plan.md
     MW->>MCP: open project
     MCP->>SV: create or reopen the project
     MW->>SA: one importer per plumbing type
@@ -737,9 +738,11 @@ The subagent may read more files but can't change the repo. Its only write path 
 
 ### 13.3 MCP tools
 
+The plugin's server is `dp`, so Claude Code names each tool `mcp__plugin_plumb_dp__<tool>`. The main window is the one running `/plumb:rough-in` or `/plumb:listen`.
+
 | Tool | Used by | Purpose |
 |---|---|---|
-| `dp_open` | main window | Work out the repo, then create or reopen a plumbing project and make sure the service is running |
+| `dp_open` | main window | Work out the repo, then create or reopen a plumbing project and make sure the service is running. `/plumb:listen` never passes a plan, and answers a changed plan with `update: false`. |
 | `dp_repo_profile` | repo-setup | Read the repo profile, or propose one for you to confirm |
 | `dp_write_items` | importer | Add or change items, or mark the type "no changes". Validated as a batch that fully succeeds or fully fails. |
 | `dp_wait` | main window | Wait for the next submission, with a heartbeat. Returns the threads, linked groups and models from `agents.json`. |
@@ -776,8 +779,8 @@ The subagent may read more files but can't change the repo. Its only write path 
 3. **Waiting, timeouts and resuming.** Checked against the Claude Code docs:
    - **Limits:** an MCP tool call can run for about 28 hours by default. A stdio server's call is dropped after 30 minutes idle unless a progress message resets the timer.
    - **The wait:** `dp_wait` sends a heartbeat every `waitHeartbeatSeconds`, and the plugin sets a 12-hour per-server `timeout`.
-   - **Submissions are saved first.** If no window is listening, the app says: *Saved. No Claude window is listening. Run `/dev-plumbing` in any clone.*
-   - **While listening, the window is busy.** Press Esc to chat with it, then run `/dev-plumbing` to resume.
+   - **Submissions are saved first.** If no window is listening, the app says: *Saved. No Claude window is listening. Run `/plumb:listen` in any clone.*
+   - **While listening, the window is busy.** Press Esc to chat with it, then run `/plumb:listen` to resume.
 4. **The plan changing in the repo after import.** dev-plumbing is the only writer of the draft, so patches never collide. If the plan in the repo changes later (you edited it, or pulled), the project home shows **The plan changed in the repo**, with **Bring changes in**:
    - **A three-way merge** (`git merge-file`): `original.md` is the common base, your draft is one side and the new repo version is the other.
    - **Clean changes** go into the draft. **Conflicts** become a thread for you and Claude.
@@ -884,7 +887,7 @@ dev-plumbing/
   plugin/                        # Claude Code plugin
     .claude-plugin/plugin.json
     .mcp.json                    # starts packages/mcp, per-server timeout 12 h
-    skills/dev-plumbing/SKILL.md
+    skills/rough-in/SKILL.md  listen/SKILL.md
     agents/repo-setup.md  importer.md  thread.md  finalizer.md  whiteboard.md
   .claude-plugin/marketplace.json   # lets you install the plugin straight from this repo
 ```
@@ -920,7 +923,7 @@ Everything below is v1. It's built in this order so each milestone is usable bef
 3. You answer five questions inline, send one thread on its own, and subagents reply.
 4. An accepted proposal changes the draft, and the plan in the repo is untouched.
 5. Reopening the project from another clone loses nothing.
-6. A submission made with no window listening is picked up by the next `/dev-plumbing`.
+6. A submission made with no window listening is picked up by the next `/plumb:listen`.
 7. **Finalize** saves the final in the plumbing project and copies it into the repo as `<name>.final.md`.
 8. The Whiteboard Defense plays in Present, reads in Study, and tracks progress in Practice.
 9. Changing a plumbing rules file changes the next import.
