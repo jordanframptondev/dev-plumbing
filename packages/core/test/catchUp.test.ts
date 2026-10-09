@@ -274,7 +274,7 @@ describe('a catch-up that was cut short', () => {
     expect(await runImporters(dir, ['questions', 'concerns'])).toEqual([false, true]);
     const done = await readProjectFile(dir);
     expect(done).toMatchObject({ status: 'active', importPending: [], caughtUp: 2 });
-    for (const field of ['reimporting', 'importIncomplete', 'importIncompleteCatchUp', 'importIncompleteTries']) expect(done).not.toHaveProperty(field);
+    for (const field of ['reimporting', 'importIncomplete', 'importIncompleteCatchUp', 'importIncompleteCarried', 'importIncompleteTries']) expect(done).not.toHaveProperty(field);
     expect((await readThread(dir, 't-questions-approach')).messages.at(-1)).toMatchObject({ author: 'system', text: 'Updated to match your settled Plan changes.' });
   });
 });
@@ -317,6 +317,44 @@ describe('a catch-up still waiting when a newer version comes in', () => {
     );
     expect(await finishImport(dir)).toBe(true);
     expect(await catchUpWaiting(dir)).toBeNull();
+    expect(await catchUpDue(dir)).toBeNull();
+  });
+
+  it('still rides along when that re-import is cut short and then finished', async () => {
+    const dir = await atV2();
+    await accept(dir, CONFLICT, 'theirs');
+    await update(dir, V3, new Date('2026-10-09T10:00:00.000Z'));
+    // Only Architecture's importer came back before the import was ended.
+    await runImporters(dir, ['architecture']);
+    expect(await finishImport(dir)).toBe(true);
+    const ended = await readProjectFile(dir);
+    expect(ended).toMatchObject({ status: 'active', caughtUp: 2, importIncomplete: ['questions', 'concerns'], importIncompleteCarried: 2, importIncompleteTries: 1 });
+    expect(ended.importIncompleteCatchUp).toBeUndefined();
+    // caughtUp is already set, so only the resumed re-import can still bring the settled edits to those types.
+    expect(await resumeIncompleteImport(dir, { types, now: T })).toEqual({ kind: 'resumed', version: 3, importTypes: ['questions', 'concerns'] });
+    expect((await readProjectFile(dir)).reimporting).toEqual({ version: 3, from: 'active', carriedCatchUp: 2 });
+    const pack = await importPack({ dir, typeId: 'questions', types });
+    expect(pack.reimport).toMatchObject({ from: 2, to: 3, catchUp: false });
+    expect(pack.reimport!.changes).toContain(
+      ["Settled in v2's Plan changes:", '@@ Approach', '- sends an email reminder.', '+ sends a text message.'].join('\n'),
+    );
+    expect(await runImporters(dir, ['questions', 'concerns'])).toEqual([false, true]);
+    const done = await readProjectFile(dir);
+    for (const field of ['reimporting', 'importIncomplete', 'importIncompleteCatchUp', 'importIncompleteCarried', 'importIncompleteTries']) expect(done).not.toHaveProperty(field);
+  });
+
+  it("isn't carried into an update that starts the draft afresh, which still counts it as caught up", async () => {
+    const dir = await atV2();
+    await accept(dir, CONFLICT, 'theirs');
+    expect(await catchUpWaiting(dir)).toBe(2);
+    await updatePlan(dir, { repoText: V3, clone: '/Users/you/src/acme', branch: 'main', commit: null, types, fresh: true, home: '/Users/you', now: T });
+    const project = await readProjectFile(dir);
+    expect(project.caughtUp).toBe(2);
+    expect(project.reimporting).toEqual({ version: 3, from: 'active' });
+    const pack = await importPack({ dir, typeId: 'questions', types });
+    expect(pack.reimport!.changes).toContain('push notification');
+    expect(pack.reimport!.changes).not.toContain('Settled in');
+    expect(await finishImport(dir)).toBe(true);
     expect(await catchUpDue(dir)).toBeNull();
   });
 });

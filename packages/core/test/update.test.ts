@@ -893,10 +893,12 @@ describe('finishing a re-import that was ended early', () => {
 
   it("is forgotten by an update to a newer version, which re-imports every type", async () => {
     const dir = await endedEarly();
+    // As if the re-import cut short had carried an earlier version's settled Plan changes.
+    await writeProjectFile(dir, { ...(await readProjectFile(dir)), importIncompleteCarried: 2 });
     await update(dir, CLEAN.replace('take two', 'take three'), { now: T4 });
     const project = await readProjectFile(dir);
     expect(project).toMatchObject({ status: 'importing', importPending: IMPORTABLE, reimporting: { version: 3, from: 'active' } });
-    for (const field of ['importIncomplete', 'importIncompleteCatchUp', 'importIncompleteTries']) expect(project).not.toHaveProperty(field);
+    for (const field of ['importIncomplete', 'importIncompleteCatchUp', 'importIncompleteCarried', 'importIncompleteTries']) expect(project).not.toHaveProperty(field);
   });
 
   it("drops types that can't be imported any more, and clears the record when none is left", async () => {
@@ -905,11 +907,13 @@ describe('finishing a re-import that was ended early', () => {
     expect(await resumeIncompleteImport(dir, { types: withoutConcerns })).toEqual({ kind: 'resumed', version: 2, importTypes: ['architecture'] });
 
     const other = await endedEarly();
+    await writeProjectFile(other, { ...(await readProjectFile(other)), importIncompleteCarried: 2 });
     const neither = types.map((t) => (t.id === 'concerns' || t.id === 'architecture' ? { ...t, enabled: false } : t));
     expect(await resumeIncompleteImport(other, { types: neither })).toBeNull();
     const project = await readProjectFile(other);
     expect(project).toMatchObject({ status: 'active', importPending: [] });
     expect(project.importIncomplete).toBeUndefined();
+    expect(project.importIncompleteCarried).toBeUndefined();
     expect(project.importIncompleteTries).toBeUndefined();
   });
 });

@@ -9,7 +9,7 @@ import { defenseThreadIds } from '../defenseType';
 import { importableTypes, PLAN_CHANGES } from '../planChanges';
 import { andList, titleFromMarkdown, type Item, type Leftover, type Message, type PlanVersion, type PlumbingProject, type PlumbingType, type Submission, type Thread } from '../schemas';
 import { readFinalize } from './finalize';
-import { uniqueId } from './importItems';
+import { uniqueId, withoutIncomplete } from './importItems';
 import {
   ConflictError,
   docPath,
@@ -381,10 +381,10 @@ export async function catchUpDue(dir: string): Promise<number | null> {
 
 /**
  * Starts the re-import that catches the items up with v<version>'s settled Plan changes: every importable type is
- * imported again, by key, as after an update, and importPack gives the importers the draft's changes since the update
- * merged it. `windowId` is the window that runs the importers, as claimImport records it. caughtUp is set now, so it
- * runs once per version, even if it's cut short. With no type to import, only caughtUp is set. Under the project's
- * lock, after catchUpDue.
+ * imported again, by key, as after an update, and importPack gives the importers only the edits that settling
+ * v<version>'s Plan changes threads made to the draft (settledEdits), never your answers to other items. `windowId` is
+ * the window that runs the importers, as claimImport records it. caughtUp is set now, so it runs once per version,
+ * even if it's cut short. With no type to import, only caughtUp is set. Under the project's lock, after catchUpDue.
  */
 export async function startCatchUp(dir: string, o: { version: number; types: PlumbingType[]; windowId: string; now?: Date }): Promise<{ importTypes: string[] }> {
   const project = await readProjectFile(dir);
@@ -392,9 +392,8 @@ export async function startCatchUp(dir: string, o: { version: number; types: Plu
   const importPending = importableTypes(o.types).map((t) => t.id);
   const from = project.status === 'finalized' ? 'finalized' : 'active';
   // It imports every type again, so a re-import that was ended early has nothing left to finish.
-  const { importIncomplete: _incomplete, importIncompleteCatchUp: _catchUp, importIncompleteTries: _tries, ...rest } = project;
   await writeProjectFile(dir, {
-    ...rest,
+    ...withoutIncomplete(project),
     caughtUp: o.version,
     ...(importPending.length ? { status: 'importing' as const, importPending, reimporting: { version: o.version, from, catchUp: true }, importBy: o.windowId } : {}),
     updatedAt: (o.now ?? new Date()).toISOString(),
@@ -523,13 +522,15 @@ export async function updatePlan(
   // A finalized project stays Finalized only when the update left its draft as it was.
   const from = project.status === 'finalized' && !changedDraft(version) ? 'finalized' : 'active';
   // Nothing of an earlier re-import that was ended early is left to finish: this one imports every type again.
-  const { reimporting: _earlier, importBy: _importer, importIncomplete: _incomplete, importIncompleteCatchUp: _catchUp, importIncompleteTries: _tries, ...rest } = project;
+  const { reimporting: _earlier, importBy: _importer, ...rest } = withoutIncomplete(project);
   // A catch-up still waiting for the version being replaced rides along with this re-import (importPack appends its
-  // settled edits to `changes`), so those edits aren't lost when the newer version comes in first.
-  const carried = await catchUpWaiting(dir);
+  // settled edits to `changes`), so those edits aren't lost when the newer version comes in first. A fresh start
+  // replaces the draft those edits were made to, so it has nothing to carry, but the catch-up is done with all the same.
+  const waiting = await catchUpWaiting(dir);
+  const carried = fresh ? null : waiting;
   const next: PlumbingProject = {
     ...rest,
-    ...(carried !== null ? { caughtUp: carried } : {}),
+    ...(waiting !== null ? { caughtUp: waiting } : {}),
     title: titleFromMarkdown(o.repoText) ?? project.title,
     versions: [...projectVersions(project), version],
     importPending,
@@ -650,7 +651,8 @@ export type IncompleteImport = { kind: 'resumed' | 'waits' | 'again'; version: n
 /**
  * Finishes a re-import that was ended early (finishImport recorded importIncomplete): the types whose batch never came
  * are imported again, as a re-import of the current version (matched by key, new items added, removed ones parked),
- * and only those, as a catch-up again when it was one. Null, writing nothing, when there's nothing to finish or the
+ * and only those, as a catch-up again when it was one, and carrying an earlier version's settled Plan changes again
+ * when it carried them (importIncompleteCarried). Null, writing nothing, when there's nothing to finish or the
  * project is importing. Types that can't be imported any more (turned off since) are dropped; with none left, the
  * record is cleared and it's null. While updateRefusal says an update would have to wait, it `waits`, writing nothing.
  * It runs once on its own: ended early again (importIncompleteTries 2), it's `again`, and the count goes back to 1, so
@@ -666,10 +668,9 @@ export async function resumeIncompleteImport(dir: string, o: { types: PlumbingTy
     .map((t) => t.id)
     .filter((id) => incomplete.includes(id));
   const updatedAt = (o.now ?? new Date()).toISOString();
-  const { importIncomplete: _incomplete, importIncompleteCatchUp: _catchUp, importIncompleteTries: _tries, ...rest } = project;
   // v1 has no re-import to finish.
   if (!importTypes.length || version < 2) {
-    await writeProjectFile(dir, { ...rest, updatedAt });
+    await writeProjectFile(dir, { ...withoutIncomplete(project), updatedAt });
     return null;
   }
   if (await updateRefusal(dir)) return { kind: 'waits', version, importTypes };
@@ -678,8 +679,14 @@ export async function resumeIncompleteImport(dir: string, o: { types: PlumbingTy
     return { kind: 'again', version, importTypes };
   }
   const from = project.status === 'finalized' ? 'finalized' : 'active';
-  // A catch-up that was ended early is finished as one, with the settled edits as its changes.
-  const reimporting: PlumbingProject['reimporting'] = { version, from, ...(project.importIncompleteCatchUp ? { catchUp: true } : {}) };
+  // A catch-up that was ended early is finished as one, with the settled edits as its changes, and an update's
+  // re-import that carried an earlier version's settled edits carries them again.
+  const reimporting: PlumbingProject['reimporting'] = {
+    version,
+    from,
+    ...(project.importIncompleteCatchUp ? { catchUp: true } : {}),
+    ...(project.importIncompleteCarried !== undefined ? { carriedCatchUp: project.importIncompleteCarried } : {}),
+  };
   await writeProjectFile(dir, { ...project, importPending: importTypes, status: 'importing', reimporting, updatedAt });
   return { kind: 'resumed', version, importTypes };
 }

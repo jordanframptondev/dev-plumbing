@@ -133,16 +133,22 @@ async function markRemoved(dir: string, item: Item, version: number, now: Date):
   if (thread) await writeThread(dir, { ...thread, status: withClaude ? thread.status : 'parked', messages: [...thread.messages, systemLine(now, text)] });
 }
 
+/** The fields finishImport records about a re-import that was ended early. */
+type IncompleteFields = 'importIncomplete' | 'importIncompleteCatchUp' | 'importIncompleteCarried' | 'importIncompleteTries';
+
+/** The project without its record of a re-import that was ended early (importIncomplete and what goes with it). */
+export function withoutIncomplete(project: PlumbingProject): Omit<PlumbingProject, IncompleteFields> {
+  const { importIncomplete: _incomplete, importIncompleteCatchUp: _catchUp, importIncompleteCarried: _carried, importIncompleteTries: _tries, ...rest } = project;
+  return rest;
+}
+
 /**
  * The project once its import has finished: Active, or, after a re-import, whatever it was before the update. An import
  * that finished clears importIncomplete and what goes with it; finishImport records them again when a re-import ends
  * with types missing.
  */
-function importDone(
-  project: PlumbingProject,
-  changes: Pick<PlumbingProject, 'importPending' | 'emptyTypes' | 'updatedAt' | 'importIncomplete' | 'importIncompleteCatchUp' | 'importIncompleteTries'>,
-): PlumbingProject {
-  const { reimporting, importBy: _importBy, importIncomplete: _incomplete, importIncompleteCatchUp: _catchUp, importIncompleteTries: _tries, ...rest } = project;
+function importDone(project: PlumbingProject, changes: Pick<PlumbingProject, 'importPending' | 'emptyTypes' | 'updatedAt' | IncompleteFields>): PlumbingProject {
+  const { reimporting, importBy: _importBy, ...rest } = withoutIncomplete(project);
   return { ...rest, ...changes, status: reimporting?.from ?? 'active' };
 }
 
@@ -313,8 +319,9 @@ export async function finishImport(dir: string, o: { windowId?: string; isAlive?
     .filter((type) => !project.emptyTypes.some((e) => e.type === type) && !items.some((i) => i.type === type))
     .map((type) => ({ type, reason: IMPORT_DID_NOT_FINISH }));
   // A re-import ended early: the types whose batch never came, how many times this version's re-import was cut, and
-  // whether it was a catch-up, so the next /dev-plumbing finishes it the same way.
+  // whether it was a catch-up or carried one, so the next /dev-plumbing finishes it the same way.
   const incomplete = project.reimporting ? project.importPending : [];
+  const carried = project.reimporting?.carriedCatchUp;
   await writeProjectFile(
     dir,
     importDone(project, {
@@ -326,6 +333,7 @@ export async function finishImport(dir: string, o: { windowId?: string; isAlive?
             importIncomplete: incomplete,
             importIncompleteTries: (project.importIncompleteTries ?? 0) + 1,
             ...(project.reimporting?.catchUp ? { importIncompleteCatchUp: true } : {}),
+            ...(carried !== undefined ? { importIncompleteCarried: carried } : {}),
           }
         : {}),
     }),

@@ -63,6 +63,11 @@ export const plumbingProjectSchema = z.object({
   importIncomplete: z.array(z.string()).optional(),
   /** The re-import that was ended early was a catch-up, so finishing it is one too (reimporting.catchUp). */
   importIncompleteCatchUp: z.boolean().optional(),
+  /**
+   * The re-import that was ended early carried an earlier version's settled Plan changes (reimporting.carriedCatchUp),
+   * so finishing it carries them too.
+   */
+  importIncompleteCarried: z.number().int().min(2).optional(),
   /** How many times this version's re-import was ended early. From 2, /dev-plumbing says so rather than run it again. */
   importIncompleteTries: z.number().int().min(1).optional(),
   createdAt: z.string(),
