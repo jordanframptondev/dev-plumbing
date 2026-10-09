@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { disableLoginItem, enableLoginItem, isLoginItemEnabled, loginItemPath } from '@dev-plumbing/core';
+import { disableLoginItem, enableLoginItem, isLoginItemEnabled, loginItemPath, updateSettingsFile } from '@dev-plumbing/core';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app';
 import { createRuntime } from '../src/runtime';
@@ -316,11 +316,35 @@ describe('login item follows startAtLogin', () => {
     await fs.access(loginItemPath(tmp));
   });
 
-  it('a PUT that does not change startAtLogin still turns the login item on when the plist is missing', async () => {
+  it("a PUT that doesn't change startAtLogin leaves the login item as it is, even with the plist missing", async () => {
     const { ctx, tmp } = await withTempLoginItem();
     const res = await call(createApp(ctx), '/api/settings', put({ theme: 'light' }));
     expect(res.status).toBe(200);
-    expect(await isLoginItemEnabled(tmp)).toBe(true);
+    expect(await isLoginItemEnabled(tmp)).toBe(false);
+    // Saving startAtLogin at its saved value is no change either.
+    expect((await call(createApp(ctx), '/api/settings', put({ startAtLogin: true }))).status).toBe(200);
+    expect(await isLoginItemEnabled(tmp)).toBe(false);
+  });
+
+  it('only a change to startAtLogin asks the login item anything', async () => {
+    const { ctx } = await makeContext();
+    const asked: string[] = [];
+    const { enable, disable, isEnabled } = ctx.loginItem;
+    ctx.loginItem = {
+      enable: () => (asked.push('enable'), enable()),
+      disable: () => (asked.push('disable'), disable()),
+      isEnabled: () => (asked.push('isEnabled'), isEnabled()),
+    };
+    const app = createApp(ctx);
+    expect((await call(app, '/api/settings', put({ theme: 'dark' }))).status).toBe(200);
+    expect((await call(app, '/api/settings', put({ theme: 'light', homePageSize: 5 }))).status).toBe(200);
+    expect(asked).toEqual([]);
+    expect((await call(app, '/api/settings', put({ startAtLogin: false }))).status).toBe(200);
+    expect(asked).toEqual(['isEnabled', 'disable']);
+    expect((await call(app, '/api/settings', put({ theme: 'dark', startAtLogin: false }))).status).toBe(200);
+    expect(asked).toEqual(['isEnabled', 'disable']);
+    expect((await call(app, '/api/settings', put({ startAtLogin: true }))).status).toBe(200);
+    expect(asked).toEqual(['isEnabled', 'disable', 'isEnabled', 'enable']);
   });
 
   it('turns the login item off when startAtLogin is false and the plist is there', async () => {
@@ -332,12 +356,13 @@ describe('login item follows startAtLogin', () => {
 
   it('keeps the settings and says so when the login item cannot be changed', async () => {
     const { ctx, loginState } = await makeContext();
+    await updateSettingsFile(ctx.configDir, { startAtLogin: false });
     loginState.enabled = false;
     ctx.loginItem.enable = async () => {
       throw new Error('launchd said no');
     };
     const app = createApp(ctx);
-    const res = await call(app, '/api/settings', put({ theme: 'dark' }));
+    const res = await call(app, '/api/settings', put({ theme: 'dark', startAtLogin: true }));
     expect(res.status).toBe(200);
     expect(((await res.json()) as { loginItemError?: string }).loginItemError).toMatch(/settings were saved.*launchd said no/);
     expect(JSON.parse(await fs.readFile(path.join(ctx.configDir, 'settings.json'), 'utf8')).theme).toBe('dark');

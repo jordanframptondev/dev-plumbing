@@ -101,7 +101,8 @@ export function configRoutes(ctx: AppContext, rt: Runtime): Hono {
     if (!merged.ok) return c.json({ error: 'Some settings are not valid.', errors: merged.errors }, 400);
     const before = parseSettings(merged.before).value;
     const value = parseSettings(merged.after).value;
-    const loginItemError = await reconcileLoginItem(value.startAtLogin);
+    // Only a change to startAtLogin touches the login item: saving the theme, say, never does.
+    const loginItemError = before.startAtLogin !== value.startAtLogin ? await reconcileLoginItem(value.startAtLogin) : undefined;
     changed();
     return c.json({ value, restartRequired: before.port !== value.port, ...(loginItemError ? { loginItemError } : {}) });
   });
