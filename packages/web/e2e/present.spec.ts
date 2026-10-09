@@ -353,8 +353,13 @@ test("the smoke run's look at Present passes on a real board", async () => {
   // As smoke-claude.sh runs it: this run's dev-plumbing home, and your own HOME, where Playwright keeps its browsers.
   // The service is up, so it leaves it running.
   const env = { ...process.env, DEV_PLUMBING_HOME: path.join(tmp, '.dev-plumbing') };
+  const settingsFile = path.join(tmp, '.dev-plumbing', 'settings.json');
+  const settings = fs.readFileSync(settingsFile, 'utf8');
   const run = spawnSync(process.execPath, [path.join(repoRoot, 'scripts', 'smoke-present.mjs'), tmp, p.project], { env, encoding: 'utf8' });
   expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
+  // Dark mode was set in the run's own settings.json, which is put back as it was, with no temp file left.
+  expect(fs.readFileSync(settingsFile, 'utf8')).toBe(settings);
+  expect(fs.readdirSync(path.dirname(settingsFile)).filter((f) => f.endsWith('.tmp'))).toEqual([]);
   expect(run.stdout).toContain('Parts the steps revealed, drawn: 9 of 9');
   expect(run.stdout).toContain("Notes with a part, listed at the board's foot (should be none): none");
   expect(run.stdout).toContain('Full screen on a phone held sideways: the caption and ▶ fit without scrolling');

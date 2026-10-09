@@ -8,22 +8,45 @@
 // - no note with a part to sit by (`near` isn't "") is in the list at the board's foot, which means its part wasn't drawn;
 // - the page logs no errors.
 // It saves screenshots in <work>/present/: each chapter's last step at 1280 x 800, then full screen at 1280 x 800, full
-// screen at 812 x 375 (a phone held sideways) and the page in dark mode (the run's theme setting is put back after). It
+// screen at 812 x 375 (a phone held sideways) and the page in dark mode. For dark mode it writes the theme into the
+// run's own settings.json, never through the service's settings route, and puts the file back as it was after. It
 // exits non-zero when any check fails.
 //   DEV_PLUMBING_HOME=<work>/.dev-plumbing node scripts/smoke-present.mjs <work> [project]
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
+import os from 'node:os';
 import path from 'node:path';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const [work, project = 'restock-reminders'] = process.argv.slice(2);
 const dir = process.env.DEV_PLUMBING_HOME;
-if (!work || !dir || !path.resolve(dir).startsWith(path.resolve(work))) throw new Error("Run this from scripts/smoke-claude.sh, with the run's DEV_PLUMBING_HOME inside its folder.");
-const settings = JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8'));
+/** The path with every link followed, or just resolved when it doesn't exist. */
+const real = (p) => {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+};
+/** `child` is inside `parent`, not `parent` itself, and not a sibling that only starts with the same name. */
+const inside = (parent, child) => {
+  const rel = path.relative(real(parent), real(child));
+  return rel !== '' && rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
+};
+if (!work || !dir || !inside(work, dir)) throw new Error("Run this from scripts/smoke-claude.sh, with the run's DEV_PLUMBING_HOME inside its folder.");
+if (real(dir) === real(path.join(os.homedir(), '.dev-plumbing'))) throw new Error('DEV_PLUMBING_HOME is your own ~/.dev-plumbing. This look only ever uses a smoke run\'s home.');
+const settingsFile = path.join(dir, 'settings.json');
+const settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
 if (settings.port === 4545) throw new Error("The run's home uses port 4545, the real service's. This look never does.");
 const log = (msg) => console.log(`[present] ${msg}`);
 const cli = (command) => execFileSync(process.execPath, [path.join(root, 'packages', 'cli', 'dist', 'index.js'), command], { env: process.env, encoding: 'utf8' }).trim();
+/** Writes a file whole or not at all: a temp file beside it, then a rename. */
+const writeAtomic = (file, text) => {
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, text);
+  fs.renameSync(tmp, file);
+};
 // Playwright comes with the web package's dev dependencies, as the e2e tests use it.
 const { chromium } = createRequire(path.join(root, 'packages', 'web', 'package.json'))('@playwright/test');
 
@@ -34,10 +57,8 @@ const drawingKey = (d) => (d.kind === 'tables' ? 'tables' : `${d.kind}:${d.itemI
 
 const out = path.join(work, 'present');
 fs.mkdirSync(out, { recursive: true });
-const started = !cli('status').startsWith('Running');
-if (started) log(cli('start'));
-const run = JSON.parse(fs.readFileSync(path.join(dir, 'run', 'service.json'), 'utf8'));
-const base = `http://localhost:${run.port}`;
+/** The run's service, once it's up: its port and token. */
+let run = null;
 async function call(route, method = 'GET', body) {
   const res = await fetch(`http://127.0.0.1:${run.port}${route}`, {
     method,
@@ -50,8 +71,14 @@ async function call(route, method = 'GET', body) {
 
 const failures = [];
 let browser = null;
-let themeChanged = false;
+let started = false;
+/** settings.json as it was, once dark mode has changed its theme, so it's put back. */
+let savedSettings = null;
 try {
+  started = !cli('status').startsWith('Running');
+  if (started) log(cli('start'));
+  run = JSON.parse(fs.readFileSync(path.join(dir, 'run', 'service.json'), 'utf8'));
+  const base = `http://localhost:${run.port}`;
   const presenter = (await call(`${P}/whiteboard`)).defense?.presenter;
   if (!presenter?.chapters.length) throw new Error('The saved defense has no presenter to look at.');
   // The parts each chapter's drawing has, as the whiteboard subagent's pack lists them (the route only reads).
@@ -132,9 +159,10 @@ try {
   if (!fits) failures.push("On a phone held sideways, full screen's caption and ▶ don't fit without scrolling.");
   await page.keyboard.press('Escape');
 
-  // Dark mode, at 1280 x 800, whatever the run's theme setting is: it's set to dark, and put back below.
-  await call('/api/settings', 'PUT', { theme: 'dark' });
-  themeChanged = true;
+  // Dark mode, at 1280 x 800, whatever the run's theme setting is: it's set to dark in the file, and the file is put back
+  // below. Never through PUT /api/settings, which may also look after the login item.
+  savedSettings = fs.readFileSync(settingsFile, 'utf8');
+  writeAtomic(settingsFile, `${JSON.stringify({ ...JSON.parse(savedSettings), theme: 'dark' }, null, 2)}\n`);
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.reload();
@@ -150,9 +178,22 @@ try {
 } catch (error) {
   failures.push(error instanceof Error ? error.message : String(error));
 } finally {
-  await browser?.close();
-  if (themeChanged) await call('/api/settings', 'PUT', { theme: settings.theme ?? 'system' }).catch((e) => failures.push(`The theme setting couldn't be put back: ${e.message}`));
-  if (started) log(cli('stop'));
+  await browser?.close().catch((e) => log(`The browser couldn't be closed: ${e.message}`));
+  if (savedSettings !== null) {
+    try {
+      writeAtomic(settingsFile, savedSettings);
+    } catch (e) {
+      failures.push(`settings.json couldn't be put back: ${e.message}`);
+    }
+  }
+  // Stopping the service is tidying up, so failing to doesn't change the result, which is still said below.
+  if (started) {
+    try {
+      log(cli('stop'));
+    } catch (e) {
+      log(`The service couldn't be stopped: ${e.message}`);
+    }
+  }
 }
 if (failures.length) {
   log(`Present look failed:\n- ${failures.join('\n- ')}`);
