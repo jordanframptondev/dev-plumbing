@@ -146,15 +146,24 @@ it('hands a Whiteboard Defense request to the window and takes the defense back'
   expect(fs.readFileSync(pack.rulesFile, 'utf8')).toMatch(/^# /);
   expect(pack.basedOn).toEqual({ doc: 'draft', version: 2 });
   expect(fs.readFileSync(pack.documentFile, 'utf8').length).toBeGreaterThan(0);
-  // A bad basis and a missing section come back from the service together, in one refusal.
+  // Present's seven chapters, and what they may draw: this plan's only items are questions, so nothing.
+  expect(pack.chapters.map((c: { id: string }) => c.id)).toEqual(['purpose', 'flow', 'data', 'states', 'security', 'failure', 'rollback']);
+  expect(pack.drawings).toEqual([]);
+  // A bad basis, a missing section and a drawing the project doesn't have come back from the service together, in one refusal.
   const input = validDefenseInput();
-  const bad = { ...input, sections: input.sections.filter((s) => s.id !== 'summary').map((s) => (s.id === 'data' ? { ...s, claims: [{ text: 'Perhaps.', basis: 'maybe' }] } : s)) };
+  const presenter = { chapters: input.presenter!.chapters.map((c) => (c.id === 'flow' ? { ...c, drawing: { kind: 'diagram' as const, itemId: 'architecture-system' } } : c)) };
+  const bad = {
+    ...input,
+    sections: input.sections.filter((s) => s.id !== 'summary').map((s) => (s.id === 'data' ? { ...s, claims: [{ text: 'Perhaps.', basis: 'maybe' }] } : s)),
+    presenter,
+  };
   const refused = await mcp.callTool({ name: 'dp_whiteboard', arguments: { repo: 'acme-app', project: 'restock-reminders', request: generated.request.id, defense: bad } });
   expect(refused.isError).toBe(true);
   const problems = (refused as { content: { text: string }[] }).content[0]!.text;
   expect(problems).toContain('Nothing was saved. Fix these and call dp_whiteboard again with the whole defense:');
   expect(problems).toContain('- sections.2.claims.0.basis:');
   expect(problems).toContain('- sections: summary is missing.');
+  expect(problems).toContain('- presenter.chapters: flow: there\'s no diagram item "architecture-system". There are none, so pick another drawing or none.');
   const sent = await mcp.callTool({
     name: 'dp_whiteboard',
     arguments: { repo: 'acme-app', project: 'restock-reminders', request: generated.request.id, defense: input },
@@ -163,4 +172,14 @@ it('hands a Whiteboard Defense request to the window and takes the defense back'
   expect(json(sent)).toMatchObject({ ok: true, request: generated.request.id, questions: 3, concerns: 2 });
   const view = await http(`${P}/whiteboard`);
   expect(view).toMatchObject({ request: null, defense: { basedOn: { kind: 'plan', doc: 'draft', version: 2 } }, stale: null });
+  // The presenter is saved with its chapters' titles, in order.
+  expect(view.defense.presenter.chapters.map((c: { title: string }) => c.title)).toEqual([
+    'Purpose',
+    'System flow',
+    'Data and source of truth',
+    'States',
+    'Security',
+    'Failure and retries',
+    'Rollback and blast radius',
+  ]);
 }, 60_000);

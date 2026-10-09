@@ -125,12 +125,13 @@ export function createDpServer(o: { client: ServiceClient; cwd: string; windowId
     'dp_whiteboard',
     {
       description:
-        'Send the whole Whiteboard Defense you wrote for a Whiteboard Defense request: the level and its reasons, every section with its claims (each tagged known, inferred, unknown or verify), the questions with their answers, the release concerns and the checklist. The defense is checked as a whole. If anything is wrong, nothing is saved and the error lists every problem: fix them all and call dp_whiteboard again with the whole defense.',
+        "Send the whole Whiteboard Defense you wrote for a Whiteboard Defense request: the level and its reasons, every section with its claims (each tagged known, inferred, unknown or verify), the questions with their answers, the release concerns, the checklist, and the presenter's seven chapters. The defense is checked as a whole. If anything is wrong, nothing is saved and the error lists every problem: fix them all and call dp_whiteboard again with the whole defense.",
       inputSchema: {
         ...project,
         request: z.string().min(1).describe('The Whiteboard Defense request id, from your prompt'),
         // Checked by the service, not here: saveDefense lists every problem at once, the shape's with the project's
-        // (every section once, each with a claim, the tables, the diagram items, the size), so one resend fixes them all.
+        // (every section once, each with a claim, the tables, the diagram items, the presenter's chapters and drawings, the
+        // size), so one resend fixes them all.
         defense: z.record(z.unknown()).describe('The whole defense: see your instructions for its shape'),
       },
     },

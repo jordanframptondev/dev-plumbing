@@ -163,6 +163,29 @@ describe('the plugin', () => {
     expect(thread).toContain('add a Questions or Concerns item with `newItems` (type `questions` or `concerns`)');
   });
 
+  it("has the whiteboard agent write the presenter's seven chapters from the pack's drawings", () => {
+    const agent = parseFrontMatter(read('plugin/agents/whiteboard.md')).content;
+    for (const s of [
+      '`drawings`',
+      '`chapters`',
+      '`purpose`, `flow`, `data`, `states`, `security`, `failure` and `rollback`',
+      '**Pick a drawing for each chapter** from `drawings`',
+      '`{ "kind": "tables" }`',
+      'or `null` when none fits',
+      '**Give each chapter 1 to 8 steps,** in the order you\'d draw it on a whiteboard',
+      'Revealing a line (`edge:` or `link:`) also draws its two ends',
+      'its `reveal` is always `[]`',
+      'what the engineer says out loud',
+      '`near` set to `""`',
+      '`seal` for a risk',
+      'Keep the presenter under about 12,000 characters of JSON.',
+      '"presenter": {',
+      'send all ten sections and all seven chapters',
+    ]) {
+      expect(agent).toContain(s);
+    }
+  });
+
   it("detects a repo profile again when the user asks, keeping the user's own settings", () => {
     const setup = parseFrontMatter(read('plugin/agents/repo-setup.md'));
     expect(String(setup.data.description)).toContain('Detect again');

@@ -11,15 +11,18 @@ import {
   firstParagraph,
   headingsOf,
   parseData,
+  PRESENT_CHAPTERS,
   sectionFor,
   type ClaudeMessage,
   type CodeRef,
   type Decision,
   type DefenseSectionId,
   type DisplayStatus,
+  type DrawingOption,
   type Item,
   type Message,
   type PlumbingType,
+  type PresentChapterId,
   type RepoProfile,
   type Screen,
   type Thread,
@@ -29,6 +32,7 @@ import {
 import { finalizeChecklist } from './checklist';
 import { activeDecisions } from './decisions';
 import { defenseMarkdown } from './defenseMarkdown';
+import { drawingOptions } from './drawings';
 import { finalName } from './finalize';
 import { docPath, projectFiles, readDecisions, readDocText, readItem, readItems, readProjectFile, readThread, readThreads, StoreError } from './io';
 import { presetLabel } from './threads';
@@ -466,6 +470,13 @@ export type WhiteboardPack = {
   /** The items a section's diagramItemId may name: exactly the ones saveDefense accepts (defenseDiagramItemIds). */
   diagramItemIds: string[];
   /**
+   * What a Present chapter may draw (drawingOptions): each diagram item, the tables, and each system flow, with the
+   * parts a step may reveal, as typed refs, and their labels. saveDefense checks the presenter against exactly these.
+   */
+  drawings: DrawingOption[];
+  /** Present's seven chapters, in order. The presenter has each once. */
+  chapters: { id: PresentChapterId; title: string }[];
+  /**
    * The saved defense's question texts, and the texts of its claims marked unknown or verify. A regenerate keeps the
    * wording of those that still apply: Practice keeps ratings, and sending matches unknowns, by text. Null with none saved.
    * At most the first 40 questions and 60 unknowns, each cut to 300 characters (ending "…"), so the pack stays small.
@@ -488,8 +499,9 @@ const clipPrevious = (text: string) => (text.length <= PREVIOUS_MAX ? text : `${
 /**
  * What the whiteboard subagent receives: the framework and the document the defense is based on (as files to Read),
  * every item that goes into the final, the decisions with their why, the defaults, the items still open, the repo's
- * conventions, sensitive data, schema and apps, the sections to fill, the diagrams it may name, and the last defense's
- * wording. `rulesFile` is the rules file the service picked: the user's, or the shipped one.
+ * conventions, sensitive data, schema and apps, the sections to fill, the diagrams it may name, what Present's
+ * chapters may draw and the chapters, and the last defense's wording. `rulesFile` is the rules file the service
+ * picked: the user's, or the shipped one.
  */
 export async function whiteboardPack(o: { dir: string; types: PlumbingType[]; profile?: RepoProfile; rulesFile: string }): Promise<WhiteboardPack> {
   const project = await readProjectFile(o.dir);
@@ -521,6 +533,8 @@ export async function whiteboardPack(o: { dir: string; types: PlumbingType[]; pr
     apps: (o.profile?.apps ?? []).map((a) => ({ name: a.name, path: a.path })),
     sections: DEFENSE_SECTIONS.map((s) => ({ id: s.id, n: s.n, title: s.title })),
     diagramItemIds: await defenseDiagramItemIds(o.dir, o.types),
+    drawings: await drawingOptions(o.dir, o.types),
+    chapters: PRESENT_CHAPTERS.map((c) => ({ id: c.id, title: c.title })),
     previous: saved
       ? {
           questions: saved.questions.slice(0, PREVIOUS_QUESTIONS).map((q) => clipPrevious(q.q)),

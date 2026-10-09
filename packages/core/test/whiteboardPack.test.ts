@@ -3,10 +3,11 @@ import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { DEFENSE } from '../src/defenseType';
 import { PLAN_CHANGES } from '../src/planChanges';
-import { DEFENSE_SECTIONS, repoProfileSchema, type Item, type PlumbingType, type Thread } from '../src/schemas';
+import { DEFENSE_SECTIONS, PRESENT_CHAPTERS, repoProfileSchema, type Item, type PlumbingType, type Thread } from '../src/schemas';
 import { threadPack, whiteboardPack } from '../src/store/context';
 import { addDecision } from '../src/store/decisions';
 import { defenseMarkdown } from '../src/store/defenseMarkdown';
+import { drawingOptions } from '../src/store/drawings';
 import { readProjectFile, writeProjectFile } from '../src/store/io';
 import { writeDefense } from '../src/store/whiteboard';
 import { removeTempDirs } from '../../../testkit/tmp';
@@ -32,7 +33,7 @@ const profile = repoProfileSchema.parse({
 /** The rules file the service picked, which the subagent Reads. */
 const RULES_FILE = '/Users/you/.dev-plumbing/outputs/whiteboard-defense.md';
 const DIAGRAM = { kind: 'system', groups: [], nodes: [{ id: 'job', label: 'Reminder job', status: 'new' }], edges: [] };
-const TABLE = { model: 'RestockReminder', change: 'new', fields: [{ name: 'sentAt', type: 'DateTime', change: 'added' }] };
+const TABLE = { model: 'RestockReminder', change: 'new', fields: [{ name: 'sentAt', type: 'DateTime', change: 'added' }], schemaDiff: '+model RestockReminder {\n+  sentAt DateTime\n+}' };
 const FLOW = { kind: 'user', steps: [{ n: 1, label: 'Opens the reminder' }] };
 const MOCKUP = { location: { app: 'web', route: '/account', files: [] }, kit: 'web', after: '<div>Soon</div>' };
 
@@ -126,6 +127,18 @@ describe("the whiteboard subagent's context pack", () => {
     ]);
   });
 
+  it("lists what Present's chapters may draw, as the presenter is checked, and the seven chapters", async () => {
+    const dir = await seed();
+    const pack = await whiteboardPack({ dir, types, profile, rulesFile: RULES_FILE });
+    expect(pack.chapters).toEqual(PRESENT_CHAPTERS.map((c) => ({ id: c.id, title: c.title })));
+    // The diagram and the table; not the parked diagram, the diagram not drawn yet, or the user flow.
+    expect(pack.drawings).toEqual([
+      { drawing: { kind: 'diagram', itemId: 'architecture-system' }, title: 'System view', parts: [{ ref: 'node:job', label: 'Reminder job' }] },
+      { drawing: { kind: 'tables' }, title: 'Tables', parts: [{ ref: 'table:RestockReminder', label: 'RestockReminder' }] },
+    ]);
+    expect(pack.drawings).toEqual(await drawingOptions(dir, types));
+  });
+
   it("carries the last defense's questions and unknowns, so a regenerate can keep their wording", async () => {
     const dir = await seed();
     await writeDefense(dir, storedDefense());
@@ -194,6 +207,8 @@ describe("the whiteboard subagent's context pack", () => {
       expect(item.body).toMatch(/… \(clipped: Read file for the rest\)$/);
     }
     expect(pack.items.filter((i) => i.data !== null)).toHaveLength(5);
+    // Present may draw each of the five, with its six boxes and five lines.
+    expect(pack.drawings.map((d) => d.parts.length)).toEqual([11, 11, 11, 11, 11]);
     expect(JSON.stringify(pack).length).toBeLessThan(60_000);
   });
 
@@ -205,6 +220,8 @@ describe("the whiteboard subagent's context pack", () => {
     expect(pack.schema).toBeNull();
     expect(pack.apps).toEqual([]);
     expect(pack.diagramItemIds).toEqual([]);
+    expect(pack.drawings).toEqual([]);
+    expect(pack.chapters).toHaveLength(7);
   });
 });
 

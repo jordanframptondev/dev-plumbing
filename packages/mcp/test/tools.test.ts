@@ -258,6 +258,7 @@ describe('the dp tools', () => {
     expect(context.description).toContain('whiteboard: true');
     const whiteboard = tools.find((t) => t.name === 'dp_whiteboard')!;
     expect(whiteboard.inputSchema.properties?.defense).toMatchObject({ type: 'object', description: 'The whole defense: see your instructions for its shape' });
+    expect(whiteboard.description).toContain("the release concerns, the checklist, and the presenter's seven chapters");
   });
 
   it('returns whiteboard work, and passes back the request it finished', async () => {
