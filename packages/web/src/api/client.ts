@@ -25,7 +25,7 @@ import type {
   ThreadDetail,
   TypeEntry,
   TypeItemRow,
-  VersionSummary,
+  VersionsView,
   WhiteboardView,
 } from '@dev-plumbing/core/schemas';
 
@@ -118,7 +118,9 @@ export const api = {
   startFinalize: (repo: string, id: string) => request<StartFinalizeResponse>(`${proj(repo, id)}/finalize`, send('POST', {})),
   acceptFinal: (repo: string, id: string, clone: string) => request<AcceptFinalResponse>(`${proj(repo, id)}/finalize/accept`, send('POST', { clone })),
   discardProposal: (repo: string, id: string) => request<{ ok: true }>(`${proj(repo, id)}/finalize/discard`, send('POST', {})),
-  versions: (repo: string, id: string) => request<{ versions: VersionSummary[] }>(`${proj(repo, id)}/versions`),
+  versions: (repo: string, id: string) => request<VersionsView>(`${proj(repo, id)}/versions`),
+  /** Removes a folder an update that didn't finish left in docs/versions. Anything else is a 404. */
+  removeLeftover: (repo: string, id: string, name: string) => request<{ ok: true }>(`${proj(repo, id)}/versions/leftovers/${enc(name)}`, { method: 'DELETE' }),
   versionDoc: (repo: string, id: string, n: number, which: 'original' | 'draft') => request<{ text: string | null }>(`${proj(repo, id)}/versions/${n}/${which}`),
   compareVersions: (repo: string, id: string, from: number, to: number, which: 'original' | 'draft') =>
     request<{ segments: DiffSegment[] }>(`${proj(repo, id)}/versions/compare?${new URLSearchParams({ from: String(from), to: String(to), which })}`),

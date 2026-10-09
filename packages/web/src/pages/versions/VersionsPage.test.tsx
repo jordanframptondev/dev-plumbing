@@ -1,6 +1,6 @@
-import type { VersionSummary } from '@dev-plumbing/core/schemas';
+import type { Leftover, VersionSummary } from '@dev-plumbing/core/schemas';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../../api/client';
 import { formatUpdated } from '../../lib/time';
@@ -26,8 +26,8 @@ const V2: VersionSummary = {
   current: true,
 };
 
-function show(versions: VersionSummary[]) {
-  const list = vi.spyOn(api, 'versions').mockResolvedValue({ versions });
+function show(versions: VersionSummary[], leftovers: Leftover[] = []) {
+  const list = vi.spyOn(api, 'versions').mockResolvedValue({ versions, leftovers });
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <VersionsBody repo="acme-app" project="restock" />
@@ -60,6 +60,53 @@ describe('the Versions page', () => {
 
   it('says when a version started the draft afresh', () => {
     expect(versionMeta({ ...V2, n: 3, commit: null, merge: { clean: 0, conflicts: 0, fresh: true } })).toBe(`${formatUpdated(V2.at)} · restock · Draft started from v3`);
+  });
+
+  it('lists no leftovers when there are none', async () => {
+    show([V2, V1]);
+    await screen.findByTestId('versions-list');
+    expect(screen.queryByText("Left over from updates that didn't finish")).toBeNull();
+    expect(screen.queryByTestId('leftovers-list')).toBeNull();
+  });
+
+  it('lists the folders updates that did not finish left behind, each with Remove, which asks first', async () => {
+    const leftovers: Leftover[] = [
+      { name: 'v2.unfinished-20261006100000', version: 2, at: '2026-10-06T10:00:00.000Z' },
+      { name: 'v1.unfinished-20261005100000', version: 1, at: '2026-10-05T10:00:00.000Z' },
+    ];
+    const list = show([V2, V1], leftovers);
+    const remove = vi.spyOn(api, 'removeLeftover').mockResolvedValue({ ok: true });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const section = await screen.findByTestId('leftovers-list');
+    expect(within(section).getByRole('heading').textContent).toBe("Left over from updates that didn't finish");
+    const rows = within(section).getAllByTestId('leftover-row');
+    expect(rows.map((r) => r.textContent)).toEqual([
+      `v2.unfinished-20261006100000v2's plan and draft from before the update · set aside ${formatUpdated(leftovers[0]!.at)}Remove`,
+      `v1.unfinished-20261005100000v1's plan and draft from before the update · set aside ${formatUpdated(leftovers[1]!.at)}Remove`,
+    ]);
+    // Remove is never the page's main action.
+    expect(within(rows[0]!).getByRole('button', { name: 'Remove' }).className).not.toContain('bg-button');
+
+    // Cancelled: nothing is removed.
+    fireEvent.click(within(rows[1]!).getByRole('button', { name: 'Remove' }));
+    expect(confirm).toHaveBeenCalledWith("Remove v1.unfinished-20261005100000? It holds your v1 plan and draft from before an update that didn't finish. They're deleted.");
+    expect(remove).not.toHaveBeenCalled();
+
+    // Confirmed: it's removed, and the list is read again.
+    confirm.mockReturnValue(true);
+    list.mockResolvedValue({ versions: [V2, V1], leftovers: [leftovers[0]!] });
+    fireEvent.click(within(rows[1]!).getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(remove).toHaveBeenCalledWith('acme-app', 'restock', 'v1.unfinished-20261005100000'));
+    await waitFor(() => expect(screen.getAllByTestId('leftover-row')).toHaveLength(1));
+    expect(list).toHaveBeenCalledTimes(2);
+  });
+
+  it("says why a leftover couldn't be removed", async () => {
+    show([V2, V1], [{ name: 'v1.unfinished-20261005100000', version: 1, at: '2026-10-05T10:00:00.000Z' }]);
+    vi.spyOn(api, 'removeLeftover').mockRejectedValue(new Error("That folder isn't a leftover from an update."));
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
+    expect(await screen.findByText("That folder isn't a leftover from an update.")).toBeTruthy();
   });
 
   it("says why the list couldn't be read", async () => {

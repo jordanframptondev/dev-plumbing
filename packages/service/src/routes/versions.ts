@@ -1,8 +1,9 @@
 import { Hono, type Context } from 'hono';
-import { currentVersion, diffText, projectVersions, readProjectFile, readVersionDoc, type VersionSummary } from '@dev-plumbing/core';
+import { currentVersion, diffText, listLeftovers, projectVersions, readProjectFile, readVersionDoc, removeLeftover, type VersionsView, type VersionSummary } from '@dev-plumbing/core';
 import type { AppContext } from '../context';
 import { handle } from '../errors';
 import { locateProject } from '../locate';
+import { projectKey, type Runtime } from '../runtime';
 
 const DOCS = ['original', 'draft'] as const;
 const UNKNOWN_DOC = { error: 'Unknown document.' };
@@ -12,8 +13,11 @@ const MISSING = { error: "That version's document is missing from the project fo
 /** A version number from the URL: a whole number from 1, or null. */
 const versionNumber = (value: string | undefined) => (value && /^[1-9][0-9]{0,5}$/.test(value) ? Number(value) : null);
 
-/** Documents → Versions: every version of the plan a project went through, each one's plan and draft, and a diff of two. */
-export function versionRoutes(ctx: AppContext): Hono {
+/**
+ * Documents → Versions: every version of the plan a project went through, each one's plan and draft, a diff of two, and
+ * the folders updates that didn't finish left behind, which you can remove.
+ */
+export function versionRoutes(ctx: AppContext, rt: Runtime): Hono {
   const r = new Hono();
   const base = '/projects/:repo/:id/versions';
   /** The project, and its versions oldest first (v1 synthesised for a project that was never updated). */
@@ -24,12 +28,22 @@ export function versionRoutes(ctx: AppContext): Hono {
   };
 
   r.get(base, handle(async (c) => {
-    const { project } = await find(c);
+    const { dir, project } = await find(c);
     const current = currentVersion(project).n;
     const versions: VersionSummary[] = projectVersions(project)
       .map((v) => ({ ...v, current: v.n === current }))
       .reverse();
-    return c.json({ versions });
+    const view: VersionsView = { versions, leftovers: await listLeftovers(dir) };
+    return c.json(view);
+  }));
+
+  // Removes one folder an update that didn't finish left in docs/versions. removeLeftover refuses anything else with a
+  // StoreError, which is a 404.
+  r.delete(`${base}/leftovers/:name`, handle(async (c) => {
+    const { ref } = await locateProject(ctx, c.req.param('repo')!, c.req.param('id')!);
+    await rt.withLock(projectKey(ref.repo, ref.id), () => removeLeftover(ref.dir, c.req.param('name')!));
+    rt.events.projectChanged(ref.repo, ref.id);
+    return c.json({ ok: true });
   }));
 
   r.get(`${base}/compare`, handle(async (c) => {

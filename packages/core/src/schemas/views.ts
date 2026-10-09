@@ -118,6 +118,18 @@ export type ProjectHome = {
 
 /** One version in the Versions list (GET …/versions, newest first). `current` marks the one the working files hold. */
 export type VersionSummary = PlanVersion & { current: boolean };
+/**
+ * A folder an update that didn't finish was set aside in, docs/versions/<name>: `version` is the n of its
+ * v<n>.unfinished-<UTC time> name, and `at` the time in its name (ISO).
+ */
+export type Leftover = { name: string; version: number; at: string };
+/** GET …/versions: the versions, newest first, and the leftover folders, newest first. */
+export type VersionsView = { versions: VersionSummary[]; leftovers: Leftover[] };
+
+/** "a", "a and b", "a, b and c". */
+export function andList(parts: string[]): string {
+  return parts.length < 2 ? parts.join('') : `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`;
+}
 
 export type OpenOptions = { messageId: string; options: Option[]; recommended?: string };
 

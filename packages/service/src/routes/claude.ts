@@ -46,6 +46,8 @@ import {
   readThread,
   readWhiteboardRequest,
   recordClone,
+  recoverUnfinishedUpdate,
+  recoveryLines,
   relevantDecisions,
   replySchema,
   repoProfileSchema,
@@ -300,6 +302,12 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
 
       const key = projectKey(ref.repo, ref.id);
       const isAlive = (w: string) => rt.listeners.isAlive(w);
+      // An update that stopped part-way is put back first thing under the lock, and the user is told, before anything
+      // else. planChange and updatePlan put one back too, but by then there's nothing left to put back.
+      const recovery: string[] = [];
+      const putBackFirst = async () => {
+        recovery.push(...recoveryLines(await recoverUnfinishedUpdate(ref.dir, new Date(rt.now()))));
+      };
       // A plan that changed in the repo is never brought in without asking. Without `update`, the answer is
       // plan-changed, before anything is written, and the skill asks the user. update: true brings the new version in;
       // update: false opens the project as it was, and the next open asks again. When the update would have to wait
@@ -311,6 +319,7 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
         const text = repoText;
         const commit = body.update ? await gitHead(git.root) : null;
         const outcome = await rt.withLock(key, async () => {
+          await putBackFirst();
           const change = await planChange(ref.dir, text);
           if (!change) return null;
           const project = await readProjectFile(ref.dir);
@@ -350,7 +359,7 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
             suggestFresh: change.suggestFresh,
             whitespaceOnly: change.whitespaceOnly,
             branch: git.branch,
-            next: askNext(change, outcome.branch),
+            next: telling(recovery, askNext(change, outcome.branch)),
           });
         }
         if (outcome?.kind === 'tell') tell = outcome.line;
@@ -365,6 +374,7 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
       const windowId = body.windowId;
       if (!created && !update && windowId) {
         caughtUp = await rt.withLock(key, async () => {
+          await putBackFirst();
           const version = await catchUpDue(ref.dir);
           if (version === null) {
             if ((await catchUpWaiting(ref.dir)) !== null && (await updateRefusal(ref.dir)) !== null) waits.push(CATCH_UP_WAITS);
@@ -378,6 +388,7 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
       }
       if (body.windowId) rt.listeners.seen(body.windowId, key);
       await rt.withLock(key, async () => {
+        await putBackFirst();
         // Every clone a project is opened from is remembered, so Accept can offer it.
         await recordClone(ref.dir, git.root, ctx.home);
         await requeueUnfinished(ref.dir, isAlive);
@@ -416,7 +427,7 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
           models,
           maxParallel: cfg.agents.maxParallel,
           waitingSubmissions,
-          next: `Tell the user: "${updatedLine(update)}" ${next}`,
+          next: telling([...recovery, updatedLine(update)], next),
         });
       }
       return c.json({
@@ -429,7 +440,7 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
         models,
         maxParallel: cfg.agents.maxParallel,
         waitingSubmissions,
-        next: telling([...(tell ? [tell] : []), ...(caughtUp ? [CATCH_UP] : []), ...waits], next),
+        next: telling([...recovery, ...(tell ? [tell] : []), ...(caughtUp ? [CATCH_UP] : []), ...waits], next),
       });
     }),
   );

@@ -42,7 +42,7 @@ type Docs = { original: string | null; draft: string | null };
  */
 function show(n: number, versions: VersionSummary[], o: { docs?: Docs; segments?: DiffSegment[]; updated?: DiffSegment[] } = {}) {
   const docs = o.docs ?? { original: PLAN, draft: DRAFT };
-  vi.spyOn(api, 'versions').mockResolvedValue({ versions });
+  vi.spyOn(api, 'versions').mockResolvedValue({ versions, leftovers: [] });
   const doc = vi.spyOn(api, 'versionDoc').mockImplementation(async (_repo, _id, _n, which) => ({ text: docs[which] }));
   const compare = vi.spyOn(api, 'compareVersions').mockResolvedValue({ segments: o.segments ?? SEGMENTS });
   const updateDiff = vi.spyOn(api, 'updateDiff').mockResolvedValue({ segments: o.updated ?? SEGMENTS });

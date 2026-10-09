@@ -7,7 +7,7 @@ import { diffText } from '../docDiff';
 import { MergeError, mergePlan, type MergeConflict, type MergeResult } from '../merge';
 import { defenseThreadIds } from '../defenseType';
 import { importableTypes, PLAN_CHANGES } from '../planChanges';
-import { titleFromMarkdown, type Item, type Message, type PlanVersion, type PlumbingProject, type PlumbingType, type Submission, type Thread } from '../schemas';
+import { andList, titleFromMarkdown, type Item, type Leftover, type Message, type PlanVersion, type PlumbingProject, type PlumbingType, type Submission, type Thread } from '../schemas';
 import { readFinalize } from './finalize';
 import { uniqueId } from './importItems';
 import {
@@ -190,19 +190,33 @@ async function setAside(dir: string, n: number, now: Date): Promise<string> {
 /**
  * What recoverUnfinishedUpdate did. `recovered`: it put back an update that hadn't finished. `keptChanged`: the working
  * files it left as you have them, because they changed since that update wrote them. `setAside`: where the copy from
- * before that update went, then (docs/versions/v<n>.unfinished-<UTC time>), or null.
+ * before that update went, then (docs/versions/v<n>.unfinished-<UTC time>), or null. `version`: the version that
+ * update was bringing in, or null when nothing was put back.
  */
-export type UpdateRecovery = { recovered: boolean; keptChanged: string[]; setAside: string | null };
+export type UpdateRecovery = { recovered: boolean; keptChanged: string[]; setAside: string | null; version: number | null };
+
+/**
+ * What /dev-plumbing tells you after recoverUnfinishedUpdate put an update back: that it did, and, when it kept working
+ * files you'd changed since, which ones, and where your files from before the update went. [] when nothing was put back.
+ */
+export function recoveryLines(note: UpdateRecovery): string[] {
+  // `version` is set whenever `recovered` is.
+  if (!note.recovered || note.version === null) return [];
+  const lines = [`An earlier update to v${note.version} didn't finish, and was put back.`];
+  if (note.keptChanged.length && note.setAside) lines.push(`Your own changes to ${andList(note.keptChanged)} were kept, and your files from before the update are in ${note.setAside}.`);
+  return lines;
+}
 
 /**
  * Finishes what an update left behind when it stopped part-way (the service died, or putting files back failed). A
  * journal whose version is in project.json is just deleted. Any other update is put back: its snapshot and journal are
  * removed, or, when a working file changed since the update wrote it, that file stays as it is and they're set aside.
  * Throws when a file can't be put back yet, keeping the snapshot and the journal for the next try. Runs at the start of
- * planChange and updatePlan, so under the project's lock. `now` names a set-aside folder.
+ * planChange and updatePlan, so under the project's lock, and /open runs it first, to tell the user (recoveryLines).
+ * `now` names a set-aside folder.
  */
 export async function recoverUnfinishedUpdate(dir: string, now: Date = new Date()): Promise<UpdateRecovery> {
-  const note: UpdateRecovery = { recovered: false, keptChanged: [], setAside: null };
+  const note: UpdateRecovery = { recovered: false, keptChanged: [], setAside: null, version: null };
   const folders = await fs.readdir(docPath(dir, 'docs/versions')).catch((): string[] => []);
   for (const folder of folders) {
     const match = /^v([1-9][0-9]*)$/.exec(folder)?.[1];
@@ -233,6 +247,7 @@ export async function recoverUnfinishedUpdate(dir: string, now: Date = new Date(
       if (left.length) throw unfinished(left);
     }
     note.recovered = true;
+    note.version = journal.data.to;
   }
   return note;
 }
@@ -415,10 +430,11 @@ export async function updatePlan(
   if (planHash(o.repoText) === current.hash) throw new ConflictError(`The plan hasn't changed since v${current.n}.`);
   // A snapshot already in docs/versions/v<n> isn't this update's. snapshotVersion would refuse to overwrite it, and
   // putting the update back must never restore from it or remove it, so the update doesn't start. Only a missing
-  // folder means there's none: any other error says nothing about what's in it.
+  // folder means there's none: any other error says nothing about what's in it, so the update stops, writing nothing.
   const present = await fs.readdir(docPath(dir, `docs/versions/v${current.n}`)).catch((error: unknown): string[] => {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
-    throw error;
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new ConflictError(`The update couldn't read docs/versions/v${current.n} (${reason}). Run /dev-plumbing to try again.`);
   });
   if (present.includes('original.md') || present.includes('draft.md')) throw new ConflictError(`Version ${current.n} is already saved in docs/versions/v${current.n}.`);
   const n = current.n + 1;
@@ -577,4 +593,46 @@ export async function updatePlan(
     await writeThread(dir, { ...thread, status: 'parked', messages: [...thread.messages, line] }).catch(quiet);
   }
   return { version: n, clean: version.merge!.clean, conflicts: merged.conflicts.length, fresh, conflictThreadIds, importTypes: importPending };
+}
+
+/** The name of a folder an update that didn't finish was set aside in (setAside), and of nothing else. */
+const LEFTOVER = /^v([1-9][0-9]*)\.unfinished-[0-9TZ-]+(-[0-9]+)?$/;
+export const NOT_A_LEFTOVER = "That folder isn't a leftover from an update.";
+
+/** The UTC time in a set-aside folder's name (…unfinished-20261005113000), as ISO, or null when it has none. */
+function stampTime(name: string): string | null {
+  const t = /\.unfinished-(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/.exec(name);
+  return t ? `${t[1]}-${t[2]}-${t[3]}T${t[4]}:${t[5]}:${t[6]}.000Z` : null;
+}
+
+/**
+ * The folders updates that didn't finish were set aside in (docs/versions/v<n>.unfinished-<UTC time>), newest first.
+ * Only real folders whose name has that form: a file or a link with such a name isn't one. Nothing removes them on its
+ * own: the Versions page lists them, with Remove.
+ */
+export async function listLeftovers(dir: string): Promise<Leftover[]> {
+  const names = await fs.readdir(docPath(dir, 'docs/versions')).catch((): string[] => []);
+  const leftovers: Leftover[] = [];
+  for (const name of names) {
+    const version = LEFTOVER.exec(name)?.[1];
+    if (!version) continue;
+    const stat = await lstat(docPath(dir, `docs/versions/${name}`));
+    if (!stat?.isDirectory()) continue;
+    leftovers.push({ name, version: Number(version), at: stampTime(name) ?? stat.mtime.toISOString() });
+  }
+  return leftovers.sort((a, b) => b.at.localeCompare(a.at) || b.name.localeCompare(a.name));
+}
+
+/**
+ * Removes one leftover folder, docs/versions/<name>, with everything in it, then docs/versions if that leaves it empty.
+ * Only a name of the v<n>.unfinished-<UTC time> form that is a real folder there: anything else (v2 itself, a path with
+ * .. or a slash, a file, a link, a name that isn't there) is a StoreError, NOT_A_LEFTOVER, and nothing is removed.
+ * Under the project's lock.
+ */
+export async function removeLeftover(dir: string, name: string): Promise<void> {
+  if (!LEFTOVER.test(name)) throw new StoreError(NOT_A_LEFTOVER);
+  const folder = docPath(dir, `docs/versions/${name}`);
+  if (!(await lstat(folder))?.isDirectory()) throw new StoreError(NOT_A_LEFTOVER);
+  await fs.rm(folder, { recursive: true, force: true });
+  await fs.rmdir(docPath(dir, 'docs/versions')).catch(quiet);
 }

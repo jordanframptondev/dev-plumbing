@@ -23,7 +23,7 @@ export function createApp(ctx: AppContext, rt: Runtime = createRuntime()): Hono 
   app.route('/api', threadRoutes(ctx, rt));
   app.route('/api', finalizeRoutes(ctx, rt));
   app.route('/api', whiteboardRoutes(ctx, rt));
-  app.route('/api', versionRoutes(ctx));
+  app.route('/api', versionRoutes(ctx, rt));
   app.route('/api', mockupRoutes(ctx));
   app.route('/api', configRoutes(ctx, rt));
   app.route('/api/claude', claudeRoutes(ctx, rt));

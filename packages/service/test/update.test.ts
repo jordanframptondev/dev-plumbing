@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { readItem, readProjectFile, readThread, writeJsonAtomic } from '@dev-plumbing/core';
+import { readItem, readProjectFile, readThread, snapshotVersion, writeJsonAtomic } from '@dev-plumbing/core';
 import { createApp } from '../src/app';
 import { createRuntime } from '../src/runtime';
 import { DRAFT, makeRepo } from '../../core/test/fixtures';
@@ -27,13 +27,15 @@ const V2 = DRAFT.replace('# Restock reminders', '# Restock alerts')
   .replace('Log reminders in a table.', 'Log reminders in the events table.');
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 
-/** Every file and folder under `dir`, with each file's text. */
+/** Every file, folder and link under `dir`, with each file's text and where each link points. */
 async function snapshot(dir: string): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
   const walk = async (d: string): Promise<void> => {
     for (const entry of await fs.readdir(d, { withFileTypes: true })) {
       const p = path.join(d, entry.name);
-      if (entry.isDirectory()) {
+      if (entry.isSymbolicLink()) {
+        out[p] = `link to ${await fs.readlink(p)}`;
+      } else if (entry.isDirectory()) {
         out[p] = 'folder';
         await walk(p);
       } else {
@@ -78,8 +80,8 @@ async function importAll(t: Setup, types: { id: string }[], questions: unknown[]
 }
 
 /** The plan imported from the clone, with two questions. */
-async function setup() {
-  const t = await harness();
+async function setup(o: { now?: () => number } = {}) {
+  const t = await harness(o);
   const open = await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a' });
   await importAll(t, open.body.importTypes, QUESTIONS);
   return t;
@@ -98,6 +100,23 @@ async function rewritePlan(t: Setup, text: string, o: { commit?: boolean } = {})
   gitIn(t.repo, 'add', '-A');
   gitIn(t.repo, 'commit', '-q', '--no-verify', '-m', 'Restock alerts');
   return gitIn(t.repo, 'rev-parse', 'HEAD');
+}
+
+/**
+ * An update to v2 that stopped once it had written everything but project.json, as when the service dies: its journal,
+ * v1's snapshot, `draft` as the merged draft, and V2 as docs/original.md.
+ */
+async function stoppedUpdate(t: Setup, draft: string) {
+  const write = async (rel: string, text: string) => {
+    await fs.mkdir(path.dirname(path.join(t.dir, rel)), { recursive: true });
+    await fs.writeFile(path.join(t.dir, rel), text);
+  };
+  const created = ['docs/versions/v2', 'docs/versions/v2/merged.md'];
+  await write('docs/versions/v1/update.json', JSON.stringify({ to: 2, created, wrote: { draft: sha256(draft), original: sha256(V2) } }));
+  await snapshotVersion(t.dir, 1);
+  await write('docs/versions/v2/merged.md', draft);
+  await write('docs/draft.md', draft);
+  await write('docs/original.md', V2);
 }
 
 const ASK_V2 =
@@ -512,11 +531,54 @@ describe('catching the items up with settled Plan changes', () => {
   });
 });
 
+describe('an update that stopped part-way', () => {
+  const PUT_BACK = "An earlier update to v2 didn't finish, and was put back.";
+
+  it('is put back first, and the user is told before the question', async () => {
+    const t = await setup();
+    await rewritePlan(t, V2);
+    const before = await snapshot(t.dir);
+    await stoppedUpdate(t, 'The merged draft.\n');
+    const ask = await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a' });
+    expect(ask.body).toMatchObject({ kind: 'plan-changed', version: 1, nextVersion: 2 });
+    expect(ask.body.next).toBe(`Tell the user: "${PUT_BACK}" ${ASK_V2}`);
+    expect(await snapshot(t.dir)).toEqual(before);
+    // It's told once.
+    expect((await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a' })).body.next).toBe(ASK_V2);
+  });
+
+  it('is told in the same line as the update that runs after it', async () => {
+    const t = await setup();
+    await rewritePlan(t, V2);
+    await stoppedUpdate(t, 'The merged draft.\n');
+    const yes = await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a', update: true });
+    expect(yes.body).toMatchObject({ kind: 'updated', version: 2 });
+    expect(yes.body.next).toBe(`Tell the user: "${PUT_BACK} v2: 3 changes merged, nothing to settle." ${IMPORT_NEXT}`);
+  });
+
+  it('keeps a draft you changed since, says where the copies went, and lists the folder under Versions', async () => {
+    const t = await setup({ now: () => Date.parse('2026-10-08T10:00:00.000Z') });
+    await rewritePlan(t, V2);
+    await stoppedUpdate(t, 'The merged draft.\n');
+    await fs.writeFile(path.join(t.dir, 'docs', 'draft.md'), 'The merged draft, and your edit.\n');
+    // Opened without bringing the plan in: it's put back all the same.
+    const open = await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a', update: false });
+    expect(open.body).toMatchObject({ kind: 'reopened', importTypes: [] });
+    expect(open.body.next).toBe(
+      `Tell the user: "${PUT_BACK} Your own changes to docs/draft.md were kept, and your files from before the update are in docs/versions/v1.unfinished-20261008100000." ${WAIT_NEXT}`,
+    );
+    expect(await fs.readFile(path.join(t.dir, 'docs', 'draft.md'), 'utf8')).toBe('The merged draft, and your edit.\n');
+    expect(await fs.readFile(path.join(t.dir, 'docs', 'original.md'), 'utf8')).toBe(DRAFT);
+    expect((await t.send('GET', `${P}/versions`)).body.leftovers).toEqual([{ name: 'v1.unfinished-20261008100000', version: 1, at: '2026-10-08T10:00:00.000Z' }]);
+    expect((await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a', update: false })).body.next).toBe(WAIT_NEXT);
+  });
+});
+
 describe('versions', () => {
   it('lists every version, newest first, with the current one marked', async () => {
     const t = await setup();
     const v1 = { n: 1, at: (await readProjectFile(t.dir)).createdAt, hash: sha256(DRAFT), clone: t.repo, branch: 'main', commit: null };
-    expect((await t.send('GET', `${P}/versions`)).body).toEqual({ versions: [{ ...v1, current: true }] });
+    expect((await t.send('GET', `${P}/versions`)).body).toEqual({ versions: [{ ...v1, current: true }], leftovers: [] });
 
     await acceptOneRow(t);
     const head = await rewritePlan(t, V2, { commit: true });
@@ -593,12 +655,72 @@ describe('versions', () => {
     expect(await get('/compare?from=1&to=2&which=draft')).toEqual({ status: 404, body: { error: "That version's document is missing from the project folder." } });
   });
 
+  it('only a leftover folder can be removed', async () => {
+    const t = await setup();
+    const versions = path.join(t.dir, 'docs', 'versions');
+    const leftover = path.join(versions, 'v1.unfinished-20261005100000');
+    // A real leftover; v2's own folder; a file and a link with a leftover's name; a folder beside docs/versions; and a
+    // folder outside the project, which the link points at.
+    await fs.mkdir(leftover, { recursive: true });
+    await fs.writeFile(path.join(leftover, 'draft.md'), 'The copy from before the update.\n');
+    await fs.mkdir(path.join(versions, 'v2'));
+    await fs.writeFile(path.join(versions, 'v2', 'draft.md'), "v2's draft.\n");
+    await fs.writeFile(path.join(versions, 'v3.unfinished-20261007100000'), 'A file, not a folder.\n');
+    await fs.mkdir(path.join(t.dir, 'docs', 'x'));
+    await fs.writeFile(path.join(t.dir, 'docs', 'x', 'keep.md'), 'Beside docs/versions.\n');
+    const outside = path.join(t.tmp, 'outside');
+    await fs.mkdir(outside);
+    await fs.writeFile(path.join(outside, 'keep.md'), "Not the project's.\n");
+    await fs.symlink(outside, path.join(versions, 'v4.unfinished-20261008100000'));
+    const before = { project: await snapshot(t.dir), outside: await snapshot(outside) };
+
+    // Names that reach the route, each refused whole: v2, slashes and dot segments sent encoded, the file, the link,
+    // and a leftover's name that isn't there.
+    const refused = { status: 404, body: { error: "That folder isn't a leftover from an update." } };
+    for (const name of [
+      'v2',
+      '..%2Fx',
+      '%2E%2E%2Fx',
+      'v2.unfinished-x%2F..%2F..',
+      'v1.unfinished-20261005100000%2F..%2Fv2',
+      'v1.unfinished-20261005100000%2F',
+      'v3.unfinished-20261007100000',
+      'v4.unfinished-20261008100000',
+      'v1.unfinished-20990101000000',
+    ]) {
+      expect(await t.send('DELETE', `${P}/versions/leftovers/${name}`), name).toEqual(refused);
+    }
+    // Real slashes and dot segments: the URL resolves them, or the path matches no route.
+    for (const route of ['../x', 'v2.unfinished-x/../..', '..', 'v1.unfinished-20261005100000/draft.md', '']) {
+      expect((await call(t.app, `${P}/versions/leftovers/${route}`, { method: 'DELETE' })).status, route).toBe(404);
+    }
+    expect({ project: await snapshot(t.dir), outside: await snapshot(outside) }).toEqual(before);
+
+    // The leftover goes, with what's in it, and nothing else does.
+    expect(await t.send('DELETE', `${P}/versions/leftovers/v1.unfinished-20261005100000`)).toEqual({ status: 200, body: { ok: true } });
+    const after = await snapshot(t.dir);
+    expect(Object.keys(before.project).filter((p) => !(p in after)).sort()).toEqual([leftover, path.join(leftover, 'draft.md')]);
+    expect(Object.keys(after).length).toBe(Object.keys(before.project).length - 2);
+    expect(await snapshot(outside)).toEqual(before.outside);
+    expect((await t.send('GET', `${P}/versions`)).body.leftovers).toEqual([]);
+    expect(await t.send('DELETE', `${P}/versions/leftovers/v1.unfinished-20261005100000`)).toEqual(refused);
+    expect((await t.send('DELETE', '/api/projects/acme-app/nope/versions/leftovers/v1.unfinished-20261005100000')).status).toBe(404);
+  });
+
   it('needs the token or the same origin', async () => {
     const t = await setup();
     for (const route of [`${P}/versions`, `${P}/versions/1/original`, `${P}/versions/compare?from=1&to=1&which=draft`, `${P}/versions/1/update-diff`]) {
       const res = await t.app.request(`http://localhost:4545${route}`, { headers: { 'sec-fetch-site': 'cross-site', origin: 'http://evil.example' } });
       expect(res.status, route).toBe(401);
     }
+    const leftover = path.join(t.dir, 'docs', 'versions', 'v1.unfinished-20261005100000');
+    await fs.mkdir(leftover, { recursive: true });
+    const remove = await t.app.request(`http://localhost:4545${P}/versions/leftovers/v1.unfinished-20261005100000`, {
+      method: 'DELETE',
+      headers: { 'sec-fetch-site': 'cross-site', origin: 'http://evil.example' },
+    });
+    expect(remove.status).toBe(401);
+    expect((await fs.stat(leftover)).isDirectory()).toBe(true);
     const same = await t.app.request(`http://localhost:4545${P}/versions`, { headers: { 'sec-fetch-site': 'same-origin', origin: 'http://localhost:4545' } });
     expect(same.status).toBe(200);
   });

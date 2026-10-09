@@ -46,9 +46,9 @@ import { PLAN_CHANGES_TYPE } from '../src/planChanges';
 import type { PlumbingProject } from '../src/schemas';
 import { pickUpFinalize, requestFinalize } from '../src/store/finalize';
 import { finalizeChecklist } from '../src/store/checklist';
-import { ConflictError, InputError, readItem, readItems, readProjectFile, readSubmissions, readThread, readThreads, writeItem, writeProjectFile, writeThread } from '../src/store/io';
+import { ConflictError, InputError, readItem, readItems, readProjectFile, readSubmissions, readThread, readThreads, StoreError, writeItem, writeProjectFile, writeThread } from '../src/store/io';
 import { finishSubmission, pendingSubmissions, pickUp } from '../src/store/queue';
-import { planChange, recoverUnfinishedUpdate, updatePlan } from '../src/store/update';
+import { listLeftovers, NOT_A_LEFTOVER, planChange, recoverUnfinishedUpdate, recoveryLines, removeLeftover, updatePlan } from '../src/store/update';
 import { planHash, snapshotVersion } from '../src/store/versions';
 import { removeTempDirs } from '../../../testkit/tmp';
 import { DRAFT, listType, pair, seedProject, TYPES } from './fixtures';
@@ -455,10 +455,15 @@ describe('when an update is refused or fails', () => {
   it("refuses, writing nothing, when it can't tell whether the version it would save is already saved", async () => {
     const dir = await seed();
     const before = await snapshot(dir);
-    reading.fail = new Set([path.join(dir, 'docs', 'versions', 'v1')]);
+    const folder = path.join(dir, 'docs', 'versions', 'v1');
+    reading.fail = new Set([folder]);
     const error = await failure(update(dir, CONFLICTING));
     reading.fail = new Set();
-    expect((error as NodeJS.ErrnoException).code).toBe('EMFILE');
+    // A plain message, not Node's error.
+    expect(error).toBeInstanceOf(ConflictError);
+    expect((error as Error).message).toBe(
+      `The update couldn't read docs/versions/v1 (EMFILE: too many open files, scandir '${folder}'). Run /dev-plumbing to try again.`,
+    );
     expect(await snapshot(dir)).toEqual(before);
   });
 
@@ -613,7 +618,7 @@ describe('when an update is refused or fails', () => {
     const edited = `${await read(dir, 'docs/draft.md')}\n## Rollout\n\nShip to one store first.\n`;
     await fs.writeFile(path.join(dir, 'docs', 'draft.md'), edited);
     const aside = 'docs/versions/v1.unfinished-20261005113000';
-    expect(await recoverUnfinishedUpdate(dir, new Date('2026-10-05T11:30:00.000Z'))).toEqual({ recovered: true, keptChanged: ['docs/draft.md'], setAside: aside });
+    expect(await recoverUnfinishedUpdate(dir, new Date('2026-10-05T11:30:00.000Z'))).toEqual({ recovered: true, keptChanged: ['docs/draft.md'], setAside: aside, version: 2 });
     // Your edit wins. The original, which only the update had changed, is v1's again, and the conflict's files are gone.
     expect(await read(dir, 'docs/draft.md')).toBe(edited);
     expect(await read(dir, 'docs/original.md')).toBe(DRAFT);
@@ -647,7 +652,7 @@ describe('when an update is refused or fails', () => {
     await write('docs/original.md', CONFLICTING);
     await write('docs/draft.md', 'The merged draft, and your edit.\n');
     const before = await snapshot(dir);
-    expect(await recoverUnfinishedUpdate(dir, T)).toEqual({ recovered: true, keptChanged: ['docs/draft.md'], setAside: 'docs/versions/v1.unfinished-20261005100000' });
+    expect(await recoverUnfinishedUpdate(dir, T)).toEqual({ recovered: true, keptChanged: ['docs/draft.md'], setAside: 'docs/versions/v1.unfinished-20261005100000', version: 2 });
     expect(await read(dir, 'docs/draft.md')).toBe('The merged draft, and your edit.\n');
     expect(await read(dir, 'docs/original.md')).toBe(DRAFT);
     expect((await readItems(dir)).values.map((i) => i.id)).toEqual(['q1']);
@@ -709,5 +714,110 @@ describe('when an update is refused or fails', () => {
     await fs.writeFile(path.join(dir, 'docs', 'versions', 'v1', 'update.json'), JSON.stringify({ to: 2, created: ['items/plan-changes-v2-1.json'], wrote }));
     expect(await planChange(dir, CONFLICTING)).toBeNull();
     expect(await snapshot(dir)).toEqual(after);
+  });
+});
+
+describe('telling you about an update that was put back', () => {
+  const NOTHING = { recovered: false, keptChanged: [], setAside: null, version: null };
+
+  it('says nothing when nothing was put back', async () => {
+    const dir = await seed();
+    expect(await recoverUnfinishedUpdate(dir, T)).toEqual(NOTHING);
+    expect(recoveryLines(NOTHING)).toEqual([]);
+  });
+
+  it('names the version the update was bringing in', async () => {
+    const dir = await seed();
+    failing.counts.clear();
+    failing.calls = new Set([`${path.join(dir, 'project.json')}#1`, `${path.join(dir, 'docs', 'draft.md')}#2`]);
+    await failure(update(dir, CONFLICTING));
+    failing.calls = new Set();
+    const note = await recoverUnfinishedUpdate(dir, T);
+    expect(note).toEqual({ recovered: true, keptChanged: [], setAside: null, version: 2 });
+    expect(recoveryLines(note)).toEqual(["An earlier update to v2 didn't finish, and was put back."]);
+  });
+
+  it('names the files it kept as you had them, and where the copies went', async () => {
+    const dir = await seed();
+    failing.counts.clear();
+    failing.calls = new Set([`${path.join(dir, 'project.json')}#1`, `${path.join(dir, 'docs', 'draft.md')}#2`]);
+    await failure(update(dir, CONFLICTING));
+    failing.calls = new Set();
+    await fs.writeFile(path.join(dir, 'docs', 'draft.md'), `${await read(dir, 'docs/draft.md')}\nYour edit.\n`);
+    const note = await recoverUnfinishedUpdate(dir, new Date('2026-10-05T11:30:00.000Z'));
+    expect(recoveryLines(note)).toEqual([
+      "An earlier update to v2 didn't finish, and was put back.",
+      "Your own changes to docs/draft.md were kept, and your files from before the update are in docs/versions/v1.unfinished-20261005113000.",
+    ]);
+    const both = { recovered: true, keptChanged: ['docs/original.md', 'docs/draft.md'], setAside: 'docs/versions/v2.unfinished-20261006100000', version: 3 };
+    expect(recoveryLines(both)).toEqual([
+      "An earlier update to v3 didn't finish, and was put back.",
+      "Your own changes to docs/original.md and docs/draft.md were kept, and your files from before the update are in docs/versions/v2.unfinished-20261006100000.",
+    ]);
+  });
+});
+
+describe('leftover folders', () => {
+  /** A project whose update to v2 stopped, then had its draft changed, so the next look set v1's copy aside. */
+  async function withLeftover(): Promise<string> {
+    const dir = await seed();
+    failing.counts.clear();
+    failing.calls = new Set([`${path.join(dir, 'project.json')}#1`, `${path.join(dir, 'docs', 'draft.md')}#2`]);
+    await failure(update(dir, CONFLICTING));
+    failing.calls = new Set();
+    await fs.writeFile(path.join(dir, 'docs', 'draft.md'), `${await read(dir, 'docs/draft.md')}\nYour edit.\n`);
+    await recoverUnfinishedUpdate(dir, new Date('2026-10-05T11:30:00.000Z'));
+    return dir;
+  }
+  const versions = (dir: string, ...rest: string[]) => path.join(dir, 'docs', 'versions', ...rest);
+
+  it('are listed newest first, and only real folders with a leftover name', async () => {
+    const dir = await withLeftover();
+    expect(await listLeftovers(dir)).toEqual([{ name: 'v1.unfinished-20261005113000', version: 1, at: '2026-10-05T11:30:00.000Z' }]);
+    // A second one, set aside the next day and named apart from one set aside in the same second.
+    await fs.mkdir(versions(dir, 'v2.unfinished-20261006100000-2'), { recursive: true });
+    // None of these is a leftover: a version's own folder, a file and a link with a leftover's name, and other names.
+    await fs.mkdir(versions(dir, 'v2'));
+    await fs.writeFile(versions(dir, 'v3.unfinished-20261007100000'), 'not a folder');
+    await fs.symlink(versions(dir, 'v2'), versions(dir, 'v4.unfinished-20261008100000'));
+    await fs.mkdir(versions(dir, 'v1.unfinished-later'));
+    await fs.mkdir(versions(dir, 'v0.unfinished-20261005100000'));
+    expect(await listLeftovers(dir)).toEqual([
+      { name: 'v2.unfinished-20261006100000-2', version: 2, at: '2026-10-06T10:00:00.000Z' },
+      { name: 'v1.unfinished-20261005113000', version: 1, at: '2026-10-05T11:30:00.000Z' },
+    ]);
+  });
+
+  it('are none in a project that has no docs/versions', async () => {
+    expect(await listLeftovers(await seed())).toEqual([]);
+  });
+
+  it('can be removed one at a time, with everything in them, and then docs/versions goes once it is empty', async () => {
+    const dir = await withLeftover();
+    await fs.mkdir(versions(dir, 'v1.unfinished-20261006100000'));
+    const before = await snapshot(dir);
+    await removeLeftover(dir, 'v1.unfinished-20261005113000');
+    const after = await snapshot(dir);
+    // Only that folder and what was in it went.
+    const gone = versions(dir, 'v1.unfinished-20261005113000');
+    expect(Object.keys(before).filter((p) => !(p in after)).sort()).toEqual([gone, ...['draft.md', 'original.md', 'update.json'].map((f) => path.join(gone, f))]);
+    expect(await listLeftovers(dir)).toEqual([{ name: 'v1.unfinished-20261006100000', version: 1, at: '2026-10-06T10:00:00.000Z' }]);
+    await removeLeftover(dir, 'v1.unfinished-20261006100000');
+    expect((await fs.readdir(path.join(dir, 'docs'))).sort()).toEqual(['draft.md', 'original.md']);
+  });
+
+  it('refuses anything but a leftover folder, removing nothing', async () => {
+    const dir = await withLeftover();
+    await fs.mkdir(versions(dir, 'v2'));
+    await fs.writeFile(versions(dir, 'v2', 'draft.md'), 'v2 draft');
+    await fs.writeFile(versions(dir, 'v3.unfinished-20261007100000'), 'not a folder');
+    await fs.symlink(path.join(dir, 'docs', 'draft.md'), versions(dir, 'v4.unfinished-20261008100000'));
+    const before = await snapshot(dir);
+    for (const name of ['v2', '../v2', 'v1.unfinished-20261005113000/../v2', 'v1.unfinished-20261005113000/', 'v3.unfinished-20261007100000', 'v4.unfinished-20261008100000', 'v1.unfinished-20990101000000', '']) {
+      const error = await failure(removeLeftover(dir, name));
+      expect(error, name).toBeInstanceOf(StoreError);
+      expect((error as Error).message, name).toBe(NOT_A_LEFTOVER);
+    }
+    expect(await snapshot(dir)).toEqual(before);
   });
 });
