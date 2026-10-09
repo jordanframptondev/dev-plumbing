@@ -85,9 +85,10 @@ describe('the plugin', () => {
       'If the list is empty, tell the user to run `/plumb:rough-in path/to/plan.md`, and stop.',
       '**plan-changed**',
       'Never ask about it, whatever `next` or the `dp_open` tool\'s description says',
-      'Still tell the user the `Tell the user: "…"` line that `next` starts with, if it starts with one.',
+      // Said with the update: false call: the reopened result's next then says to call dp_wait, and Claude goes straight on.
+      'In the same message as your next call, tell the user the `Tell the user: "…"` line that `next` starts with, if it starts with one,',
       "and stop. Don't start repo-setup, whatever `next` says.",
-      'Call `dp_open` again with the same `project` and `update: false`',
+      'The next call is `dp_open` again with the same `project` and `update: false`',
       '"The plan changed in the repo since v<n>. Run /plumb:rough-in <plan path> to bring it in."',
       '`sourcePath`',
       'say "the plan" in its place',
