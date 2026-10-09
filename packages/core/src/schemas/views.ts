@@ -97,6 +97,11 @@ export type ProjectHome = {
   documents: { original: boolean; draft: boolean; final: boolean };
   /** The plan version the working original and draft hold, and how many versions there are (1 until an update). */
   version: { current: number; count: number };
+  /**
+   * Every Plan changes item of the current version is settled, and the items haven't caught up with what that did to
+   * the draft: the next /dev-plumbing re-imports to catch them up (catchUpWaiting). The Plan changes list says so.
+   */
+  catchUpDue: boolean;
   listening?: ListeningState;
   /**
    * For the header's Finalize spec button. `state` is the finalize request's, or null when none is under way.

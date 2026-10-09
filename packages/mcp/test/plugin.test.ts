@@ -250,6 +250,11 @@ describe('the plugin', () => {
       '**Leave items about a passage in `conflicts` alone.** Their Plan changes thread settles it.',
       // Every importer writes, removals included.
       'Always call `dp_write_items` once: items, `removed`, both, or `noChanges`.',
+      // Once the Plan changes are settled, a catch-up brings in what the user chose in them.
+      '- `catchUp`: true when this re-import catches the items up with settled Plan changes',
+      '**A catch-up** (`catchUp: true`) comes once the user has settled every Plan changes thread of v`to`.',
+      '`changes` is only what settling those threads did to the draft',
+      'There are no `conflicts` to leave alone, because they\'re settled and their outcome is in `changes`.',
       '"<Type title>: <n> items, <k> removed from the plan"',
     ]) {
       expect(importer).toContain(s);

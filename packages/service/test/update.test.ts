@@ -414,6 +414,91 @@ describe('bringing a changed plan in', () => {
   });
 });
 
+describe('catching the items up with settled Plan changes', () => {
+  const CATCH_UP = `Tell the user: "Your settled Plan changes touch the plan's items. Re-importing to catch them up." ${IMPORT_NEXT}`;
+  const WAITS = `Tell the user: "Your settled Plan changes still need a re-import. It waits until Claude has answered: run /dev-plumbing again then." ${WAIT_NEXT}`;
+  const MERGED = { id: 'merged', label: 'Use the merged version', change: { md: [{ find: 'Log one row per reminder sent.', replace: 'Log one row per reminder sent, in the events table.' }] } };
+  const KEEP = { id: 'keep', label: 'Keep my draft', change: { md: [] } };
+
+  /** v2 is in with its Data conflict, its importers are back, and Claude offered its choices: it's your turn. */
+  async function atV2(): Promise<Setup> {
+    const t = await setup();
+    await acceptOneRow(t);
+    await rewritePlan(t, V2);
+    const yes = await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a', update: true });
+    expect(yes.body).toMatchObject({ kind: 'updated', merged: { clean: 2, conflicts: 1 } });
+    await importAll(t, yes.body.importTypes, QUESTIONS.map(({ message: _message, ...item }) => item));
+    const wait = await t.claude('/wait', { ...base, windowId: 'w-a', timeoutSeconds: 0 });
+    expect(wait.body).toMatchObject({ kind: 'submission', groups: [{ threads: ['t-plan-changes-v2-1'] }] });
+    const reply = await t.claude('/reply', { ...base, threadId: 't-plan-changes-v2-1', text: 'You log one row per send; the repo logs to the events table.', options: [MERGED, KEEP], recommended: 'merged' });
+    expect(reply.status).toBe(200);
+    expect((await t.claude('/wait', { ...base, windowId: 'w-a', timeoutSeconds: 0, finished: { submission: wait.body.submission } })).body).toEqual({ kind: 'timeout' });
+    return t;
+  }
+
+  /** You take one of Claude's choices on the conflict in the browser. */
+  async function settle(t: Setup, optionId: string) {
+    await t.send('PUT', `${P}/threads/t-plan-changes-v2-1/draft`, { optionId });
+    expect((await t.send('POST', `${P}/submit`, { scope: 'thread', threadId: 't-plan-changes-v2-1' })).body).toMatchObject({ resolved: 1 });
+  }
+
+  it('re-imports once from /open, after Not now too, when every Plan changes thread is settled, and the next /open just listens', async () => {
+    const t = await atV2();
+    // While the conflict is open, nothing is due, and /open just listens.
+    expect((await t.send('GET', P)).body.catchUpDue).toBe(false);
+    expect((await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a' })).body).toMatchObject({ kind: 'reopened', importTypes: [], next: WAIT_NEXT });
+
+    await settle(t, 'merged');
+    expect((await t.send('GET', P)).body.catchUpDue).toBe(true);
+    // Not now only declines a newer version of the plan: the catch-up is this version's, so it runs.
+    const open = await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a', update: false });
+    expect(open.body).toMatchObject({ kind: 'reopened', title: 'Restock alerts', next: CATCH_UP });
+    expect((open.body.importTypes as { id: string }[]).map((x) => x.id)).toEqual(['architecture', 'database', 'ui', 'questions', 'concerns', 'ideas', 'testing', 'security', 'flows', 'phases']);
+    expect(await readProjectFile(t.dir)).toMatchObject({ status: 'importing', importBy: 'w-a', caughtUp: 2, reimporting: { version: 2, from: 'active', catchUp: true } });
+    expect((await t.send('GET', P)).body.catchUpDue).toBe(false);
+
+    // The importers get what settling the conflict did to the draft, with nothing left to settle.
+    const pack = (await t.claude('/context', { ...base, importType: 'questions' })).body;
+    expect(pack.reimport).toMatchObject({ from: 2, to: 2, catchUp: true, conflicts: [] });
+    expect(pack.reimport.changes).toContain('- Log one row per reminder sent.');
+    expect(pack.reimport.changes).toContain('+ Log one row per reminder sent, in the events table.');
+    // Another window's dp_wait doesn't end it before this window's importers are back.
+    expect((await t.claude('/wait', { ...base, windowId: 'w-b', timeoutSeconds: 0 })).body).toEqual({ kind: 'timeout' });
+    expect((await readProjectFile(t.dir)).status).toBe('importing');
+
+    const results = await importAll(t, open.body.importTypes, [{ key: 'log', summary: 'One row per reminder sent, in the events table.' }]);
+    expect(results.at(-1)).toMatchObject({ importFinished: true });
+    expect((await readItem(t.dir, 'questions-log')).flags).toEqual([expect.objectContaining({ reason: "Changed in the plan's v2." })]);
+    const project = await readProjectFile(t.dir);
+    expect(project).toMatchObject({ status: 'active', importPending: [], caughtUp: 2 });
+    expect(project.reimporting).toBeUndefined();
+
+    // Once per version: the next /dev-plumbing just listens.
+    expect((await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a' })).body).toMatchObject({ kind: 'reopened', importTypes: [], next: WAIT_NEXT });
+    expect((await readProjectFile(t.dir)).status).toBe('active');
+  });
+
+  it("doesn't re-import when you kept your draft, and says it waits while Claude has a thread to answer", async () => {
+    const kept = await atV2();
+    await settle(kept, 'keep');
+    expect((await kept.send('GET', P)).body.catchUpDue).toBe(false);
+    expect((await kept.claude('/open', { cwd: kept.repo, plan: PLAN, windowId: 'w-a' })).body).toMatchObject({ kind: 'reopened', importTypes: [], next: WAIT_NEXT });
+
+    const busy = await atV2();
+    await settle(busy, 'merged');
+    // You asked something Claude hasn't answered yet: the window listens and answers it first, and says the catch-up
+    // waits for another /dev-plumbing.
+    await busy.send('PUT', `${P}/threads/t-questions-who/draft`, { text: 'Everyone.' });
+    expect((await busy.send('POST', `${P}/submit`, { scope: 'thread', threadId: 't-questions-who' })).body).toMatchObject({ sent: 1 });
+    expect((await busy.send('GET', P)).body.catchUpDue).toBe(true);
+    expect((await busy.claude('/open', { cwd: busy.repo, plan: PLAN, windowId: 'w-a' })).body).toMatchObject({ kind: 'reopened', importTypes: [], waitingSubmissions: 1, next: WAITS });
+    expect((await busy.claude('/wait', { ...base, windowId: 'w-a', timeoutSeconds: 0 })).body).toMatchObject({ kind: 'submission' });
+    expect((await busy.claude('/reply', { ...base, threadId: 't-questions-who', text: 'Everyone gets them.', resolve: { decision: 'Everyone gets reminders.' } })).status).toBe(200);
+    // Then the next /dev-plumbing catches the items up.
+    expect((await busy.claude('/open', { cwd: busy.repo, plan: PLAN, windowId: 'w-a' })).body).toMatchObject({ kind: 'reopened', next: CATCH_UP });
+  });
+});
+
 describe('versions', () => {
   it('lists every version, newest first, with the current one marked', async () => {
     const t = await setup();

@@ -49,6 +49,7 @@ When `reimport` is set, the user brought a new version of the plan in, and every
 - `changes`: what changed in the plan between those versions, as lines starting with `+ ` (added), `- ` (removed) or two spaces (unchanged), in hunks headed `@@`. `draft` has these changes, apart from `conflicts`, and the user's own edits too.
 - `conflicts`: passages that both the user's draft and the new version changed, each with its `heading` (null when there's none), the draft's text (`ours`) and the new version's (`theirs`). The draft still has `ours`; a Plan changes thread settles each one with the user.
 - `existing`: this type's imported items, each with its `key`, `id`, `title`, `summary`, `body`, `fields`, `mdAnchor`, `hasData` and `data` (its drawing as it is now, or null), and `removed` (an earlier version took it out of the plan).
+- `catchUp`: true when this re-import catches the items up with settled Plan changes (see A catch-up, below), false after an update.
 
 Then:
 - **Change an existing item only for what the `+ ` and `- ` lines in `changes` say.** Where the draft differs from an item for another reason (the user's own edits, which threads already settled), leave the item as it is. Never bring items in line with the draft.
@@ -60,3 +61,5 @@ Then:
 - **Drawings:** If a drawing's part of the plan changed, edit the current `data` you're given; don't redraw it from scratch. Send the whole edited `data`. A drawing you don't send stays as it is.
 - **Use `noChanges` only when nothing in `changes` touches this type, apart from passages in `conflicts`.** It leaves every item of the type exactly as it is, drawings included.
 - Links work as at a first import: keys in your batch, or ids from `existingItems`. A reused key keeps its item's id, so links to it still hold.
+
+**A catch-up** (`catchUp: true`) comes once the user has settled every Plan changes thread of v`to`. `from` and `to` are both that version, and `changes` is only what settling those threads did to the draft: each change the user took, as `- ` and `+ ` lines under `@@` and the passage's heading. It holds nothing else: not the update's changes again, and not the user's answers to other items. There are no `conflicts` to leave alone, because they're settled and their outcome is in `changes`. Follow the rules above with these `changes`.

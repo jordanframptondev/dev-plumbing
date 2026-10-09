@@ -152,7 +152,11 @@ function ListRow({
   );
 }
 
-export function ListScreen({ repo, project, data }: { repo: string; project: string; data: { type: TypeEntry; items: TypeItemRow[] } }) {
+/**
+ * One plumbing type's items as a list. `catchUpDue`: every Plan changes thread of the plan's current version is settled,
+ * and the next /dev-plumbing re-imports to catch the items up (only the Plan changes list passes it).
+ */
+export function ListScreen({ repo, project, data, catchUpDue = false }: { repo: string; project: string; data: { type: TypeEntry; items: TypeItemRow[] }; catchUpDue?: boolean }) {
   const { type, items } = data;
   const needs = items.filter((i) => i.status === 'your_turn' || i.status === 'draft');
   const withClaude = items.filter((i) => i.status === 'with_claude');
@@ -191,6 +195,11 @@ export function ListScreen({ repo, project, data }: { repo: string; project: str
           </Button>
         )}
       </header>
+      {catchUpDue && (
+        <p data-testid="catch-up-due" className="mt-2 text-[12.5px] text-ink-2">
+          Your Plan changes are settled. Run /dev-plumbing to catch the items up.
+        </p>
+      )}
       {notice && (
         <p role="status" data-testid="send-notice" className="mt-3 text-[12.5px] text-ink-2">
           {notice}

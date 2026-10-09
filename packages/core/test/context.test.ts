@@ -75,6 +75,8 @@ describe('context packs', () => {
     expect(pack.reimport).toEqual({
       from: 2,
       to: 3,
+      // An update's re-import, not the catch-up after its Plan changes are settled.
+      catchUp: false,
       changes: [
         '@@',
         '  # Restock reminders',

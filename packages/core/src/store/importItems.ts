@@ -68,6 +68,8 @@ const withoutEmpty = (item: Item): Item =>
   ) as Item;
 
 const systemLine = (now: Date, text: string): Message => ({ id: newId('m', now), at: now.toISOString(), author: 'system', text });
+/** What a catch-up (Task 7) says on a changed item's thread: the change came from your settled Plan changes. */
+const CAUGHT_UP = 'Updated to match your settled Plan changes.';
 
 /**
  * A re-imported item whose key was in the plan before. It becomes { ...old, ...given }: it keeps its id, thread,
@@ -77,7 +79,8 @@ const systemLine = (now: Date, text: string): Message => ({ id: newId('m', now),
  * - a field the importer gave is different: the item is updated and flagged (which clears its reviewed mark), its
  *   thread says so, and the importer's question is added only when the thread is idle or waiting for you.
  */
-async function reimportItem(dir: string, old: Item, given: Given, opening: Message | null, version: number, now: Date): Promise<void> {
+async function reimportItem(dir: string, old: Item, given: Given, opening: Message | null, reimport: { version: number; catchUp?: boolean }, now: Date): Promise<void> {
+  const version = reimport.version;
   const back = old.removedIn !== undefined;
   const changed = CONTENT.some((key) => key in given && comparable(key, old[key]) !== comparable(key, given[key]));
   if (!back && !changed) return;
@@ -98,7 +101,8 @@ async function reimportItem(dir: string, old: Item, given: Given, opening: Messa
     messages.push(systemLine(now, `Back in the plan in v${version}.`));
   }
   if (changed) {
-    messages.push(systemLine(now, `Updated from the plan's v${version}.`));
+    // The flag still names v<n> (Task 8 reads it); the line says a catch-up's change came from settling, not the plan.
+    messages.push(systemLine(now, reimport.catchUp ? CAUGHT_UP : `Updated from the plan's v${version}.`));
     if (opening && (status === 'idle' || status === 'your_turn')) {
       messages.push(opening);
       status = 'your_turn';
@@ -244,7 +248,7 @@ export async function writeImportBatch(o: {
     itemIds.push(id);
     const old = previous.get(it.key);
     if (old && reimport) {
-      await reimportItem(o.dir, old, given, opening, reimport.version, now);
+      await reimportItem(o.dir, old, given, opening, reimport, now);
       continue;
     }
     const threadId = `t-${id}`;

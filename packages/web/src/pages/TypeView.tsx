@@ -8,6 +8,9 @@ export function TypeView() {
   const { repo, project, type } = useParams({ from: '/p/$repo/$project/t/$type' });
   const { item } = useSearch({ from: '/p/$repo/$project/t/$type' });
   const { data, error } = useQuery({ queryKey: ['typeItems', repo, project, type], queryFn: () => api.typeItems(repo, project, type) });
+  const home = useQuery({ queryKey: ['projectHome', repo, project], queryFn: () => api.projectHome(repo, project) });
+  // The built-in Plan changes list (core's PLAN_CHANGES) says when settling it calls for a re-import.
+  const catchUpDue = type === 'plan-changes' && home.data?.catchUpDue === true;
   if (error) return <p className="text-[13px] text-seal">{(error as Error).message}</p>;
   if (!data) return <p className="text-[13px] text-ink-3">Loading…</p>;
   if (data.type.noChanges && data.type.importFailed) {
@@ -27,6 +30,6 @@ export function TypeView() {
       </div>
     );
   }
-  if (data.type.screen === 'list') return <ListScreen key={type} repo={repo} project={project} data={data} />;
+  if (data.type.screen === 'list') return <ListScreen key={type} repo={repo} project={project} data={data} catchUpDue={catchUpDue} />;
   return <VisualScreen key={type} repo={repo} project={project} data={data} item={item} />;
 }

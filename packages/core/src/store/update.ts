@@ -17,6 +17,7 @@ import {
   newId,
   projectFiles,
   readDocText,
+  readHistory,
   readItems,
   readJsonFile,
   readProjectFile,
@@ -299,6 +300,87 @@ export async function updateRefusal(dir: string): Promise<string | null> {
   const finalize = await readFinalize(dir);
   if (finalize?.state === 'requested' || finalize?.state === 'writing') return "Finalize is under way. Run /dev-plumbing again once it's done or cancelled.";
   return null;
+}
+
+/** One edit settling a Plan changes thread made to the draft, with the heading of the passage it's in. */
+export type SettledEdit = { heading: string | null; find: string; replace: string };
+
+/** v<n>'s Plan changes items, in key order (v<n>-1, v<n>-2, …). */
+async function planChangesOf(dir: string, n: number): Promise<Item[]> {
+  const prefix = `v${n}-`;
+  const k = (i: Item) => Number(i.key!.slice(prefix.length));
+  return (await readItems(dir)).values.filter((i) => i.type === PLAN_CHANGES && i.key?.startsWith(prefix)).sort((a, b) => k(a) - k(b));
+}
+
+/**
+ * What settling v<n>'s Plan changes did to the draft: the markdown edits of every applied, not undone, history/ entry
+ * of their threads, in the items' order and then oldest first, each with its passage's heading. A thread settled with
+ * Keep my draft, or parked, made none, and your answers to other items are never here. A catch-up's importers get
+ * these as `changes` (importPack), and catchUpWaiting is due only when there are some.
+ */
+export async function settledEdits(dir: string, n: number): Promise<SettledEdit[]> {
+  const items = await planChangesOf(dir, n);
+  const applied = (await readHistory(dir)).filter((h) => h.appliedAt && !h.undoneAt).sort((a, b) => a.at.localeCompare(b.at));
+  return items.flatMap((item) =>
+    applied
+      .filter((h) => h.threadId === item.threadId)
+      .flatMap((h) => (h.change.md ?? []).map((e) => ({ heading: item.mdAnchor?.heading ?? null, find: e.find, replace: e.replace }))),
+  );
+}
+
+/**
+ * The current version, when the update that brought it in left conflicts to settle, every one of its Plan changes
+ * items is now resolved or parked, settling them changed the draft (settledEdits), and the items haven't been caught
+ * up with it yet (project.caughtUp). Null otherwise. It doesn't look at work in progress, and writes nothing, so the
+ * project home can say a catch-up is waiting.
+ */
+export async function catchUpWaiting(dir: string): Promise<number | null> {
+  const project = await readProjectFile(dir);
+  const current = currentVersion(project);
+  if (!current.merge?.conflicts || (project.caughtUp ?? 0) >= current.n) return null;
+  const conflicts = await planChangesOf(dir, current.n);
+  if (!conflicts.length) return null;
+  const statusOf = new Map((await readThreads(dir)).values.map((t) => [t.id, t.status]));
+  if (!conflicts.every((i) => ['resolved', 'parked'].includes(statusOf.get(i.threadId) ?? 'missing'))) return null;
+  // Keep my draft everywhere, or parking, changed nothing: there's nothing to catch up, whatever else you answered.
+  return (await settledEdits(dir, current.n)).length ? current.n : null;
+}
+
+/**
+ * The version whose settled Plan changes the items should be caught up with now, or null: catchUpWaiting's, once
+ * nothing is in the way. It waits, as an update does, while updateRefusal says so (an import, threads queued for
+ * Claude, a finalize), and while an update that stopped part-way still has its journal: planChange and updatePlan put
+ * that back first. Under the project's lock.
+ */
+export async function catchUpDue(dir: string): Promise<number | null> {
+  const folders = await fs.readdir(docPath(dir, 'docs/versions')).catch((): string[] => []);
+  for (const folder of folders) {
+    const n = /^v([1-9][0-9]*)$/.exec(folder)?.[1];
+    if (n && (await lstat(docPath(dir, journalRel(Number(n)))))) return null;
+  }
+  if (await updateRefusal(dir)) return null;
+  return catchUpWaiting(dir);
+}
+
+/**
+ * Starts the re-import that catches the items up with v<version>'s settled Plan changes: every importable type is
+ * imported again, by key, as after an update, and importPack gives the importers the draft's changes since the update
+ * merged it. `windowId` is the window that runs the importers, as claimImport records it. caughtUp is set now, so it
+ * runs once per version, even if it's cut short. With no type to import, only caughtUp is set. Under the project's
+ * lock, after catchUpDue.
+ */
+export async function startCatchUp(dir: string, o: { version: number; types: PlumbingType[]; windowId: string; now?: Date }): Promise<{ importTypes: string[] }> {
+  const project = await readProjectFile(dir);
+  if (project.status === 'importing') throw new ConflictError("This project is still importing. Run /dev-plumbing again once that's done.");
+  const importPending = importableTypes(o.types).map((t) => t.id);
+  const from = project.status === 'finalized' ? 'finalized' : 'active';
+  await writeProjectFile(dir, {
+    ...project,
+    caughtUp: o.version,
+    ...(importPending.length ? { status: 'importing' as const, importPending, reimporting: { version: o.version, from, catchUp: true }, importBy: o.windowId } : {}),
+    updatedAt: (o.now ?? new Date()).toISOString(),
+  });
+  return { importTypes: importPending };
 }
 
 /**

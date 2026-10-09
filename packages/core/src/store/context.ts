@@ -37,6 +37,7 @@ import { drawingOptions } from './drawings';
 import { finalName } from './finalize';
 import { docPath, projectFiles, readDecisions, readDocText, readItem, readItems, readProjectFile, readThread, readThreads, StoreError } from './io';
 import { presetLabel } from './threads';
+import { settledEdits, type SettledEdit } from './update';
 import { readVersionDoc } from './versions';
 import { defenseBasis, defenseDiagramItemIds, readDefense } from './whiteboard';
 
@@ -75,11 +76,14 @@ export type ImportPack = {
    * Set while a new version of the plan is re-imported, null at first import. `changes` is how the plan changed from
    * v`from` to v`to`; `conflicts` are the passages this update left to settle in Plan changes (`ours` is still in the
    * draft, `theirs` isn't yet); `existing` is this type's imported items, by key, so the importer can reuse a key for the
-   * same thing.
+   * same thing. In a catch-up (`catchUp`, once every Plan changes thread of v`to` is settled), `from` is `to`,
+   * `changes` is only what settling those threads did to the draft (each edit under its passage's heading), and there
+   * are no `conflicts`.
    */
   reimport: {
     from: number;
     to: number;
+    catchUp: boolean;
     changes: string;
     /** In document order. `heading` is the heading above the passage, or null when there's none. */
     conflicts: { heading: string | null; ours: string; theirs: string }[];
@@ -144,6 +148,15 @@ function conflictsOf(items: Item[], to: number): NonNullable<ImportPack['reimpor
     .map((i) => ({ heading: i.mdAnchor?.heading ?? null, ours: i.conflict!.ours, theirs: i.conflict!.theirs }));
 }
 
+/**
+ * Edits as a small diff, each under its passage's heading: `@@ <heading>`, then its `find` as `- ` lines and its
+ * `replace` as `+ ` lines. What a catch-up's importers get as `changes`.
+ */
+function editsDiff(edits: SettledEdit[]): string {
+  const lines = (prefix: string, text: string) => (text === '' ? [] : text.split('\n').map((l) => `${prefix}${l}`));
+  return edits.map((e) => [e.heading ? `@@ ${e.heading}` : '@@', ...lines('- ', e.find), ...lines('+ ', e.replace)].join('\n')).join('\n');
+}
+
 /** Spec §13.2: what a thread subagent receives. */
 export async function threadPack(o: { dir: string; threadId: string; types: PlumbingType[]; profile?: RepoProfile }): Promise<ThreadPack> {
   const project = await readProjectFile(o.dir);
@@ -201,16 +214,22 @@ export async function importPack(o: { dir: string; typeId: string; types: Plumbi
   if (!type) throw new StoreError(`There's no plumbing type "${o.typeId}".`);
   const project = await readProjectFile(o.dir);
   const { values: items } = await readItems(o.dir);
+  const draft = await readDocText(o.dir, project.docs.draft);
   const p = o.profile;
   const to = project.reimporting?.version;
+  // A catch-up brings in only what settling the Plan changes did to the draft, never your answers to other items.
+  const catchUp = project.reimporting?.catchUp === true;
   const reimport: ImportPack['reimport'] =
     to === undefined
       ? null
       : {
-          from: to - 1,
+          from: catchUp ? to : to - 1,
           to,
-          changes: planDiff((await readVersionDoc(o.dir, project, to - 1, 'original')) ?? '', (await readVersionDoc(o.dir, project, to, 'original')) ?? ''),
-          conflicts: conflictsOf(items, to),
+          catchUp,
+          changes: catchUp
+            ? editsDiff(await settledEdits(o.dir, to))
+            : planDiff((await readVersionDoc(o.dir, project, to - 1, 'original')) ?? '', (await readVersionDoc(o.dir, project, to, 'original')) ?? ''),
+          conflicts: catchUp ? [] : conflictsOf(items, to),
           existing: items.flatMap((i) =>
             i.type === type.id && i.createdBy === 'import' && i.key !== undefined
               ? [
@@ -242,7 +261,7 @@ export async function importPack(o: { dir: string; typeId: string; types: Plumbi
       rules: type.body,
       dataShape: dataShapeFor(type),
     },
-    draft: await readDocText(o.dir, project.docs.draft),
+    draft,
     profile: p
       ? {
           name: p.name,

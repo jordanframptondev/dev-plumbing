@@ -3,6 +3,8 @@ import path from 'node:path';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import {
+  catchUpDue,
+  catchUpWaiting,
   checklistLines,
   claimImport,
   currentVersion,
@@ -54,6 +56,7 @@ import {
   resolvePlan,
   saveDefense,
   saveProposal,
+  startCatchUp,
   StoreError,
   suggestRepoName,
   summarizeProject,
@@ -83,6 +86,10 @@ import { projectKey, type Runtime } from '../runtime';
 export const MAX_POLL_SECONDS = 240;
 
 const NO_REMOTE = "This repo has no git remote, so dev-plumbing can't recognise its other clones. Add one (git remote add origin <url>), then run /dev-plumbing again.";
+/** What the skill tells the user when /open starts the re-import that catches the items up with settled Plan changes. */
+const CATCH_UP = "Your settled Plan changes touch the plan's items. Re-importing to catch them up.";
+/** …and when that re-import is due but has to wait for what Claude has under way. */
+const CATCH_UP_WAITS = 'Your settled Plan changes still need a re-import. It waits until Claude has answered: run /dev-plumbing again then.';
 
 /**
  * What the skill asks when the plan in the repo changed since the project's current version. `branch` is set when
@@ -110,6 +117,11 @@ function updatedLine(u: UpdateResult): string {
   if (u.fresh) return `v${u.version}: the draft now starts from the plan's v${u.version}. Your earlier draft is kept under Versions.`;
   const merged = `${u.clean} ${u.clean === 1 ? 'change' : 'changes'} merged`;
   return u.conflicts ? `v${u.version}: ${merged}, ${u.conflicts} to settle in Plan changes.` : `v${u.version}: ${merged}, nothing to settle.`;
+}
+
+/** `next` with lines the skill tells the user first, as one "Tell the user" sentence, or `next` itself when there are none. */
+function telling(lines: string[], next: string): string {
+  return lines.length ? `Tell the user: "${lines.join(' ')}" ${next}` : next;
 }
 
 const projectBody = z.object({ repo: z.string().min(1), project: z.string().min(1) });
@@ -344,6 +356,26 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
         if (outcome?.kind === 'tell') tell = outcome.line;
         if (outcome?.kind === 'updated') update = outcome.result;
       }
+      // Once every Plan changes thread of the current version is settled, and settling them changed the draft, the
+      // items catch up with that: one re-import, run by this window, as an update's is. After Not now too, which only
+      // declines a newer version. While Claude has work under way it waits, and the user is told to run /dev-plumbing
+      // again once Claude has answered (`waits` holds what has to wait, said last).
+      let caughtUp = false;
+      const waits: string[] = [];
+      const windowId = body.windowId;
+      if (!created && !update && windowId) {
+        caughtUp = await rt.withLock(key, async () => {
+          const version = await catchUpDue(ref.dir);
+          if (version === null) {
+            if ((await catchUpWaiting(ref.dir)) !== null && (await updateRefusal(ref.dir)) !== null) waits.push(CATCH_UP_WAITS);
+            return false;
+          }
+          // Seen under the same lock, so another window's dp_wait can't end the re-import before this one starts it.
+          rt.listeners.seen(windowId, key);
+          return (await startCatchUp(ref.dir, { version, types: cfg.types, windowId })).importTypes.length > 0;
+        });
+        if (caughtUp) changed(ref);
+      }
       if (body.windowId) rt.listeners.seen(body.windowId, key);
       await rt.withLock(key, async () => {
         // Every clone a project is opened from is remembered, so Accept can offer it.
@@ -397,7 +429,7 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
         models,
         maxParallel: cfg.agents.maxParallel,
         waitingSubmissions,
-        next: tell ? `Tell the user: "${tell}" ${next}` : next,
+        next: telling([...(tell ? [tell] : []), ...(caughtUp ? [CATCH_UP] : []), ...waits], next),
       });
     }),
   );

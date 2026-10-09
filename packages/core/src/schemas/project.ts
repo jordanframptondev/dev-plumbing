@@ -46,8 +46,13 @@ export const plumbingProjectSchema = z.object({
   importPending: z.array(z.string()).default([]),
   /** Every version of the plan, oldest first. Empty means the project is still at v1, read from `source`. */
   versions: z.array(versionSchema).default([]),
-  /** Set while the importers re-run after an update: the version they import, and the status to go back to. */
-  reimporting: z.object({ version: z.number().int().min(2), from: z.enum(['active', 'finalized']) }).optional(),
+  /**
+   * Set while the importers re-run after an update: the version they import, and the status to go back to. `catchUp`
+   * marks the re-import that catches the items up once that version's Plan changes are all settled (startCatchUp).
+   */
+  reimporting: z.object({ version: z.number().int().min(2), from: z.enum(['active', 'finalized']), catchUp: z.boolean().optional() }).optional(),
+  /** The last version whose settled Plan changes the items were caught up with, so that re-import runs once per version. */
+  caughtUp: z.number().int().min(2).optional(),
   /** While importing: the Claude window that runs the importers. Only it, or another once it's gone, ends the import. */
   importBy: z.string().optional(),
   createdAt: z.string(),
