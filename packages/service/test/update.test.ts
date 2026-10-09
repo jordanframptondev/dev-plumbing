@@ -478,6 +478,19 @@ describe('catching the items up with settled Plan changes', () => {
     expect((await readProjectFile(t.dir)).status).toBe('active');
   });
 
+  it("carries a catch-up that's still waiting into the update to a newer plan version", async () => {
+    const t = await atV2();
+    await settle(t, 'merged');
+    await rewritePlan(t, V2.replace('# Restock alerts', '# Restock alerts, v3'));
+    expect((await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a' })).body).toMatchObject({ kind: 'plan-changed', version: 2, nextVersion: 3 });
+    const yes = await t.claude('/open', { cwd: t.repo, plan: PLAN, windowId: 'w-a', update: true });
+    expect(yes.body).toMatchObject({ kind: 'updated' });
+    expect(await readProjectFile(t.dir)).toMatchObject({ caughtUp: 2, reimporting: { version: 3, carriedCatchUp: 2 } });
+    const pack = (await t.claude('/context', { ...base, importType: 'questions' })).body;
+    expect(pack.reimport.changes).toContain("Settled in v2's Plan changes:");
+    expect(pack.reimport.changes).toContain('+ Log one row per reminder sent, in the events table.');
+  });
+
   it("doesn't re-import when you kept your draft, and says it waits while Claude has a thread to answer", async () => {
     const kept = await atV2();
     await settle(kept, 'keep');

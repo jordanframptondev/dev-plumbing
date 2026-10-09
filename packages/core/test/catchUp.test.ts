@@ -268,3 +268,24 @@ describe("a catch-up importer's pack", () => {
     expect(await catchUpWaiting(dir)).toBeNull();
   });
 });
+
+describe('a catch-up still waiting when a newer version comes in', () => {
+  it("rides along with the update's re-import, and isn't run on its own", async () => {
+    const dir = await atV2();
+    await accept(dir, CONFLICT, 'theirs');
+    expect(await catchUpWaiting(dir)).toBe(2);
+    expect(await update(dir, V3, new Date('2026-10-09T10:00:00.000Z'))).toMatchObject({ version: 3 });
+    const project = await readProjectFile(dir);
+    expect(project.caughtUp).toBe(2);
+    expect(project.reimporting).toMatchObject({ version: 3, carriedCatchUp: 2 });
+    const pack = await importPack({ dir, typeId: 'questions', types });
+    expect(pack.reimport).toMatchObject({ from: 2, to: 3, catchUp: false });
+    expect(pack.reimport!.changes).toContain('push notification');
+    expect(pack.reimport!.changes).toContain(
+      ["Settled in v2's Plan changes:", '@@ Approach', '- sends an email reminder.', '+ sends a text message.'].join('\n'),
+    );
+    expect(await finishImport(dir)).toBe(true);
+    expect(await catchUpWaiting(dir)).toBeNull();
+    expect(await catchUpDue(dir)).toBeNull();
+  });
+});

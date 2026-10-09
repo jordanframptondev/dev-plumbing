@@ -157,6 +157,13 @@ function editsDiff(edits: SettledEdit[]): string {
   return edits.map((e) => [e.heading ? `@@ ${e.heading}` : '@@', ...lines('- ', e.find), ...lines('+ ', e.replace)].join('\n')).join('\n');
 }
 
+/** An update's `changes`, plus what settling the earlier version's Plan changes did, when that catch-up rode along. */
+async function withCarried(dir: string, changes: string, carried: number | undefined): Promise<string> {
+  if (carried === undefined) return changes;
+  const settled = editsDiff(await settledEdits(dir, carried));
+  return settled ? [changes, `Settled in v${carried}'s Plan changes:`, settled].filter((x) => x !== '').join('\n') : changes;
+}
+
 /** Spec §13.2: what a thread subagent receives. */
 export async function threadPack(o: { dir: string; threadId: string; types: PlumbingType[]; profile?: RepoProfile }): Promise<ThreadPack> {
   const project = await readProjectFile(o.dir);
@@ -228,7 +235,11 @@ export async function importPack(o: { dir: string; typeId: string; types: Plumbi
           catchUp,
           changes: catchUp
             ? editsDiff(await settledEdits(o.dir, to))
-            : planDiff((await readVersionDoc(o.dir, project, to - 1, 'original')) ?? '', (await readVersionDoc(o.dir, project, to, 'original')) ?? ''),
+            : await withCarried(
+                o.dir,
+                planDiff((await readVersionDoc(o.dir, project, to - 1, 'original')) ?? '', (await readVersionDoc(o.dir, project, to, 'original')) ?? ''),
+                project.reimporting?.carriedCatchUp,
+              ),
           conflicts: catchUp ? [] : conflictsOf(items, to),
           existing: items.flatMap((i) =>
             i.type === type.id && i.createdBy === 'import' && i.key !== undefined

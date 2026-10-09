@@ -503,14 +503,18 @@ export async function updatePlan(
   // A finalized project stays Finalized only when the update left its draft as it was.
   const from = project.status === 'finalized' && !changedDraft(version) ? 'finalized' : 'active';
   const { reimporting: _earlier, importBy: _importer, ...rest } = project;
+  // A catch-up still waiting for the version being replaced rides along with this re-import (importPack appends its
+  // settled edits to `changes`), so those edits aren't lost when the newer version comes in first.
+  const carried = await catchUpWaiting(dir);
   const next: PlumbingProject = {
     ...rest,
+    ...(carried !== null ? { caughtUp: carried } : {}),
     title: titleFromMarkdown(o.repoText) ?? project.title,
     versions: [...projectVersions(project), version],
     importPending,
     // With no type to import, there's nothing to wait for.
     status: importPending.length ? 'importing' : from,
-    ...(importPending.length ? { reimporting: { version: n, from } } : {}),
+    ...(importPending.length ? { reimporting: { version: n, from, ...(carried !== null ? { carriedCatchUp: carried } : {}) } } : {}),
     updatedAt: at,
   };
 

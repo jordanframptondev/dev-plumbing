@@ -254,6 +254,7 @@ describe('the plugin', () => {
       '- `catchUp`: true when this re-import catches the items up with settled Plan changes',
       '**A catch-up** (`catchUp: true`) comes once the user has settled every Plan changes thread of v`to`.',
       '`changes` is only what settling those threads did to the draft',
+      "Settled in v<n>'s Plan changes:",
       'There are no `conflicts` to leave alone, because they\'re settled and their outcome is in `changes`.',
       '"<Type title>: <n> items, <k> removed from the plan"',
     ]) {

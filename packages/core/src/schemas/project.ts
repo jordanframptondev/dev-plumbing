@@ -49,8 +49,9 @@ export const plumbingProjectSchema = z.object({
   /**
    * Set while the importers re-run after an update: the version they import, and the status to go back to. `catchUp`
    * marks the re-import that catches the items up once that version's Plan changes are all settled (startCatchUp).
+   * `carriedCatchUp` is the earlier version whose settled Plan changes were still waiting when this update came in: its edits ride along with this re-import's `changes`.
    */
-  reimporting: z.object({ version: z.number().int().min(2), from: z.enum(['active', 'finalized']), catchUp: z.boolean().optional() }).optional(),
+  reimporting: z.object({ version: z.number().int().min(2), from: z.enum(['active', 'finalized']), catchUp: z.boolean().optional(), carriedCatchUp: z.number().int().min(2).optional() }).optional(),
   /** The last version whose settled Plan changes the items were caught up with, so that re-import runs once per version. */
   caughtUp: z.number().int().min(2).optional(),
   /** While importing: the Claude window that runs the importers. Only it, or another once it's gone, ends the import. */
