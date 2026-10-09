@@ -51,7 +51,7 @@ Setup installs the Claude Code plugin for your user (skip it with `--no-plugin`)
   - When the plan changes, it's marked **Out of date**, and **Regenerate** writes it again. **Export .md** writes it into the repo as `<name>.whiteboard-defense.md`, next to the plan, with its diagram drawn in Mermaid.
 - **Keep chatting:** after two minutes the listening call moves to the background, so you can keep using the Claude window.
 - **No arguments:** `/dev-plumbing` lists this repo's plumbing projects to reopen.
-- **Keep this checkout:** the plugin and the app both run from its build here. After you pull, run `pnpm build`, restart the app (`dev-plumbing stop`, then `dev-plumbing start`), and restart every Claude Code session that was open while you updated, so it picks up the new agents. A session that kept running uses the old ones: after this update, its Whiteboard Defense would be refused with "presenter is missing. Send the seven chapters too."
+- **Keep this checkout:** the plugin and the app both run from its build here. After you pull, run `pnpm build`, restart the app (`dev-plumbing stop`, then `dev-plumbing start`), and restart every Claude Code session that was open while you updated, so it picks up the new agents. A session that kept running uses the old ones: after this update, its Whiteboard Defense would be refused with "presenter is missing. Send the seven chapters too." A project that brought in a new plan version before this update may run one catch-up re-import on its first `/dev-plumbing` after you update.
 
 How the app, the plugin, its agents and its tools fit together is explained in [docs/how-it-works.md](docs/how-it-works.md).
 
