@@ -98,6 +98,13 @@ describe('opening a plan', () => {
 
   it('creates a plumbing project, then reopens it from the plan or by id, and lists them', async () => {
     const t = await setup();
+    // With none yet, it says how one starts, and leaves what to do to the skill.
+    expect((await t.claude('/open', { cwd: t.repo })).body).toEqual({
+      kind: 'pick-project',
+      repo: 'acme-app',
+      projects: [],
+      next: 'There are no plumbing projects for acme-app yet: one starts with /plumb:rough-in path/to/plan.md.',
+    });
     const open = await t.claude('/open', { cwd: t.repo, plan: PLAN });
     expect(open.body).toMatchObject({
       kind: 'created',

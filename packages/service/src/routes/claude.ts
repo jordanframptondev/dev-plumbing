@@ -284,7 +284,7 @@ export function claudeRoutes(ctx: AppContext, rt: Runtime): Hono {
           projects: summaries.map((s) => ({ id: s.id, title: s.title, sourcePath: s.sourcePath, waiting: s.counts.yourTurn + s.counts.drafts, status: s.status })),
           next: summaries.length
             ? 'Ask the user which plumbing project to open, then call dp_open with project set to its id.'
-            : `There are no plumbing projects for ${profile.name} yet. Tell the user to run /plumb:rough-in path/to/plan.md.`,
+            : `There are no plumbing projects for ${profile.name} yet: one starts with /plumb:rough-in path/to/plan.md.`,
         });
       }
 
